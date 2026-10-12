@@ -37,6 +37,7 @@ from app.api.fiscal import router as fiscal_router
 from app.api.invoice_attachments import router as invoice_attachments_router
 from app.api.invoice_schedules import router as invoice_schedules_router
 from app.api.invoices import router as invoices_router
+from app.api.loan_payments import router as loan_payments_router
 from app.api.products import router as products_router
 from app.api.public_invoices import router as public_invoices_router
 from app.api.payees import router as payees_router
@@ -178,6 +179,7 @@ app.include_router(transactions_router)
 app.include_router(import_router)
 app.include_router(import_logs_router)
 app.include_router(accounts_router)
+app.include_router(loan_payments_router)
 app.include_router(connections_router)
 app.include_router(recurring_router)
 app.include_router(budgets_router)
