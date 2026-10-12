@@ -871,6 +871,109 @@ async def create_installment_series(
     return created
 
 
+async def _add_transfer_legs(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *,
+    from_account: Account,
+    to_account: Account,
+    amount,
+    date: date,
+    description: str,
+    notes: Optional[str] = None,
+    destination_amount=None,
+) -> tuple[Transaction, Transaction]:
+    """Add both legs of a transfer to the session and flush, without committing.
+
+    The body of `create_transfer`, shared with callers that write more rows
+    in the same commit (a loan payment writes the pair plus an interest row).
+    The caller has already checked that both accounts are in the workspace.
+    """
+    is_cross_currency = from_account.currency != to_account.currency
+    if (
+        not is_cross_currency
+        and destination_amount is not None
+    ):
+        raise ValueError(
+            "Destination amount must be absent for same-currency transfers."
+        )
+
+    transfer_pair_id = uuid.uuid4()
+    from decimal import Decimal, ROUND_HALF_UP
+
+    def _to_cents(value) -> Decimal:
+        """Round to the 2 decimals both amount columns store.
+
+        Without this the response would echo back a precision the database
+        never kept, and `amount_primary`/`fx_rate_used` would be derived from
+        an amount that isn't the one on the row.
+        """
+        return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    debit_amount = _to_cents(amount)
+    amount_is_explicit = destination_amount is not None
+
+    # Debit transaction (from account)
+    debit_tx = Transaction(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        account_id=from_account.id,
+        description=description,
+        amount=debit_amount,
+        currency=from_account.currency,
+        date=date,
+        type="debit",
+        source="transfer",
+        notes=notes,
+        transfer_pair_id=transfer_pair_id,
+        transfer_amount_explicit=amount_is_explicit,
+    )
+    apply_effective_date(debit_tx, from_account)
+    session.add(debit_tx)
+
+    # Credit transaction (to account) — convert if cross-currency
+    if is_cross_currency:
+        if destination_amount is not None:
+            credit_amount = _to_cents(destination_amount)
+        else:
+            credit_amount, _ = await fx_convert(
+                session, debit_amount, from_account.currency, to_account.currency, date
+            )
+    else:
+        credit_amount = debit_amount
+
+    credit_tx = Transaction(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        account_id=to_account.id,
+        description=description,
+        amount=credit_amount,
+        currency=to_account.currency,
+        date=date,
+        type="credit",
+        source="transfer",
+        notes=notes,
+        transfer_pair_id=transfer_pair_id,
+        transfer_amount_explicit=amount_is_explicit,
+    )
+    apply_effective_date(credit_tx, to_account)
+    session.add(credit_tx)
+    await session.flush()
+
+    # Stamp primary amounts on both
+    await stamp_primary_amount(session, user_id, debit_tx)
+    await stamp_primary_amount(session, user_id, credit_tx)
+
+    # For cross-currency transfers, both sides should show the same primary amount
+    if from_account.currency != to_account.currency and debit_tx.amount_primary is not None:
+        credit_tx.amount_primary = debit_tx.amount_primary
+        if credit_tx.amount and Decimal(str(credit_tx.amount)):
+            credit_tx.fx_rate_used = debit_tx.amount_primary / Decimal(str(credit_tx.amount))
+
+    return debit_tx, credit_tx
+
+
 async def create_transfer(
     session: AsyncSession,
     workspace_id: uuid.UUID,
@@ -911,86 +1014,18 @@ async def create_transfer(
     if not to_account:
         raise ValueError("Destination account not found")
 
-    is_cross_currency = from_account.currency != to_account.currency
-    if (
-        not is_cross_currency
-        and data.destination_amount is not None
-    ):
-        raise ValueError(
-            "Destination amount must be absent for same-currency transfers."
-        )
-
-    transfer_pair_id = uuid.uuid4()
-    from decimal import Decimal, ROUND_HALF_UP
-
-    def _to_cents(value) -> Decimal:
-        """Round to the 2 decimals both amount columns store.
-
-        Without this the response would echo back a precision the database
-        never kept, and `amount_primary`/`fx_rate_used` would be derived from
-        an amount that isn't the one on the row.
-        """
-        return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-    debit_amount = _to_cents(data.amount)
-    amount_is_explicit = data.destination_amount is not None
-
-    # Debit transaction (from account)
-    debit_tx = Transaction(
-        user_id=user_id,
-        workspace_id=workspace_id,
-        account_id=data.from_account_id,
-        description=data.description,
-        amount=debit_amount,
-        currency=from_account.currency,
+    debit_tx, credit_tx = await _add_transfer_legs(
+        session,
+        workspace_id,
+        user_id,
+        from_account=from_account,
+        to_account=to_account,
+        amount=data.amount,
         date=data.date,
-        type="debit",
-        source="transfer",
-        notes=data.notes,
-        transfer_pair_id=transfer_pair_id,
-        transfer_amount_explicit=amount_is_explicit,
-    )
-    apply_effective_date(debit_tx, from_account)
-    session.add(debit_tx)
-
-    # Credit transaction (to account) — convert if cross-currency
-    if is_cross_currency:
-        if data.destination_amount is not None:
-            credit_amount = _to_cents(data.destination_amount)
-        else:
-            credit_amount, _ = await fx_convert(
-                session, debit_amount, from_account.currency, to_account.currency, data.date
-            )
-    else:
-        credit_amount = debit_amount
-
-    credit_tx = Transaction(
-        user_id=user_id,
-        workspace_id=workspace_id,
-        account_id=data.to_account_id,
         description=data.description,
-        amount=credit_amount,
-        currency=to_account.currency,
-        date=data.date,
-        type="credit",
-        source="transfer",
         notes=data.notes,
-        transfer_pair_id=transfer_pair_id,
-        transfer_amount_explicit=amount_is_explicit,
+        destination_amount=data.destination_amount,
     )
-    apply_effective_date(credit_tx, to_account)
-    session.add(credit_tx)
-    await session.flush()
-
-    # Stamp primary amounts on both
-    await stamp_primary_amount(session, user_id, debit_tx)
-    await stamp_primary_amount(session, user_id, credit_tx)
-
-    # For cross-currency transfers, both sides should show the same primary amount
-    if from_account.currency != to_account.currency and debit_tx.amount_primary is not None:
-        credit_tx.amount_primary = debit_tx.amount_primary
-        if credit_tx.amount and Decimal(str(credit_tx.amount)):
-            credit_tx.fx_rate_used = debit_tx.amount_primary / Decimal(str(credit_tx.amount))
 
     await session.commit()
     await session.refresh(debit_tx, ["category"])
@@ -1171,45 +1206,26 @@ async def link_existing_as_transfer(
     return debit_tx, credit_tx
 
 
-async def create_transfer_counterpart(
+async def _pair_with_counterpart(
     session: AsyncSession,
     workspace_id: uuid.UUID,
     user_id: uuid.UUID,
-    transaction_id: uuid.UUID,
-    to_account_id: uuid.UUID,
+    anchor: Transaction,
+    to_account: Account,
 ) -> tuple[Transaction, Transaction]:
-    """Mark an existing transaction as a transfer by auto-creating its
-    counterpart in another account.
+    """Write the counterpart of an existing row in another account and pair
+    the two, flushing without committing. Returns (debit, credit).
 
-    Used when the counterpart account is manual (not bank-synced), so no
-    matching transaction exists to link against. The counterpart mirrors the
-    anchor's date / description / notes with the opposite type, converting the
-    amount when the destination account uses a different currency.
+    The body of `create_transfer_counterpart`, shared with callers that
+    write more rows in the same commit. The caller has already checked that
+    `to_account` is in the workspace.
     """
     from decimal import Decimal
 
-    anchor = await get_transaction(session, transaction_id, workspace_id)
-    if not anchor:
-        raise ValueError("Transaction not found")
     if anchor.transfer_pair_id is not None:
         raise ValueError("Transaction is already part of a transfer")
-    if anchor.account_id == to_account_id:
+    if anchor.account_id == to_account.id:
         raise ValueError("Counterpart must be in a different account")
-
-    to_result = await session.execute(
-        select(Account)
-        .outerjoin(BankConnection)
-        .where(
-            Account.id == to_account_id,
-            or_(
-                Account.workspace_id == workspace_id,
-                BankConnection.workspace_id == workspace_id,
-            ),
-        )
-    )
-    to_account = to_result.scalar_one_or_none()
-    if not to_account:
-        raise ValueError("Destination account not found")
 
     opposing_type = "credit" if anchor.type == "debit" else "debit"
 
@@ -1226,7 +1242,7 @@ async def create_transfer_counterpart(
     counterpart_tx = Transaction(
         user_id=user_id,
         workspace_id=workspace_id,
-        account_id=to_account_id,
+        account_id=to_account.id,
         description=anchor.description,
         amount=counterpart_amount,
         currency=to_account.currency,
@@ -1253,12 +1269,56 @@ async def create_transfer_counterpart(
                 str(counterpart_tx.amount)
             )
 
-    await session.commit()
-    await session.refresh(anchor, ["category"])
-    await session.refresh(counterpart_tx, ["category"])
-
     debit_tx = anchor if anchor.type == "debit" else counterpart_tx
     credit_tx = counterpart_tx if anchor.type == "debit" else anchor
+    return debit_tx, credit_tx
+
+
+async def create_transfer_counterpart(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    transaction_id: uuid.UUID,
+    to_account_id: uuid.UUID,
+) -> tuple[Transaction, Transaction]:
+    """Mark an existing transaction as a transfer by auto-creating its
+    counterpart in another account.
+
+    Used when the counterpart account is manual (not bank-synced), so no
+    matching transaction exists to link against. The counterpart mirrors the
+    anchor's date / description / notes with the opposite type, converting the
+    amount when the destination account uses a different currency.
+    """
+    anchor = await get_transaction(session, transaction_id, workspace_id)
+    if not anchor:
+        raise ValueError("Transaction not found")
+    if anchor.transfer_pair_id is not None:
+        raise ValueError("Transaction is already part of a transfer")
+    if anchor.account_id == to_account_id:
+        raise ValueError("Counterpart must be in a different account")
+
+    to_result = await session.execute(
+        select(Account)
+        .outerjoin(BankConnection)
+        .where(
+            Account.id == to_account_id,
+            or_(
+                Account.workspace_id == workspace_id,
+                BankConnection.workspace_id == workspace_id,
+            ),
+        )
+    )
+    to_account = to_result.scalar_one_or_none()
+    if not to_account:
+        raise ValueError("Destination account not found")
+
+    debit_tx, credit_tx = await _pair_with_counterpart(
+        session, workspace_id, user_id, anchor, to_account
+    )
+
+    await session.commit()
+    await session.refresh(debit_tx, ["category"])
+    await session.refresh(credit_tx, ["category"])
     return debit_tx, credit_tx
 
 
