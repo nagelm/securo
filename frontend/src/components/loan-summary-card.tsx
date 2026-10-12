@@ -8,6 +8,7 @@ import { Info, Landmark, Pencil, Plus, Trash2 } from 'lucide-react'
 
 import { AssetEquityLine } from '@/components/asset-equity-summary'
 import { DeleteConfirmationDialog } from '@/components/delete-confirmation-dialog'
+import { LoanDetailsDialog } from '@/components/loan-details-dialog'
 import { LoanPaymentDialog } from '@/components/loan-payment-dialog'
 import { Button } from '@/components/ui/button'
 import {
@@ -20,7 +21,7 @@ import {
 import { extractApiError } from '@/lib/api-errors'
 import { formatCurrency } from '@/lib/format'
 import { invalidateFinancialQueries } from '@/lib/invalidate-queries'
-import { loanDetailRows } from '@/lib/loan-details'
+import { loanDetailRows, type LoanDetails } from '@/lib/loan-details'
 import { useDateLocale } from '@/hooks/use-display-locale'
 import { resolveDateFnsLocale } from '@/lib/date-fns-locale'
 import type { Account, LoanPayment, LoanPaymentCreate, LoanPaymentUpdate } from '@/types'
@@ -39,7 +40,8 @@ const identity = (value: string) => value
 
 /**
  * The loan block on a loan account's page: what the loan is, what secures it
- * and the equity there, the loan's details, the last 12 months of paid / interest
+ * and the equity there, the loan's details (typed in or from the bank, with an
+ * "Edit details" form), the last 12 months of paid / interest
  * / principal (read from the ledger, so synced loans get it too), and for
  * manual loans the recorded payments and the "Record payment" form.
  *
@@ -53,6 +55,7 @@ export function LoanSummaryCard({ account, accounts, locale, canWrite, mask = id
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<LoanPayment | null>(null)
   const [deleting, setDeleting] = useState<LoanPayment | null>(null)
+  const [detailsOpen, setDetailsOpen] = useState(false)
 
   const { data: summary } = useQuery({
     queryKey: ['accounts', account.id, 'loan-summary'],
@@ -113,6 +116,20 @@ export function LoanSummaryCard({ account, accounts, locale, canWrite, mask = id
       toast.success(t('loans.payment.updated'))
     },
   })
+  const detailsMutation = useMutation({
+    mutationFn: (details: LoanDetails | null) =>
+      accountsApi.update(account.id, { loan_details: details as Record<string, unknown> | null }),
+    onSuccess: () => {
+      // Display only: no balance or report moves, so only the account refreshes.
+      queryClient.invalidateQueries({ queryKey: ['accounts'] })
+      setDetailsOpen(false)
+      toast.success(t('loans.details.saved'))
+    },
+  })
+  const closeDetails = () => {
+    setDetailsOpen(false)
+    detailsMutation.reset()
+  }
   const deleteMutation = useMutation({
     mutationFn: (id: string) => loanPaymentsApi.delete(id),
     onSuccess: () => {
@@ -198,18 +215,35 @@ export function LoanSummaryCard({ account, accounts, locale, canWrite, mask = id
         </p>
       )}
 
-      {details.length > 0 && (
-        <dl
-          aria-label={t('loans.summary.providerDetails')}
-          className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 px-5 py-3 text-xs border-b border-border"
-        >
-          {details.map((row) => (
-            <div key={row.key} className="contents">
-              <dt className="text-muted-foreground">{row.label}</dt>
-              <dd className="tabular-nums">{row.value}</dd>
-            </div>
-          ))}
-        </dl>
+      {(details.length > 0 || canWrite) && (
+        <div className="px-5 py-3 border-b border-border">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {t('loans.summary.providerDetails')}
+            </h3>
+            {canWrite && (
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setDetailsOpen(true)}>
+                <Pencil className="h-3.5 w-3.5 mr-1" />
+                {t('loans.details.edit')}
+              </Button>
+            )}
+          </div>
+          {details.length > 0 ? (
+            <dl
+              aria-label={t('loans.summary.providerDetails')}
+              className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs"
+            >
+              {details.map((row) => (
+                <div key={row.key} className="contents">
+                  <dt className="text-muted-foreground">{row.label}</dt>
+                  <dd className="tabular-nums">{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p className="text-xs text-muted-foreground">{t('loans.details.empty')}</p>
+          )}
+        </div>
       )}
 
       <div className="px-5 py-4">
@@ -311,6 +345,18 @@ export function LoanSummaryCard({ account, accounts, locale, canWrite, mask = id
           onUpdate={(id, payload) => updateMutation.mutate({ id, payload })}
           loading={createMutation.isPending || updateMutation.isPending}
           error={dialogError}
+        />
+      )}
+
+      {canWrite && (
+        <LoanDetailsDialog
+          open={detailsOpen}
+          onClose={closeDetails}
+          loan={account}
+          locale={locale}
+          onSave={(next) => detailsMutation.mutate(next)}
+          loading={detailsMutation.isPending}
+          error={detailsMutation.error ? extractApiError(detailsMutation.error) : null}
         />
       )}
 

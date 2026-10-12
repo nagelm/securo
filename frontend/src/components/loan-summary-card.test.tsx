@@ -6,7 +6,7 @@ import { renderWithProviders, t } from '@/test/utils'
 import type { Account, Asset, LoanPayment, LoanSummary } from '@/types'
 
 const api = vi.hoisted(() => ({
-  accounts: { loanSummary: vi.fn() },
+  accounts: { loanSummary: vi.fn(), update: vi.fn() },
   assets: { get: vi.fn() },
   categories: { list: vi.fn(), create: vi.fn() },
   categoryGroups: { list: vi.fn() },
@@ -284,5 +284,76 @@ describe('LoanSummaryCard', () => {
       `${t('loans.details.repaymentFrequency')}${t('loans.details.frequencies.FORTNIGHTLY')}`,
     )
     expect(details).toHaveTextContent(`${t('loans.details.nextRepaymentDate')}4/15/2026`)
+  })
+
+  it('offers "Edit details" on a loan with none yet, and saves what the user types', async () => {
+    api.accounts.update.mockResolvedValue(loan)
+    const { user } = renderCard()
+
+    expect(screen.getByText(t('loans.details.empty'))).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: t('loans.details.edit') }))
+    await user.type(screen.getByLabelText(t('loans.details.interestRate')), '6.1')
+    await user.selectOptions(
+      screen.getByLabelText(t('loans.details.interestType')),
+      t('loans.details.interestTypes.FLOATING'),
+    )
+    await user.type(screen.getByLabelText(t('loans.details.initialPrincipal')), '250000')
+    await user.type(screen.getByLabelText(t('loans.details.termYearsLabel')), '30')
+    await user.type(screen.getByLabelText(t('loans.details.repaymentAmount')), '1500')
+    await user.selectOptions(
+      screen.getByLabelText(t('loans.details.repaymentFrequency')),
+      t('loans.details.frequencies.MONTHLY'),
+    )
+    await user.click(screen.getByRole('button', { name: t('common.save') }))
+
+    await waitFor(() =>
+      expect(api.accounts.update).toHaveBeenCalledWith('loan-1', {
+        loan_details: {
+          interest: { rate: 6.1, type: 'FLOATING' },
+          initial_principal: 250000,
+          term: { years: 30 },
+          repayment: { frequency: 'MONTHLY', next_amount: 1500 },
+        },
+      }),
+    )
+  })
+
+  it('edits existing details and clears them when every field is emptied', async () => {
+    api.accounts.update.mockResolvedValue(loan)
+    const { user } = renderCard(account({ ...loan, loan_details: { interest: { rate: 5 } } }))
+
+    await user.click(screen.getByRole('button', { name: t('loans.details.edit') }))
+    const rate = screen.getByLabelText(t('loans.details.interestRate'))
+    expect(rate).toHaveValue('5')
+    await user.clear(rate)
+    await user.click(screen.getByRole('button', { name: t('common.save') }))
+
+    await waitFor(() => expect(api.accounts.update).toHaveBeenCalledWith('loan-1', { loan_details: null }))
+  })
+
+  it('blocks saving a rate that is not a percentage', async () => {
+    const { user } = renderCard()
+
+    await user.click(screen.getByRole('button', { name: t('loans.details.edit') }))
+    await user.type(screen.getByLabelText(t('loans.details.interestRate')), '250')
+
+    expect(screen.getByText(t('loans.details.errors.rate'))).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: t('common.save') })).toBeDisabled()
+  })
+
+  it('tells the owner of a synced loan that sync replaces only what the bank sends', async () => {
+    api.accounts.loanSummary.mockResolvedValue(summary({ manual_payments_allowed: false }))
+    const { user } = renderCard(account({ ...loan, connection_id: 'conn-1' }))
+
+    await user.click(screen.getByRole('button', { name: t('loans.details.edit') }))
+    expect(screen.getByText(t('loans.details.syncedHint'))).toBeInTheDocument()
+  })
+
+  it('never offers "Edit details" to a viewer', async () => {
+    renderCard(account({ ...loan, loan_details: { interest: { rate: 5 } } }), false)
+
+    await screen.findByTestId('loan-payment-row')
+    expect(screen.queryByRole('button', { name: t('loans.details.edit') })).not.toBeInTheDocument()
+    expect(screen.getByLabelText(t('loans.summary.providerDetails'))).toHaveTextContent('5%')
   })
 })
