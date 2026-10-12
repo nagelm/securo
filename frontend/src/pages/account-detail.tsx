@@ -22,6 +22,7 @@ import { ProjectedTransactionBadge } from '@/components/projected-transaction-ba
 import { TransactionDialog, type TransactionSavePayload } from '@/components/transaction-dialog'
 import { extractApiError } from '@/lib/api-errors'
 import { TransferDialog } from '@/components/transfer-dialog'
+import { LoanSummaryCard } from '@/components/loan-summary-card'
 import { DatePickerInput } from '@/components/ui/date-picker-input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -1077,6 +1078,18 @@ export default function AccountDetailPage() {
             </Button>
           )}
         </div>
+      )}
+
+      {/* Loans: subtype, secured asset and equity, 12-month paid / interest /
+          principal, and (manual loans only) recorded payments. */}
+      {account.type === 'loan' && (
+        <LoanSummaryCard
+          account={account}
+          accounts={accountsList ?? []}
+          locale={locale}
+          canWrite={canWrite}
+          mask={mask}
+        />
       )}
 
       {/* Bill timeline (last 6 cycles) — only for CC with cycle metadata */}
