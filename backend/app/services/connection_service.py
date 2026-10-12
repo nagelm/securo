@@ -855,6 +855,14 @@ def _fill_payee_website(payee: Payee, txn_data) -> None:
         payee.website = str(website)[:255]
 
 
+# Hint keys a provider may send that no default category carries. Each one
+# resolves to a workspace category of that name when the user has made one,
+# and otherwise to the default-category key it falls back to.
+EXTRA_CATEGORY_HINTS = {
+    "travel": ("Travel", "leisure"),
+}
+
+
 async def _match_category_hint(
     session: AsyncSession,
     workspace_id: uuid.UUID,
@@ -870,6 +878,19 @@ async def _match_category_hint(
     """
     if not enabled or not category_hint:
         return None
+    extra = EXTRA_CATEGORY_HINTS.get(category_hint)
+    if extra is not None:
+        name, fallback = extra
+        found = (
+            await session.execute(
+                select(Category.id)
+                .where(Category.workspace_id == workspace_id, func.lower(Category.name) == name.lower())
+                .limit(1)
+            )
+        ).scalars().first()
+        if found is not None:
+            return found
+        category_hint = fallback
     from app.services.category_service import DEFAULT_CATEGORIES_I18N
 
     names = [

@@ -251,6 +251,17 @@ async def test_match_category_hint_any_language(
 
 
 @pytest.mark.asyncio
+async def test_match_category_hint_travel_prefers_own_category_then_leisure(
+    session: AsyncSession, test_user, test_workspace
+):
+    """`travel` has no default category: it finds a user's Travel, else Leisure."""
+    leisure = await _make_category(session, test_user.id, "Leisure")
+    assert await _match_category_hint(session, test_workspace.id, "travel") == leisure.id
+    travel = await _make_category(session, test_user.id, "Travel")
+    assert await _match_category_hint(session, test_workspace.id, "travel") == travel.id
+
+
+@pytest.mark.asyncio
 async def test_match_category_hint_misses(session: AsyncSession, test_user, test_workspace):
     await _make_category(session, test_user.id, "Groceries")
     assert await _match_category_hint(session, test_workspace.id, "unknown-key") is None

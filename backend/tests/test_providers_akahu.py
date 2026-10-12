@@ -111,6 +111,13 @@ def test_category_hint_specific_before_group():
     })) == "food"
 
 
+def test_category_hint_flights_and_hotels_are_travel():
+    for name in ("Air transport services", "Hotels, motels, and other temporary accommodation"):
+        assert category_hint_for(_txn(category={
+            "name": name, "groups": {"personal_finance": {"name": "Lifestyle"}},
+        })) == "travel"
+
+
 def test_category_hint_group_fallback():
     assert category_hint_for(_txn()) == "groceries"
 

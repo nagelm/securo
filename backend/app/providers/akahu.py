@@ -101,7 +101,8 @@ _USER_TOKEN_RE = re.compile(r"user_token_[A-Za-z0-9_\-]+")
 _APP_TOKEN_RE = re.compile(r"app_token_[A-Za-z0-9_\-]+")
 
 # NZFCC (https://nzfcc.org) category or personal-finance group -> Securo
-# default-category key (app.services.category_service.DEFAULT_CATEGORIES_I18N).
+# default-category key (app.services.category_service.DEFAULT_CATEGORIES_I18N),
+# or an extra hint key the sync layer resolves (connection_service.EXTRA_CATEGORY_HINTS).
 # Specific categories first; the group catches the rest. Income categories
 # have no personal-finance group, so they are matched by name.
 NZFCC_CATEGORY_HINTS = {
@@ -129,9 +130,9 @@ NZFCC_CATEGORY_HINTS = {
     "Haircuts and treatments": "personal_care",
     "Financial asset brokers, exchanges, and managed funds": "investments",
     "National government services": "taxes",
-    "Hotels, motels, and other temporary accommodation": "leisure",
-    "Air transport services": "leisure",
-    "Travel agencies and tour operators": "leisure",
+    "Hotels, motels, and other temporary accommodation": "travel",
+    "Air transport services": "travel",
+    "Travel agencies and tour operators": "travel",
     "Insurance": "other",
     "Tax payments": "taxes",
     "Debt repayments": "other",
