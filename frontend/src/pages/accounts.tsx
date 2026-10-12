@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
-import { accounts, connections, currencies } from '@/lib/api'
+import { accounts, assets, connections, currencies } from '@/lib/api'
 import { localDateString } from '@/lib/date-utils'
 import { invalidateFinancialQueries } from '@/lib/invalidate-queries'
 import { toast } from 'sonner'
@@ -23,10 +23,10 @@ import {
 import { DatePickerInput } from '@/components/ui/date-picker-input'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { Account, BankConnection } from '@/types'
+import type { Account, BankConnection, LoanSubtype } from '@/types'
 import { RefreshCw, TriangleAlert, Unlink, Settings } from 'lucide-react'
 import { AccountIcon, ConnectionLogo } from '@/components/account-icon'
-import { getAccountTypeConfig } from '@/lib/account-type-config'
+import { getAccountTypeConfig, LOAN_SUBTYPES } from '@/lib/account-type-config'
 import { AccountPageActions } from '@/components/account-page-actions'
 import { AccountRowActions } from '@/components/account-row-actions'
 import { PageHeader } from '@/components/page-header'
@@ -50,7 +50,18 @@ const ACCOUNT_TYPE_OPTIONS = [
   { value: 'credit_card', labelKey: 'accounts.typeCreditCard' },
   { value: 'investment', labelKey: 'accounts.typeInvestment' },
   { value: 'wallet', labelKey: 'accounts.typeWallet' },
+  { value: 'loan', labelKey: 'accounts.loan.type' },
 ] as const
+
+// A manual account's balance field holds what the user entered: an amount
+// owed (positive) for a loan, a signed balance for the other kinds (a credit
+// card already uses the owed convention). When an edit moves the account
+// across the loan boundary, the entered figure flips sign so the opening row,
+// and with it the account's balance and net worth, stays where it was.
+function crossesLoanEntryBoundary(from: string, to: string): boolean {
+  const owedEntry = (type: string) => type === 'loan' || type === 'credit_card'
+  return (from === 'loan' || to === 'loan') && owedEntry(from) !== owedEntry(to)
+}
 
 function daysUntil(dateStr: string | null): number | null {
   if (!dateStr) return null
@@ -171,7 +182,7 @@ export default function AccountsPage() {
   })
 
   const createMutation = useMutation({
-    mutationFn: (data: { name: string; type: string; balance?: number; currency?: string }) =>
+    mutationFn: (data: Parameters<typeof accounts.create>[0]) =>
       accounts.create(data),
     onSuccess: () => {
       invalidateFinancialQueries(queryClient)
@@ -656,7 +667,7 @@ export default function AccountsPage() {
           if (editingAccount) {
             updateMutation.mutate({ id: editingAccount.id, ...data })
           } else {
-            createMutation.mutate(data as { name: string; type: string; balance?: number; balance_date?: string; currency?: string })
+            createMutation.mutate(data as Parameters<typeof accounts.create>[0])
           }
         }}
         loading={createMutation.isPending || updateMutation.isPending}
@@ -685,6 +696,8 @@ function AccountDialog({
     credit_limit?: number | null
     statement_close_day?: number | null
     payment_due_day?: number | null
+    loan_subtype?: LoanSubtype | null
+    secured_asset_id?: string | null
   }) => void
   loading: boolean
 }) {
@@ -705,6 +718,8 @@ function AccountDialog({
   const [creditLimit, setCreditLimit] = useState(account?.credit_limit?.toString() ?? '')
   const [statementCloseDay, setStatementCloseDay] = useState(account?.statement_close_day?.toString() ?? '')
   const [paymentDueDay, setPaymentDueDay] = useState(account?.payment_due_day?.toString() ?? '')
+  const [loanSubtype, setLoanSubtype] = useState<LoanSubtype | ''>(account?.loan_subtype ?? '')
+  const [securedAssetId, setSecuredAssetId] = useState(account?.secured_asset_id ?? '')
 
   const [formSource, setFormSource] = useState<{ account: typeof account } | null>(null)
   if (!formSource || formSource.account !== account) {
@@ -718,6 +733,28 @@ function AccountDialog({
     setCreditLimit(account?.credit_limit?.toString() ?? '')
     setStatementCloseDay(account?.statement_close_day?.toString() ?? '')
     setPaymentDueDay(account?.payment_due_day?.toString() ?? '')
+    setLoanSubtype(account?.loan_subtype ?? '')
+    setSecuredAssetId(account?.secured_asset_id ?? '')
+  }
+
+  const isLoan = type === 'loan'
+  // Any asset can secure a loan. Archived assets are not offered, except the
+  // one this loan is already linked to, so opening the dialog never drops it.
+  const { data: assetsList } = useQuery({
+    queryKey: ['assets', 'include-archived'],
+    queryFn: () => assets.list(true),
+    enabled: open && isLoan,
+  })
+  const assetOptions = (assetsList ?? []).filter(
+    (a) => !a.is_archived || a.id === securedAssetId,
+  )
+
+  const changeType = (next: string) => {
+    if (account && !account.connection_id && crossesLoanEntryBoundary(type, next)) {
+      const entered = parseFloat(balance)
+      if (Number.isFinite(entered) && entered !== 0) setBalance((-entered).toString())
+    }
+    setType(next)
   }
 
   return (
@@ -747,6 +784,10 @@ function AccountDialog({
                 statement_close_day: parseDay(statementCloseDay),
                 payment_due_day: parseDay(paymentDueDay),
               }),
+              ...(isLoan && {
+                loan_subtype: loanSubtype || null,
+                secured_asset_id: securedAssetId || null,
+              }),
             })
           }}
           className="space-y-4"
@@ -772,7 +813,7 @@ function AccountDialog({
               <select
                 className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                 value={type}
-                onChange={(e) => setType(e.target.value)}
+                onChange={(e) => changeType(e.target.value)}
               >
                 {ACCOUNT_TYPE_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
@@ -789,7 +830,7 @@ function AccountDialog({
                   <select
                     className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     value={type}
-                    onChange={(e) => setType(e.target.value)}
+                    onChange={(e) => changeType(e.target.value)}
                   >
                     {ACCOUNT_TYPE_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
@@ -814,7 +855,9 @@ function AccountDialog({
                   <Label>
                     {type === 'credit_card'
                       ? t('accounts.balanceCreditCard')
-                      : t('accounts.balance')}
+                      : isLoan
+                        ? t('accounts.loan.amountOwed')
+                        : t('accounts.balance')}
                   </Label>
                   <Input
                     type="number"
@@ -838,7 +881,45 @@ function AccountDialog({
                   {t('accounts.balanceCreditCardHint')}
                 </p>
               )}
+              {isLoan && (
+                <p className="text-xs text-muted-foreground -mt-2">
+                  {t('accounts.loan.amountOwedHint')}
+                </p>
+              )}
             </>
+          )}
+          {isLoan && (
+            <div className="space-y-4 rounded-lg border border-border bg-muted/30 p-4">
+              <div className="space-y-2">
+                <Label htmlFor="loan-subtype">{t('accounts.loan.subtype')}</Label>
+                <select
+                  id="loan-subtype"
+                  className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={loanSubtype}
+                  onChange={(e) => setLoanSubtype(e.target.value as LoanSubtype | '')}
+                >
+                  <option value="">{t('accounts.loan.subtypeNone')}</option>
+                  {LOAN_SUBTYPES.map((s) => (
+                    <option key={s} value={s}>{t(`accounts.loan.subtypes.${s}`)}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="loan-secured-asset">{t('accounts.loan.linkedAsset')}</Label>
+                <select
+                  id="loan-secured-asset"
+                  className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={securedAssetId}
+                  onChange={(e) => setSecuredAssetId(e.target.value)}
+                >
+                  <option value="">{t('accounts.loan.linkedAssetNone')}</option>
+                  {assetOptions.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">{t('accounts.loan.linkedAssetHint')}</p>
+              </div>
+            </div>
           )}
           {type === 'credit_card' && (
             <div className="space-y-4 rounded-lg border border-border bg-muted/30 p-4">

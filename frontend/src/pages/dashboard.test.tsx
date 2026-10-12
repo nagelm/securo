@@ -71,6 +71,9 @@ function account(overrides: Partial<Account>): Account {
     card_brand: null,
     card_level: null,
     shared_balance_group: null,
+    loan_subtype: null,
+    secured_asset_id: null,
+    loan_details: null,
     is_closed: false,
     closed_at: null,
     ...overrides,
@@ -134,5 +137,56 @@ describe('Dashboard net worth breakdown', () => {
     const tooltip = await screen.findByRole('tooltip')
     const cardRow = within(tooltip).getByText(t('dashboard.creditCardBalance')).parentElement!
     expect(cardRow).toHaveTextContent(formatCurrency(-500, 'USD', 'en-US'))
+  })
+
+  it('shows loans on their own row and keeps them out of available balance', async () => {
+    // Net worth 2,000 = available 1,700 (checking 1,000 + savings 700)
+    // - cards 500 - loans 1,200 + assets 2,000.
+    api.accounts.list.mockResolvedValue([
+      ...accounts,
+      account({ id: 'savings', name: 'Savings', type: 'savings', current_balance: 700 }),
+      account({ id: 'mortgage', name: 'Mortgage', type: 'loan', loan_subtype: 'mortgage', current_balance: -1000 }),
+      account({ id: 'car', name: 'Car loan', type: 'loan', loan_subtype: 'vehicle', current_balance: -200 }),
+    ])
+    api.dashboard.summary.mockResolvedValue({
+      ...summary,
+      total_balance: { USD: 2000 },
+      total_balance_primary: 2000,
+      projected_balance: { USD: 2000 },
+      projected_balance_primary: 2000,
+      assets_value: { USD: 2000 },
+      assets_value_primary: 2000,
+    })
+
+    const { user } = renderWithProviders(
+      <TooltipProvider delayDuration={0}>
+        <DashboardPage />
+      </TooltipProvider>,
+    )
+
+    await screen.findByText(formatCurrency(2000, 'USD', 'en-US'))
+    await user.hover(screen.getByRole('button', { name: 'i' }))
+
+    const tooltip = await screen.findByRole('tooltip')
+    const rowValue = (label: string) =>
+      within(tooltip).getByText(label).parentElement!.lastElementChild!.textContent
+    expect(rowValue(t('dashboard.availableBalance'))).toBe(formatCurrency(1700, 'USD', 'en-US'))
+    expect(rowValue(t('dashboard.loanBalance'))).toBe(formatCurrency(-1200, 'USD', 'en-US'))
+    expect(rowValue(t('dashboard.creditCardBalance'))).toBe(formatCurrency(-500, 'USD', 'en-US'))
+    expect(rowValue(t('dashboard.assetsValue'))).toBe(formatCurrency(2000, 'USD', 'en-US'))
+  })
+
+  it('has no loan row when there are no loans', async () => {
+    const { user } = renderWithProviders(
+      <TooltipProvider delayDuration={0}>
+        <DashboardPage />
+      </TooltipProvider>,
+    )
+
+    await screen.findByText(formatCurrency(500, 'USD', 'en-US'))
+    await user.hover(screen.getByRole('button', { name: 'i' }))
+
+    const tooltip = await screen.findByRole('tooltip')
+    expect(within(tooltip).queryByText(t('dashboard.loanBalance'))).not.toBeInTheDocument()
   })
 })

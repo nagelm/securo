@@ -892,7 +892,8 @@
     "fxRateUsed": "Kurs FX: {{rate}}",
     "refreshRates": "Odśwież kursy FX",
     "ratesRefreshed": "Zaktualizowano kursy FX",
-    "ratesError": "Nie udało się zaktualizować kursów FX"
+    "ratesError": "Nie udało się zaktualizować kursów FX",
+    "loanBalance": "Loans and mortgages"
   },
   "transactions": {
     "title": "Transakcje",
@@ -1364,6 +1365,24 @@
       "active": "Aktywne",
       "error": "Błąd",
       "expired": "Wygasłe"
+    },
+    "loan": {
+      "type": "Loan",
+      "subtype": "Loan type",
+      "subtypeNone": "Not specified",
+      "subtypes": {
+        "mortgage": "Mortgage",
+        "vehicle": "Vehicle loan",
+        "student": "Student loan",
+        "personal": "Personal loan",
+        "line_of_credit": "Line of credit",
+        "other": "Other loan"
+      },
+      "linkedAsset": "Linked asset",
+      "linkedAssetNone": "None",
+      "linkedAssetHint": "The asset this loan is secured against, such as the house for a mortgage.",
+      "amountOwed": "Amount owed",
+      "amountOwedHint": "Enter what you owe as a positive number. It shows as a negative balance."
     }
   },
   "connections": {

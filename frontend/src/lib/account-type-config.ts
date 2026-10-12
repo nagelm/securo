@@ -1,5 +1,6 @@
 import type { ElementType } from 'react'
-import { Building2, PiggyBank, CreditCard, TrendingUp, Wallet } from 'lucide-react'
+import { Building2, PiggyBank, CreditCard, TrendingUp, Wallet, Landmark } from 'lucide-react'
+import type { LoanSubtype } from '@/types'
 
 // Account-type → icon/color, the fallback shown when an account has no bank
 // logo (manual accounts, and connected accounts whose provider exposes none).
@@ -12,7 +13,19 @@ export const ACCOUNT_TYPE_CONFIG: Record<
   credit_card: { icon: CreditCard,  color: 'text-violet-600',  bg: 'bg-violet-100',  label: 'accounts.typeCreditCard' },
   investment:  { icon: TrendingUp,  color: 'text-amber-600',   bg: 'bg-amber-100',   label: 'accounts.typeInvestment' },
   wallet:      { icon: Wallet,      color: 'text-rose-600',    bg: 'bg-rose-100',    label: 'accounts.typeWallet' },
+  loan:        { icon: Landmark,    color: 'text-rose-600',    bg: 'bg-rose-100',    label: 'accounts.loan.type' },
 }
+
+// The kinds of loan a `loan` account may be, in the order the dialog offers
+// them (backend account_service.LOAN_SUBTYPES). Display only.
+export const LOAN_SUBTYPES: readonly LoanSubtype[] = [
+  'mortgage',
+  'vehicle',
+  'student',
+  'personal',
+  'line_of_credit',
+  'other',
+]
 
 export function getAccountTypeConfig(type: string) {
   return ACCOUNT_TYPE_CONFIG[type] ?? ACCOUNT_TYPE_CONFIG['checking']

@@ -15,6 +15,7 @@ import type {
   ConnectionSettings,
   Account,
   AccountSummary,
+  LoanSubtype,
   Collection,
   CreditCardBill,
   Transaction,
@@ -467,6 +468,8 @@ export const accounts = {
     credit_limit?: number | null
     statement_close_day?: number | null
     payment_due_day?: number | null
+    loan_subtype?: LoanSubtype | null
+    secured_asset_id?: string | null
   }): Promise<Account> => {
     const { data } = await api.post('/accounts', account)
     return data
