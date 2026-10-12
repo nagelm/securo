@@ -3043,7 +3043,31 @@
       "existingHint": "Unpaired debits of the same amount within {{days}} days of the date.",
       "existingNone": "No matching transaction. Check the amount and the date.",
       "description": "Description",
-      "descriptionPlaceholder": "Loan payment"
+      "descriptionPlaceholder": "Loan payment",
+      "record": "Record payment",
+      "edit": "Edit payment",
+      "delete": "Delete payment",
+      "recorded": "Payment recorded",
+      "updated": "Payment updated",
+      "deleted": "Payment deleted",
+      "deleteTitle": "Delete this payment?",
+      "deleteDescription": "The transfer and the interest row this payment created are deleted too.",
+      "deleteDescriptionPaired": "The interest row is deleted and the bank transaction goes back to unmatched. The bank transaction itself stays."
+    },
+    "summary": {
+      "title": "Loan",
+      "securedAgainst": "Secured against",
+      "equity": "Equity",
+      "syncedNote": "Payments and interest come from your bank.",
+      "providerDetails": "Details from your bank",
+      "last12Months": "Last 12 months",
+      "noActivity": "No payments or interest in the last 12 months.",
+      "month": "Month",
+      "paid": "Paid",
+      "interest": "Interest",
+      "principal": "Principal",
+      "total": "Total",
+      "payments": "Recorded payments"
     }
   }
 }
