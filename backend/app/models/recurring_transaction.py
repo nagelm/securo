@@ -25,6 +25,10 @@ class RecurringTransaction(Base):
             "weekend_adjustment IN ('none', 'previous_friday', 'next_monday')",
             name="ck_recurring_transactions_weekend_adjustment",
         ),
+        CheckConstraint(
+            "kind IN ('standard', 'loan_payment')",
+            name="ck_recurring_transactions_kind",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -56,10 +60,24 @@ class RecurringTransaction(Base):
     amount_primary: Mapped[Optional[Decimal]] = mapped_column(Numeric(precision=15, scale=2), nullable=True)
     fx_rate_used: Mapped[Optional[Decimal]] = mapped_column(Numeric(precision=20, scale=10), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # `standard` or `loan_payment`. A loan payment pays the loan in
+    # `transfer_account_id` from `account_id`: `amount` is the whole payment,
+    # `interest_amount` its fixed interest share in `interest_category_id`.
+    # Only the interest is ever an expense; the rest is principal, a transfer
+    # between two of the user's own accounts (see dashboard_service
+    # `_get_recurring_projections`).
+    kind: Mapped[str] = mapped_column(String(20), default="standard", server_default="standard")
+    transfer_account_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    interest_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(precision=15, scale=2), nullable=True)
+    interest_category_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("categories.id", ondelete="SET NULL"), nullable=True
+    )
 
     user: Mapped["User"] = relationship()
-    account: Mapped[Optional["Account"]] = relationship()
-    category: Mapped[Optional["Category"]] = relationship()
+    account: Mapped[Optional["Account"]] = relationship(foreign_keys=[account_id])
+    category: Mapped[Optional["Category"]] = relationship(foreign_keys=[category_id])
     transactions: Mapped[list["Transaction"]] = relationship(
         back_populates="recurring_transaction"
     )

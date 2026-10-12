@@ -687,9 +687,14 @@ async def delete_account(session: AsyncSession, account_id: uuid.UUID, workspace
     await session.execute(
         delete(ImportLog).where(ImportLog.account_id == account_id)
     )
+    # A recurring loan payment references the loan as its destination:
+    # it goes with the loan as well as with the paying account.
     await session.execute(
         delete(RecurringTransaction).where(
-            RecurringTransaction.account_id == account_id
+            or_(
+                RecurringTransaction.account_id == account_id,
+                RecurringTransaction.transfer_account_id == account_id,
+            )
         )
     )
     await session.execute(

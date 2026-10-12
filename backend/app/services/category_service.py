@@ -288,12 +288,18 @@ async def get_category_usage(
         ("budgets", Budget),
         ("recurring_transactions", RecurringTransaction),
     ):
+        uses_category = model.category_id == category_id
+        if model is RecurringTransaction:
+            # A recurring loan payment books its interest in a category.
+            uses_category = or_(
+                uses_category, RecurringTransaction.interest_category_id == category_id
+            )
         result = await session.execute(
             select(func.count())
             .select_from(model)
             .where(
                 model.workspace_id == workspace_id,
-                model.category_id == category_id,
+                uses_category,
             )
         )
         counts[key] = int(result.scalar_one())
@@ -408,6 +414,14 @@ async def _transfer_category_references(
             )
             .values(category_id=destination_id)
         )
+    await session.execute(
+        sa_update(RecurringTransaction)
+        .where(
+            RecurringTransaction.workspace_id == workspace_id,
+            RecurringTransaction.interest_category_id == category_id,
+        )
+        .values(interest_category_id=destination_id)
+    )
     await _merge_budgets(session, workspace_id, category_id, destination_id)
     await _repoint_rules(session, workspace_id, category_id, destination_id)
 
