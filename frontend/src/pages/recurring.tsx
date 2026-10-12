@@ -19,7 +19,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import type { Category, CategoryGroup, RecurringTransaction } from '@/types'
+import type { Account, Category, CategoryGroup, RecurringTransaction } from '@/types'
 import { Pencil, Trash2, Plus, RefreshCw, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/page-header'
@@ -29,6 +29,13 @@ import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { formatCurrency } from '@/lib/format'
+import {
+  centsToAmount,
+  interestCategoriesFrom,
+  loanScheduleProblem,
+  payingAccountsFor,
+  toCents,
+} from '@/lib/loan-payments'
 
 const TH = 'text-xs font-medium text-muted-foreground py-3'
 
@@ -99,35 +106,41 @@ function RecurringTab() {
     queryFn: () => accountsApi.list(),
   })
 
+  // Recurring loan payments write loan payments (manual loans) and change the
+  // loan pages and the asset equity they feed, on top of the money views.
+  const invalidateAfterChange = () => {
+    invalidateFinancialQueries(queryClient)
+    queryClient.invalidateQueries({ queryKey: ['recurring'] })
+    queryClient.invalidateQueries({ queryKey: ['loan-payments'] })
+    queryClient.invalidateQueries({ queryKey: ['assets'] })
+  }
+
   const createMutation = useMutation({
     mutationFn: (data: Partial<RecurringTransaction>) => recurringApi.create(data),
     onSuccess: () => {
-      invalidateFinancialQueries(queryClient)
-      queryClient.invalidateQueries({ queryKey: ['recurring'] })
+      invalidateAfterChange()
       setDialogOpen(false)
       toast.success(t('recurring.created'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
   })
 
   const updateMutation = useMutation({
     mutationFn: ({ id, ...data }: Partial<RecurringTransaction> & { id: string }) =>
       recurringApi.update(id, data),
     onSuccess: () => {
-      invalidateFinancialQueries(queryClient)
-      queryClient.invalidateQueries({ queryKey: ['recurring'] })
+      invalidateAfterChange()
       setDialogOpen(false)
       setEditing(null)
       toast.success(t('recurring.updated'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
   })
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => recurringApi.delete(id),
     onSuccess: () => {
-      invalidateFinancialQueries(queryClient)
-      queryClient.invalidateQueries({ queryKey: ['recurring'] })
+      invalidateAfterChange()
       setDeletingRecurring(null)
       toast.success(t('recurring.deleted'))
     },
@@ -139,8 +152,7 @@ function RecurringTab() {
   const generateMutation = useMutation({
     mutationFn: () => recurringApi.generate(),
     onSuccess: (data) => {
-      invalidateFinancialQueries(queryClient)
-      queryClient.invalidateQueries({ queryKey: ['recurring'] })
+      invalidateAfterChange()
       toast.success(t('recurring.generated', { count: data.generated }))
     },
     onError: () => toast.error(t('common.error')),
@@ -198,7 +210,19 @@ function RecurringTab() {
             <tbody>
               {recurringList.map((rt) => (
                 <tr key={rt.id} className="border-b border-border last:border-0 hover:bg-muted transition-colors">
-                  <td className="py-3 pl-4 sm:pl-5 text-sm font-medium text-foreground">{rt.description}</td>
+                  <td className="py-3 pl-4 sm:pl-5 text-sm font-medium text-foreground">
+                    {rt.description}
+                    {rt.kind === 'loan_payment' && (
+                      <div className="text-[11px] font-normal text-muted-foreground">
+                        {t('loans.recurring.rowNote', {
+                          loan: getAccountName(
+                            accountsList?.find((a) => a.id === rt.transfer_account_id) ?? { name: '—' },
+                          ),
+                          interest: mask(formatCurrency(Number(rt.interest_amount ?? 0), rt.currency, locale)),
+                        })}
+                      </div>
+                    )}
+                  </td>
                   <td className={`py-3 text-xs sm:text-sm font-bold tabular-nums ${rt.type === 'credit' ? 'text-emerald-600' : 'text-rose-500'}`}>
                     {mask(`${rt.type === 'credit' ? '+' : '−'}${formatCurrency(rt.amount, rt.currency, locale)}`)}
                     {rt.currency !== userCurrency && rt.amount_primary != null && (
@@ -313,7 +337,7 @@ function RecurringForm({
   categories: Category[]
   categoryGroups: CategoryGroup[]
   currentCategory?: Category
-  accounts: { id: string; name: string; display_name?: string | null }[]
+  accounts: Account[]
   onSave: (data: Partial<RecurringTransaction>) => void
   onCancel: () => void
   loading: boolean
@@ -342,6 +366,38 @@ function RecurringForm({
   const [accountId, setAccountId] = useState(recurring?.account_id ?? sortedAccounts[0]?.id ?? '')
   const [isActive, setIsActive] = useState(recurring?.is_active ?? true)
   const [autoGenerate, setAutoGenerate] = useState(recurring?.auto_generate ?? true)
+  const formLocale = useDisplayLocale()
+
+  // A loan payment schedule: the whole payment goes from the paying account
+  // to the loan; only the fixed interest share is an expense.
+  const loans = useMemo(
+    () => sortAccountsByDisplayName(
+      accounts.filter((a) => a.type === 'loan' && (!a.is_closed || a.id === recurring?.transfer_account_id)),
+    ),
+    [accounts, recurring?.transfer_account_id],
+  )
+  const [kind, setKind] = useState<'standard' | 'loan_payment'>(recurring?.kind ?? 'standard')
+  const isLoanPayment = kind === 'loan_payment'
+  const [loanId, setLoanId] = useState(recurring?.transfer_account_id ?? loans[0]?.id ?? '')
+  const [interest, setInterest] = useState(
+    recurring?.interest_amount != null ? Number(recurring.interest_amount).toFixed(2) : '',
+  )
+  const [interestCategoryId, setInterestCategoryId] = useState(recurring?.interest_category_id ?? '')
+  const [loanProblem, setLoanProblem] = useState<string | null>(null)
+  const loan = loans.find((a) => a.id === loanId)
+  const payingAccounts = useMemo(
+    () => (loan ? sortAccountsByDisplayName(payingAccountsFor(loan, accounts)) : []),
+    [loan, accounts],
+  )
+  const payingId = payingAccounts.some((a) => a.id === accountId) ? accountId : (payingAccounts[0]?.id ?? '')
+  const paying = payingAccounts.find((a) => a.id === payingId)
+  const interestCategories = useMemo(() => interestCategoriesFrom(categories), [categories])
+  const totalCents = toCents(amount)
+  const interestCents = toCents(interest)
+  const principalCents = totalCents != null ? totalCents - (interestCents ?? 0) : null
+  // The bank writes the real rows of a connected account; the schedule can
+  // only forecast them (the backend enforces the same).
+  const projectionOnly = Boolean(loan?.connection_id || paying?.connection_id)
 
   const selectClass = 'w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary'
 
@@ -349,6 +405,32 @@ function RecurringForm({
     <form
       onSubmit={(e) => {
         e.preventDefault()
+        if (isLoanPayment) {
+          const problem = loanScheduleProblem(totalCents, interestCents, interestCategoryId)
+          setLoanProblem(problem)
+          if (problem || !loan || totalCents == null) return
+          const interestValue = interestCents ?? 0
+          onSave({
+            description,
+            amount: Number(centsToAmount(totalCents)),
+            currency: loan.currency,
+            type: 'debit',
+            frequency,
+            weekend_adjustment: weekendAdjustment,
+            day_of_month: dayOfMonth ? parseInt(dayOfMonth) : null,
+            start_date: startDate,
+            end_date: endDate || null,
+            category_id: null,
+            account_id: payingId || null,
+            is_active: isActive,
+            auto_generate: projectionOnly ? false : autoGenerate,
+            ...(recurring ? {} : { kind: 'loan_payment' as const }),
+            transfer_account_id: loan.id,
+            interest_amount: centsToAmount(interestValue),
+            interest_category_id: interestValue > 0 ? interestCategoryId : null,
+          })
+          return
+        }
         onSave({
           description,
           amount: parseFloat(amount),
@@ -367,10 +449,113 @@ function RecurringForm({
       }}
       className="space-y-4"
     >
+      {!recurring && loans.length > 0 && (
+        <div className="space-y-2">
+          <Label htmlFor="recurring-kind">{t('loans.recurring.kind')}</Label>
+          <select
+            id="recurring-kind"
+            className={selectClass}
+            value={kind}
+            onChange={(e) => setKind(e.target.value as 'standard' | 'loan_payment')}
+          >
+            <option value="standard">{t('loans.recurring.kindStandard')}</option>
+            <option value="loan_payment">{t('loans.recurring.kindLoanPayment')}</option>
+          </select>
+        </div>
+      )}
       <div className="space-y-2">
         <Label>{t('recurring.description')}</Label>
         <Input value={description} onChange={(e) => setDescription(e.target.value)} required />
       </div>
+      {isLoanPayment ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="recurring-loan">{t('loans.recurring.loan')}</Label>
+              <select
+                id="recurring-loan"
+                className={selectClass}
+                value={loanId}
+                onChange={(e) => setLoanId(e.target.value)}
+                required
+              >
+                {loans.map((acc) => (
+                  <option key={acc.id} value={acc.id}>{getAccountName(acc)}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="recurring-paying">{t('loans.payment.payingAccount')}</Label>
+              <select
+                id="recurring-paying"
+                className={selectClass}
+                value={payingId}
+                onChange={(e) => setAccountId(e.target.value)}
+                required
+              >
+                {payingAccounts.map((acc) => (
+                  <option key={acc.id} value={acc.id}>{getAccountName(acc)}</option>
+                ))}
+              </select>
+              {loan && payingAccounts.length === 0 && (
+                <p className="text-xs text-muted-foreground">{t('loans.payment.noPayingAccounts')}</p>
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="recurring-total">{t('loans.payment.total')}</Label>
+              <Input
+                id="recurring-total"
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="recurring-interest">{t('loans.payment.interest')}</Label>
+              <Input
+                id="recurring-interest"
+                type="number"
+                step="0.01"
+                min="0"
+                value={interest}
+                onChange={(e) => setInterest(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>{t('loans.payment.principal')}</Label>
+              <p className="py-2 text-sm tabular-nums text-foreground" data-testid="recurring-principal">
+                {principalCents != null && loan
+                  ? formatCurrency(principalCents / 100, loan.currency, formLocale)
+                  : '—'}
+              </p>
+            </div>
+          </div>
+          {totalCents != null && (interestCents ?? 0) > totalCents && (
+            <p className="text-xs text-rose-500">{t('loans.payment.interestTooHigh')}</p>
+          )}
+          {(interestCents ?? 0) > 0 && (
+            <div className="space-y-2">
+              <Label>{t('loans.payment.interestCategory')}</Label>
+              <CategorySelect
+                value={interestCategoryId}
+                onChange={setInterestCategoryId}
+                categories={interestCategories}
+                groups={categoryGroups}
+                placeholder={t('loans.payment.interestCategoryPlaceholder')}
+                className={selectClass}
+              />
+              <p className="text-xs text-muted-foreground">{t('loans.recurring.interestHint')}</p>
+            </div>
+          )}
+          {loanProblem && <p className="text-xs text-rose-500" role="alert">{t(loanProblem)}</p>}
+        </div>
+      ) : (
+      <>
       <div className="grid grid-cols-3 gap-4">
         <div className="space-y-2">
           <Label>{t('recurring.amount')}</Label>
@@ -392,6 +577,8 @@ function RecurringForm({
           </select>
         </div>
       </div>
+      </>
+      )}
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>{t('recurring.frequency')}</Label>
@@ -433,6 +620,7 @@ function RecurringForm({
           <DatePickerInput value={endDate} onChange={setEndDate} placeholder={t('recurring.endDate')} className="w-full justify-start" />
         </div>
       </div>
+      {!isLoanPayment && (
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>{t('recurring.category')}</Label>
@@ -461,16 +649,22 @@ function RecurringForm({
           </select>
         </div>
       </div>
+      )}
       <label className="flex items-start gap-2 cursor-pointer">
         <input
           type="checkbox"
-          checked={autoGenerate}
+          checked={isLoanPayment && projectionOnly ? false : autoGenerate}
+          disabled={isLoanPayment && projectionOnly}
           onChange={(e) => setAutoGenerate(e.target.checked)}
           className="h-4 w-4 mt-0.5 rounded border-border"
         />
         <span className="text-sm text-foreground">
           {t('recurring.autoGenerate')}
-          <span className="block text-xs text-muted-foreground">{t('recurring.autoGenerateHelp')}</span>
+          <span className="block text-xs text-muted-foreground">
+            {isLoanPayment
+              ? t(projectionOnly ? 'loans.recurring.projectionOnly' : 'loans.recurring.autoGenerateHelp')
+              : t('recurring.autoGenerateHelp')}
+          </span>
         </span>
       </label>
       {recurring && (

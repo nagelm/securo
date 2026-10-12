@@ -2956,6 +2956,19 @@
       "principal": "Principal",
       "total": "Total",
       "payments": "Recorded payments"
+    },
+    "recurring": {
+      "kind": "Kind",
+      "kindStandard": "Income or expense",
+      "kindLoanPayment": "Loan payment",
+      "loan": "Loan",
+      "interestHint": "The same interest every time. Only the interest counts as an expense; the rest pays down the loan. Transfer and ignored categories aren't offered.",
+      "autoGenerateHelp": "On each due date, record the payment: the transfer to the loan and the interest.",
+      "projectionOnly": "Your bank records these payments, so this schedule only forecasts them. The bank's transactions fulfil it.",
+      "rowNote": "To {{loan}} · interest {{interest}}",
+      "totalRequired": "Enter the total paid.",
+      "interestNegative": "Interest and fees can't be negative.",
+      "interestCategoryRequired": "Choose a category for the interest."
     }
   }
 }
