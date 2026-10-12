@@ -40,6 +40,7 @@ from app.services import admin_service
 from app.services import reconciliation_service, recurring_match_service
 from app.services.text_similarity import token_overlap
 from app.services.account_service import (
+    LOAN_SUBTYPES,
     _simplefin_to_internal_balance,
     sync_opening_balance_for_connected_account,
 )
@@ -858,11 +859,47 @@ def _fill_payee_website(payee: Payee, txn_data) -> None:
         payee.logo_url = str(logo_url)[:500]
 
 
+def _new_loan_fields(acc_data: AccountData) -> dict:
+    """Loan columns for an account sync creates; empty unless it is a loan."""
+    if acc_data.type != "loan":
+        return {}
+    subtype = acc_data.loan_subtype if acc_data.loan_subtype in LOAN_SUBTYPES else None
+    return {"loan_subtype": subtype, "loan_details": acc_data.loan_details}
+
+
+def _sync_loan_fields(provider: str, account: Account, acc_data: AccountData) -> None:
+    """Bring an existing account's loan columns up to the provider's view.
+
+    Sync never rewrites ``type``, with one exception: Akahu loans used to
+    arrive as ``checking`` (the provider mapped LOAN there), so an Akahu
+    account the provider now calls a loan and that is still ``checking``
+    becomes a ``loan``. Any other stored type is the user's choice and stays.
+    The balance needs no change: a loan keeps the provider's negative sign.
+
+    On a loan, the provider's loan facts replace the stored ones whenever it
+    sends some (display only), and its subtype fills an empty one. Nothing
+    here touches a transaction.
+    """
+    if acc_data.type != "loan":
+        return
+    if provider == "akahu" and account.type == "checking":
+        account.type = "loan"
+        logger.info("Sync: Akahu account %s is a loan; type checking -> loan", account.id)
+    if account.type != "loan":
+        return
+    if acc_data.loan_details is not None:
+        account.loan_details = acc_data.loan_details
+    if account.loan_subtype is None and acc_data.loan_subtype in LOAN_SUBTYPES:
+        account.loan_subtype = acc_data.loan_subtype
+
+
 # Hint keys a provider may send that no default category carries. Each one
 # resolves to a workspace category of that name when the user has made one,
 # and otherwise to the default-category key it falls back to.
 EXTRA_CATEGORY_HINTS = {
     "travel": ("Travel", "leisure"),
+    # Interest a lender charges on a loan account (Akahu).
+    "loan_interest": ("Loan interest", "taxes"),
 }
 
 
@@ -1193,6 +1230,7 @@ async def handle_oauth_callback(
             session, connection.id, institution_cache, acc_data
         )
         account = Account(
+            **_new_loan_fields(acc_data),
             user_id=user_id,
             workspace_id=workspace_id,
             connection_id=connection.id,
@@ -2096,6 +2134,7 @@ async def sync_connection(
                 continue
 
             if account:
+                _sync_loan_fields(connection.provider, account, acc_data)
                 # Normalize the provider sign using the account's CURRENT type,
                 # which reflects any user override (sync never rewrites `type`).
                 # SimpleFIN reports card debt as negative under a "checking"
@@ -2148,6 +2187,7 @@ async def sync_connection(
             else:
                 is_cc = acc_data.type == "credit_card"
                 account = Account(
+                    **_new_loan_fields(acc_data),
                     user_id=user_id,
                     workspace_id=workspace_id,
                     connection_id=connection.id,

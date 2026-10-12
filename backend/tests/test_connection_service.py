@@ -5623,3 +5623,254 @@ async def test_ensure_group_relocates_wallet_when_connection_moves_workspaces(
     assert group.connection_id == conn.id
     assert group.workspace_id == test_workspace.id
     assert group.name == "Moved Wallet"
+
+
+# ---------------------------------------------------------------------------
+# Akahu loans: type upgrade, loan details, loan-interest hint
+# ---------------------------------------------------------------------------
+
+_LOAN_DETAILS = {"purpose": "HOME", "interest": {"rate": 5.25, "type": "FIXED"}}
+
+
+@pytest.mark.asyncio
+async def test_match_category_hint_loan_interest_prefers_own_category_then_taxes(
+    session: AsyncSession, test_user, test_workspace
+):
+    taxes = await _make_category(session, test_user.id, "Taxes & Fees")
+    assert await _match_category_hint(session, test_workspace.id, "loan_interest") == taxes.id
+    own = await _make_category(session, test_user.id, "Loan interest")
+    assert await _match_category_hint(session, test_workspace.id, "loan_interest") == own.id
+
+
+def _loan_provider(*accounts: AccountData, transactions=None) -> AsyncMock:
+    mock = AsyncMock()
+    mock.refresh_credentials = AsyncMock(return_value={"token": "t"})
+    mock.names_accounts_by_institution = False
+    mock.get_accounts = AsyncMock(return_value=list(accounts))
+    mock.get_transactions = AsyncMock(return_value=list(transactions or []))
+    mock.get_holdings = AsyncMock(return_value=[])
+    mock.get_bills = AsyncMock(return_value=[])
+    return mock
+
+
+def _loan_data(
+    external_id: str = "loan-1",
+    loan_details: dict | None = _LOAN_DETAILS,
+    loan_subtype: str | None = "mortgage",
+) -> AccountData:
+    return AccountData(
+        external_id=external_id, name="Home Loan", type="loan",
+        balance=Decimal("-300000"), currency="NZD",
+        loan_details=loan_details, loan_subtype=loan_subtype,
+    )
+
+
+async def _sync_with(session, conn, workspace_id, user_id, mock) -> None:
+    with patch("app.services.connection_service.get_provider", return_value=mock), \
+         patch("app.services.connection_service.detect_transfer_pairs", new_callable=AsyncMock), \
+         patch("app.services.connection_service.stamp_primary_amount", new_callable=AsyncMock):
+        await sync_connection(session, conn.id, workspace_id, user_id)
+
+
+async def _akahu_connection(session, user_id) -> BankConnection:
+    conn = await _make_connection(session, user_id, "Example Bank")
+    conn.provider = "akahu"
+    await session.commit()
+    return conn
+
+
+def _connected_account(conn, user_id, workspace_id, external_id, type_, **over) -> Account:
+    return Account(
+        id=uuid.uuid4(), user_id=user_id, workspace_id=workspace_id,
+        connection_id=conn.id, external_id=external_id, name="Home Loan",
+        type=type_, balance=Decimal("-300500"), currency="NZD", **over,
+    )
+
+
+@pytest.mark.asyncio
+async def test_akahu_sync_upgrades_a_checking_loan_and_leaves_its_rows_alone(
+    session: AsyncSession, test_user, test_workspace
+):
+    """D2 (a): an Akahu loan still typed checking becomes a loan on the next
+    sync and gets the loan details; no transaction changes category, even one
+    the provider would now hint differently."""
+    conn = await _akahu_connection(session, test_user.id)
+    own_interest = await _make_category(session, test_user.id, "Mortgage costs")
+    await _make_category(session, test_user.id, "Loan interest")
+    account = _connected_account(conn, test_user.id, test_workspace.id, "loan-1", "checking")
+    session.add(account)
+    session.add(Transaction(
+        user_id=test_user.id, workspace_id=test_workspace.id, account_id=account.id,
+        external_id="int-old", description="Loan interest", amount=Decimal("1200"),
+        date=date.today(), type="debit", source="sync", currency="NZD",
+        category_id=own_interest.id,
+    ))
+    session.add(Transaction(
+        user_id=test_user.id, workspace_id=test_workspace.id, account_id=account.id,
+        external_id="int-uncat", description="Loan interest", amount=Decimal("1100"),
+        date=date.today(), type="debit", source="sync", currency="NZD",
+    ))
+    await session.commit()
+
+    incoming = [
+        TransactionData(
+            external_id=ext, description="Loan interest", amount=amount,
+            date=date.today(), type="debit", currency="NZD", category_hint="loan_interest",
+        )
+        for ext, amount in (("int-old", Decimal("1200")), ("int-uncat", Decimal("1100")))
+    ]
+    mock = _loan_provider(_loan_data(), transactions=incoming)
+    await _sync_with(session, conn, test_workspace.id, test_user.id, mock)
+
+    await session.refresh(account)
+    assert account.type == "loan"
+    assert account.loan_details == _LOAN_DETAILS
+    assert account.loan_subtype == "mortgage"
+    assert account.balance == Decimal("-300000")  # provider sign kept, no flip
+    cats = {
+        t.external_id: t.category_id
+        for t in (
+            await session.execute(select(Transaction).where(Transaction.external_id.like("int-%")))
+        ).scalars()
+    }
+    assert cats == {"int-old": own_interest.id, "int-uncat": None}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_type", ["savings", "credit_card"])
+async def test_akahu_sync_leaves_a_type_the_user_chose(
+    session: AsyncSession, test_user, test_workspace, user_type
+):
+    conn = await _akahu_connection(session, test_user.id)
+    account = _connected_account(conn, test_user.id, test_workspace.id, "loan-1", user_type)
+    session.add(account)
+    await session.commit()
+
+    await _sync_with(session, conn, test_workspace.id, test_user.id, _loan_provider(_loan_data()))
+
+    await session.refresh(account)
+    assert account.type == user_type
+    assert account.loan_details is None
+    assert account.loan_subtype is None
+
+
+@pytest.mark.asyncio
+async def test_akahu_sync_refreshes_details_but_keeps_the_users_subtype(
+    session: AsyncSession, test_user, test_workspace
+):
+    conn = await _akahu_connection(session, test_user.id)
+    account = _connected_account(
+        conn, test_user.id, test_workspace.id, "loan-1", "loan",
+        loan_subtype="personal", loan_details={"purpose": "HOME", "interest": {"rate": 6.0}},
+    )
+    session.add(account)
+    await session.commit()
+
+    await _sync_with(session, conn, test_workspace.id, test_user.id, _loan_provider(_loan_data()))
+    await session.refresh(account)
+    assert account.loan_subtype == "personal"
+    assert account.loan_details == _LOAN_DETAILS
+
+    # A feed that carries no loan details keeps the last ones.
+    await _sync_with(
+        session, conn, test_workspace.id, test_user.id,
+        _loan_provider(_loan_data(loan_details=None, loan_subtype=None)),
+    )
+    await session.refresh(account)
+    assert account.loan_details == _LOAN_DETAILS
+    assert account.loan_subtype == "personal"
+
+
+@pytest.mark.asyncio
+async def test_akahu_sync_fills_an_empty_subtype(
+    session: AsyncSession, test_user, test_workspace
+):
+    conn = await _akahu_connection(session, test_user.id)
+    account = _connected_account(conn, test_user.id, test_workspace.id, "loan-1", "loan")
+    session.add(account)
+    await session.commit()
+
+    await _sync_with(session, conn, test_workspace.id, test_user.id, _loan_provider(_loan_data()))
+    await session.refresh(account)
+    assert account.loan_subtype == "mortgage"
+
+
+@pytest.mark.asyncio
+async def test_type_upgrade_is_akahu_only(session: AsyncSession, test_user, test_workspace):
+    conn = await _make_connection(session, test_user.id, "Other Bank")  # provider "test"
+    account = _connected_account(conn, test_user.id, test_workspace.id, "loan-1", "checking")
+    session.add(account)
+    await session.commit()
+
+    await _sync_with(session, conn, test_workspace.id, test_user.id, _loan_provider(_loan_data()))
+    await session.refresh(account)
+    assert account.type == "checking"
+    assert account.loan_details is None
+
+
+@pytest.mark.asyncio
+async def test_akahu_sync_creates_new_loans_as_loans(
+    session: AsyncSession, test_user, test_workspace
+):
+    conn = await _akahu_connection(session, test_user.id)
+    await _sync_with(
+        session, conn, test_workspace.id, test_user.id,
+        _loan_provider(
+            _loan_data("loan-new"),
+            _loan_data("loan-odd", loan_subtype="not-a-subtype"),
+            AccountData(external_id="chq", name="Everyday", type="checking",
+                        balance=Decimal("100"), currency="NZD",
+                        loan_details={"purpose": "HOME"}, loan_subtype="mortgage"),
+        ),
+    )
+    rows = {
+        a.external_id: a
+        for a in (
+            await session.execute(select(Account).where(Account.connection_id == conn.id))
+        ).scalars()
+    }
+    assert rows["loan-new"].type == "loan"
+    assert rows["loan-new"].loan_subtype == "mortgage"
+    assert rows["loan-new"].loan_details == _LOAN_DETAILS
+    assert rows["loan-new"].balance == Decimal("-300000")
+    assert rows["loan-odd"].loan_subtype is None
+    assert rows["chq"].type == "checking"
+    assert rows["chq"].loan_details is None and rows["chq"].loan_subtype is None
+
+
+@pytest.mark.asyncio
+async def test_new_loan_interest_rows_take_the_hint_unless_a_rule_categorises_them(
+    session: AsyncSession, test_user, test_workspace
+):
+    conn = await _akahu_connection(session, test_user.id)
+    loan_interest = await _make_category(session, test_user.id, "Loan interest")
+    ruled = await _make_category(session, test_user.id, "Mortgage costs")
+    await create_rule(
+        session,
+        test_workspace.id,
+        test_user.id,
+        RuleCreate(
+            name="Mortgage interest",
+            conditions=[RuleCondition(field="description", op="contains", value="RULED")],
+            actions=[RuleAction(op="set_category", value=str(ruled.id))],
+            apply_to_existing=False,
+        ),
+    )
+    incoming = [
+        TransactionData(
+            external_id=f"int-{n}", description=desc, amount=Decimal("1200"),
+            date=date.today(), type="debit", currency="NZD", category_hint="loan_interest",
+        )
+        for n, desc in ((1, "Loan interest"), (2, "RULED interest"))
+    ]
+    await _sync_with(
+        session, conn, test_workspace.id, test_user.id,
+        _loan_provider(_loan_data(), transactions=incoming),
+    )
+    cats = {
+        t.external_id: t.category_id
+        for t in (
+            await session.execute(select(Transaction).where(Transaction.external_id.like("int-%")))
+        ).scalars()
+    }
+    assert cats == {"int-1": loan_interest.id, "int-2": ruled.id}
