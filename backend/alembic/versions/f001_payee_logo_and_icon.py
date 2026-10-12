@@ -11,13 +11,14 @@ recent one carrying a real merchant logo, using the same rule as
 `app.providers.akahu.merchant_logo_for`: a merchant id, an https URL, and
 not Akahu's `default.png` placeholder.
 
-Revision ID: 097
+Revision ID: f001 (a fork-only id, so upstream revisions 097+ never collide;
+later fork migrations chain f002, f003, ... after it)
 Revises: 096
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "097"
+revision = "f001"
 down_revision = "096"
 branch_labels = None
 depends_on = None
