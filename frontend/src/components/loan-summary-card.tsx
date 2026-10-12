@@ -20,6 +20,7 @@ import {
 import { extractApiError } from '@/lib/api-errors'
 import { formatCurrency } from '@/lib/format'
 import { invalidateFinancialQueries } from '@/lib/invalidate-queries'
+import { loanDetailRows } from '@/lib/loan-details'
 import { useDateLocale } from '@/hooks/use-display-locale'
 import { resolveDateFnsLocale } from '@/lib/date-fns-locale'
 import type { Account, LoanPayment, LoanPaymentCreate, LoanPaymentUpdate } from '@/types'
@@ -36,35 +37,9 @@ interface LoanSummaryCardProps {
 
 const identity = (value: string) => value
 
-/** Provider facts arrive as a free-form object (Akahu `meta.loan_details`).
- *  Show every scalar, one level of nesting flattened, with its key humanised. */
-function loanDetailRows(details: Record<string, unknown> | null): { key: string; label: string; value: string }[] {
-  if (!details) return []
-  const rows: { key: string; label: string; value: string }[] = []
-  const humanise = (key: string) => {
-    const words = key.replace(/[_.]+/g, ' ').trim()
-    return words.charAt(0).toUpperCase() + words.slice(1)
-  }
-  const add = (key: string, value: unknown) => {
-    if (value == null || value === '') return
-    if (typeof value === 'object') return
-    rows.push({ key, label: humanise(key), value: String(value) })
-  }
-  for (const [key, value] of Object.entries(details)) {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      for (const [inner, innerValue] of Object.entries(value as Record<string, unknown>)) {
-        add(`${key}.${inner}`, innerValue)
-      }
-    } else {
-      add(key, value)
-    }
-  }
-  return rows
-}
-
 /**
  * The loan block on a loan account's page: what the loan is, what secures it
- * and the equity there, provider facts, the last 12 months of paid / interest
+ * and the equity there, the loan's details, the last 12 months of paid / interest
  * / principal (read from the ledger, so synced loans get it too), and for
  * manual loans the recorded payments and the "Record payment" form.
  *
@@ -158,7 +133,12 @@ export function LoanSummaryCard({ account, accounts, locale, canWrite, mask = id
   const activeMonths = (summary?.months ?? []).filter(
     (m) => m.paid !== 0 || m.interest !== 0 || m.principal_reduction !== 0,
   )
-  const details = loanDetailRows(account.loan_details)
+  const details = loanDetailRows(account.loan_details, {
+    t,
+    money: (value) => money(value),
+    date: dateLabel,
+    locale,
+  })
   const closeDialog = () => {
     setDialogOpen(false)
     setEditing(null)

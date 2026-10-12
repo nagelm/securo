@@ -188,7 +188,8 @@ export interface Account {
   // Loan accounts only (type === 'loan'); null on every other type.
   loan_subtype: LoanSubtype | null
   secured_asset_id: string | null
-  // Provider loan facts (rate, maturity, ...) written by sync. Read-only.
+  // Loan facts (rate, term, maturity, repayment) in Akahu's shape, typed in
+  // by the user or merged in by sync (lib/loan-details.ts). Display only.
   loan_details: Record<string, unknown> | null
   is_closed: boolean
   closed_at: string | null

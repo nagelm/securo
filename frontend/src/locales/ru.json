@@ -2966,7 +2966,7 @@
       "securedAgainst": "Secured against",
       "equity": "Equity",
       "syncedNote": "Payments and interest come from your bank.",
-      "providerDetails": "Details from your bank",
+      "providerDetails": "Loan details",
       "last12Months": "Last 12 months",
       "noActivity": "No payments or interest in the last 12 months.",
       "month": "Month",
@@ -2975,6 +2975,70 @@
       "principal": "Principal",
       "total": "Total",
       "payments": "Recorded payments"
+    },
+    "details": {
+      "edit": "Edit details",
+      "editTitle": "Loan details",
+      "hint": "For your reference only. Balances, reports and forecasts don't use these.",
+      "syncedHint": "For your reference only. Each sync replaces the values your bank sends and keeps the rest.",
+      "empty": "No details yet.",
+      "saved": "Loan details saved",
+      "notSet": "Not set",
+      "clearDate": "Clear date",
+      "yes": "Yes",
+      "no": "No",
+      "sectionInterest": "Interest",
+      "sectionTerm": "Amount and term",
+      "sectionRepayment": "Repayments",
+      "purpose": "Purpose",
+      "loanType": "Repayment type",
+      "interestRate": "Interest rate",
+      "interestType": "Rate type",
+      "rateExpiresAt": "Rate fixed until",
+      "interestOnly": "Interest only",
+      "interestOnlyExpiresAt": "Interest only until",
+      "initialPrincipal": "Original loan amount",
+      "term": "Term",
+      "termYearsLabel": "Term (years)",
+      "termMonthsLabel": "Term (months)",
+      "termYears_one": "{{count}} year",
+      "termYears_other": "{{count}} years",
+      "termMonths_one": "{{count}} month",
+      "termMonths_other": "{{count}} months",
+      "maturesAt": "Ends on",
+      "repaymentAmount": "Repayment amount",
+      "repaymentFrequency": "Repayment frequency",
+      "nextRepaymentDate": "Next repayment",
+      "purposes": {
+        "HOME": "Home",
+        "PERSONAL": "Personal",
+        "BUSINESS": "Business",
+        "UNKNOWN": "Unknown"
+      },
+      "loanTypes": {
+        "TABLE": "Table (equal repayments)",
+        "REDUCING": "Reducing (equal principal)",
+        "REVOLVING": "Revolving credit",
+        "UNKNOWN": "Unknown"
+      },
+      "interestTypes": {
+        "FIXED": "Fixed",
+        "FLOATING": "Floating"
+      },
+      "frequencies": {
+        "WEEKLY": "Weekly",
+        "FORTNIGHTLY": "Fortnightly",
+        "MONTHLY": "Monthly",
+        "QUARTERLY": "Quarterly",
+        "BIANNUALLY": "Twice a year",
+        "ANNUALLY": "Yearly"
+      },
+      "errors": {
+        "rate": "Enter a rate from 0 to 100.",
+        "amount": "Enter a positive amount.",
+        "years": "Enter whole years, up to 100.",
+        "months": "Enter whole months."
+      }
     },
     "recurring": {
       "kind": "Kind",

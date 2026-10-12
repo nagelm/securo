@@ -262,4 +262,27 @@ describe('LoanSummaryCard', () => {
     await waitFor(() => expect(api.loanPayments.delete).toHaveBeenCalledWith('pay-1'))
     await waitFor(() => expect(api.accounts.loanSummary).toHaveBeenCalledTimes(2))
   })
+  it('labels and formats the loan details: rate as a percent, amounts as money, dates as dates', async () => {
+    renderCard(account({
+      ...loan,
+      loan_details: {
+        interest: { rate: 5.25, type: 'FIXED', expires_at: '2027-06-01T00:00:00Z' },
+        initial_principal: 350000,
+        term: { years: 25 },
+        repayment: { frequency: 'FORTNIGHTLY', next_date: '2026-04-15', next_amount: 950.5 },
+      },
+    }))
+
+    const details = screen.getByLabelText(t('loans.summary.providerDetails'))
+    expect(details).toHaveTextContent(`${t('loans.details.interestRate')}5.25%`)
+    expect(details).toHaveTextContent(`${t('loans.details.interestType')}${t('loans.details.interestTypes.FIXED')}`)
+    expect(details).toHaveTextContent(`${t('loans.details.rateExpiresAt')}6/1/2027`)
+    expect(details).toHaveTextContent(`${t('loans.details.initialPrincipal')}$350,000.00`)
+    expect(details).toHaveTextContent(`${t('loans.details.term')}25 years`)
+    expect(details).toHaveTextContent(`${t('loans.details.repaymentAmount')}$950.50`)
+    expect(details).toHaveTextContent(
+      `${t('loans.details.repaymentFrequency')}${t('loans.details.frequencies.FORTNIGHTLY')}`,
+    )
+    expect(details).toHaveTextContent(`${t('loans.details.nextRepaymentDate')}4/15/2026`)
+  })
 })
