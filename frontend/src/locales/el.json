@@ -1920,7 +1920,17 @@
     "total": "Σύνολο",
     "confirmRegenerateTitle": "Επανυπολογισμός αξιών;",
     "confirmRegenerate": "Οι παράμετροι ανάπτυξης άλλαξαν. Όλες οι αυτόματα παραγόμενες τιμές θα διαγραφούν και θα επανυπολογιστούν. Οι χειροκίνητες τιμές θα διατηρηθούν.",
-    "regenerate": "Επανυπολογισμός"
+    "regenerate": "Επανυπολογισμός",
+    "equity": {
+      "title": "Equity",
+      "value": "Value",
+      "debt": "Debt",
+      "equity": "Equity",
+      "linkedLoans": "Loans secured against this asset",
+      "note": "Equity is shown for reference and is not added to net worth.",
+      "deleteUnlinksLoans_one": "{{count}} loan is secured against this asset. Deleting the asset unlinks it; the loan and its balance stay.",
+      "deleteUnlinksLoans_other": "{{count}} loans are secured against this asset. Deleting the asset unlinks them; the loans and their balances stay."
+    }
   },
   "payees": {
     "noPayeeFound": "Δεν βρέθηκε δικαιούχος.",

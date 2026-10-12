@@ -60,6 +60,7 @@ import { useCollectionFilter } from '@/contexts/collection-filter-context'
 import { getAssetProfit } from '@/lib/asset-profit'
 import { getPortfolioShare, getPortfolioTotalPrimary } from '@/lib/asset-portfolio-share'
 import { formatCurrency } from '@/lib/format'
+import { AssetEquityLine, AssetEquitySummary } from '@/components/asset-equity-summary'
 
 // Renders a logo image when one is available, falling back to the asset's
 // type-based Lucide icon on missing URL or broken image. Uses the type's
@@ -269,6 +270,10 @@ export default function AssetsPage() {
     const allowed = new Set(activeWalletIds)
     return (rawAssetsList ?? []).filter((a) => a.group_id && allowed.has(a.group_id))
   }, [rawAssetsList, activeWalletIds])
+  // Deleting an asset unlinks the loans secured against it; the dialog says how many.
+  const deletingLinkedLoanCount = deletingId
+    ? (rawAssetsList ?? []).find((a) => a.id === deletingId)?.linked_loans?.length ?? 0
+    : 0
 
   const { data: rawPortfolioData } = useQuery({
     queryKey: ['portfolio-trend'],
@@ -365,6 +370,8 @@ export default function AssetsPage() {
     mutationFn: (id: string) => assets.delete(id),
     onSuccess: () => {
       refetchAssetViews()
+      // Loans secured against the asset were unlinked.
+      if (deletingLinkedLoanCount > 0) queryClient.invalidateQueries({ queryKey: ['accounts'] })
       setDeletingId(null)
       if (expandedId === deletingId) setExpandedId(null)
       toast.success(t('assets.deleted'))
@@ -739,6 +746,7 @@ export default function AssetsPage() {
     const profit = getAssetProfit(asset)
     const pctOfPortfolio = asset.sell_date ? null : getPortfolioShare(asset, portfolioTotalPrimary)
     const needsBuys = isMarketPriced && !hasCost && !asset.sell_date
+    const hasLinkedLoans = (asset.linked_loans?.length ?? 0) > 0
 
     return (
       <div key={asset.id} className="border-b border-border last:border-b-0">
@@ -842,6 +850,18 @@ export default function AssetsPage() {
             {isExpanded ? <ChevronUp size={15} className="text-muted-foreground" /> : <ChevronDown size={15} className="text-muted-foreground" />}
           </div>
         </div>
+
+        {hasLinkedLoans && (
+          <div className="pr-3 pb-2 -mt-1.5 pl-[3.375rem]">
+            <AssetEquityLine asset={asset} locale={locale} mask={mask} />
+          </div>
+        )}
+
+        {isExpanded && hasLinkedLoans && (
+          <div className="px-3 pb-2">
+            <AssetEquitySummary asset={asset} locale={locale} mask={mask} />
+          </div>
+        )}
 
         {isExpanded && (
           isMarketPriced ? (
@@ -1567,6 +1587,11 @@ export default function AssetsPage() {
             <DialogTitle>{t('assets.confirmDeleteTitle')}</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">{t('assets.confirmDelete')}</p>
+          {deletingLinkedLoanCount > 0 && (
+            <p className="text-sm text-amber-600" role="note">
+              {t('assets.equity.deleteUnlinksLoans', { count: deletingLinkedLoanCount })}
+            </p>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeletingId(null)}>
               {t('common.cancel')}

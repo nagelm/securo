@@ -2009,7 +2009,17 @@
     "total": "Łącznie",
     "confirmRegenerateTitle": "Przeliczyć wartości ponownie?",
     "confirmRegenerate": "Zmieniono parametry wzrostu. Wszystkie automatycznie wygenerowane wartości zostaną usunięte i przeliczone ponownie. Wartości ręczne zostaną zachowane.",
-    "regenerate": "Przelicz ponownie"
+    "regenerate": "Przelicz ponownie",
+    "equity": {
+      "title": "Equity",
+      "value": "Value",
+      "debt": "Debt",
+      "equity": "Equity",
+      "linkedLoans": "Loans secured against this asset",
+      "note": "Equity is shown for reference and is not added to net worth.",
+      "deleteUnlinksLoans_one": "{{count}} loan is secured against this asset. Deleting the asset unlinks it; the loan and its balance stay.",
+      "deleteUnlinksLoans_other": "{{count}} loans are secured against this asset. Deleting the asset unlinks them; the loans and their balances stay."
+    }
   },
   "reports": {
     "section": "Analityka",

@@ -1921,7 +1921,17 @@
     "total": "Gesamt",
     "confirmRegenerateTitle": "Werte neu generieren?",
     "confirmRegenerate": "Wachstumsparameter wurden geändert. Alle automatisch generierten Werte werden gelöscht und neu berechnet. Manuell eingegebene Werte bleiben erhalten.",
-    "regenerate": "Neu generieren"
+    "regenerate": "Neu generieren",
+    "equity": {
+      "title": "Equity",
+      "value": "Value",
+      "debt": "Debt",
+      "equity": "Equity",
+      "linkedLoans": "Loans secured against this asset",
+      "note": "Equity is shown for reference and is not added to net worth.",
+      "deleteUnlinksLoans_one": "{{count}} loan is secured against this asset. Deleting the asset unlinks it; the loan and its balance stay.",
+      "deleteUnlinksLoans_other": "{{count}} loans are secured against this asset. Deleting the asset unlinks them; the loans and their balances stay."
+    }
   },
   "reports": {
     "section": "Analysen",

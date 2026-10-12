@@ -807,6 +807,26 @@ export interface Asset {
   total_invested: number | null
   realized_gain: number | null
   transaction_count: number
+  // Equity against linked loans (liabilities phase 3). All in the asset's
+  // currency; the _primary copies are set only when that differs from the
+  // user's currency. Display only: never added to any total.
+  linked_loan_ids: string[]
+  linked_loans: AssetLinkedLoan[]
+  linked_debt: number | null
+  linked_debt_primary: number | null
+  equity: number | null
+  equity_primary: number | null
+}
+
+/** A loan account secured against an asset. */
+export interface AssetLinkedLoan {
+  id: string
+  name: string
+  currency: string
+  /** The loan's balance in its own currency (negative = owed). */
+  balance: number
+  /** Amount owed, converted to the asset's currency. */
+  debt: number
 }
 
 /** One order read from a broker CSV, before it reaches a holding. */
