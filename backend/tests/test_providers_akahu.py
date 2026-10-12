@@ -463,6 +463,36 @@ def test_merchant_website_reaches_the_payee():
     assert _built(_txn(merchant={"name": "Countdown", "website": "javascript:x"})).payee_website is None
 
 
+LOGO = "https://cdn.akahu.nz/logos/merchants/merchant_1"
+
+
+def test_merchant_logo_reaches_the_payee():
+    assert _built(_txn(meta={"logo": LOGO})).payee_logo_url == LOGO
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        _txn(meta={"logo": "https://cdn.akahu.nz/logos/merchants/default.png"}),
+        _txn(meta={"logo": "https://cdn.akahu.nz/logos/merchants/DEFAULT.png?v=2"}),
+        _txn(merchant=None, meta={"logo": LOGO}),
+        _txn(merchant={"name": "Countdown"}, meta={"logo": LOGO}),
+        _txn(meta={"logo": "http://cdn.akahu.nz/logos/merchants/merchant_1"}),
+        _txn(meta={}),
+    ],
+    ids=["placeholder", "placeholder-query", "no-merchant", "merchant-without-id", "not-https", "absent"],
+)
+def test_no_real_merchant_logo_leaves_the_payee_without_one(raw):
+    from app.providers.akahu import merchant_logo_for
+
+    assert merchant_logo_for(raw) is None
+
+
+def test_no_logo_when_the_payee_is_not_the_merchant():
+    t = AkahuProvider._build_transaction(_txn(meta={"logo": LOGO}), "NZD", "none")
+    assert t is not None and t.payee is None and t.payee_logo_url is None
+
+
 def test_foreign_purchase_uses_the_conversion():
     t = _built(_txn(amount=-5.4, meta={"conversion": {"amount": 2.15, "currency": "GBP", "rate": 0.49}}))
     assert (t.amount, t.currency, t.amount_in_account_currency) == (Decimal("2.15"), "GBP", Decimal("5.4"))

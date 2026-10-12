@@ -112,6 +112,10 @@ class TransactionData:
     # The merchant's website, when the provider enriches transactions. Fills
     # Payee.website on a payee that doesn't have one yet.
     payee_website: Optional[str] = None
+    # The merchant's logo URL, when the provider matched the row to a
+    # merchant and has a real logo for it (not a placeholder). Fills
+    # Payee.logo_url on a payee that doesn't have one yet.
+    payee_logo_url: Optional[str] = None
 
 
 @dataclass

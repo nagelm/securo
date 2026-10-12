@@ -269,6 +269,10 @@ export interface Transaction {
   payee: string | null
   payee_id: string | null
   payee_name: string | null
+  /** The payee's logo (provider's, else its website favicon), or null. */
+  payee_logo_url?: string | null
+  /** The icon the user picked for the payee; wins over the logo. */
+  payee_icon?: string | null
   notes: string | null
   transfer_pair_id: string | null
   amount_primary: number | null
@@ -449,6 +453,12 @@ export interface Payee {
   phone: string | null
   address: string | null
   website: string | null
+  /** Merchant logo a provider supplied. Server-set, read-only. */
+  logo_url: string | null
+  /** An icon the user picked (category icon set); wins over any logo. */
+  icon: string | null
+  /** What the payee shows: `logo_url`, else a favicon of `website`, else null. */
+  display_logo_url: string | null
   tax_ids: PayeeTaxId[]
   created_at: string
   transaction_count: number

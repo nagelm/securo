@@ -243,6 +243,45 @@ async def test_update_payee(client: AsyncClient, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_payee_icon_and_logo(client: AsyncClient, auth_headers):
+    created = await _create_payee(client, auth_headers, "Iconless")
+    assert created["icon"] is None
+    assert created["display_logo_url"] is None  # nothing to show: needs an icon
+
+    resp = await client.patch(
+        f"/api/payees/{created['id']}", headers=auth_headers,
+        json={"icon": "shopping-cart", "website": "https://shop.example/"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["icon"] == "shopping-cart"
+    assert data["logo_url"] is None
+    assert "domain=shop.example" in data["display_logo_url"]
+
+    resp = await client.patch(
+        f"/api/payees/{created['id']}", headers=auth_headers, json={"icon": None},
+    )
+    assert resp.json()["icon"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_payees_needing_an_icon(client: AsyncClient, auth_headers):
+    bare = await _create_payee(client, auth_headers, "Bare")
+    picked = await _create_payee(client, auth_headers, "Picked")
+    sited = await _create_payee(client, auth_headers, "Sited")
+    await client.patch(f"/api/payees/{picked['id']}", headers=auth_headers, json={"icon": "tv"})
+    await client.patch(
+        f"/api/payees/{sited['id']}", headers=auth_headers, json={"website": "https://sited.example/"},
+    )
+
+    resp = await client.get("/api/payees", headers=auth_headers, params={"needs_icon": "true"})
+    assert resp.status_code == 200
+    ids = {p["id"] for p in resp.json()}
+    assert bare["id"] in ids
+    assert picked["id"] not in ids and sited["id"] not in ids
+
+
+@pytest.mark.asyncio
 async def test_update_payee_not_found(client: AsyncClient, auth_headers):
     resp = await client.patch(
         f"/api/payees/{uuid.uuid4()}", headers=auth_headers,

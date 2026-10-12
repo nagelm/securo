@@ -20,8 +20,13 @@ async def get_payees(
     q: Optional[str] = None,
     type: Optional[str] = None,
     is_favorite: Optional[bool] = None,
+    needs_icon: bool = False,
 ) -> list[Payee]:
-    """List all payees in a workspace with transaction counts."""
+    """List all payees in a workspace with transaction counts.
+
+    ``needs_icon`` keeps the payees nothing can be drawn for: no icon picked,
+    no provider logo and no website to take a favicon from.
+    """
     count_subq = (
         select(
             Transaction.payee_id,
@@ -48,6 +53,13 @@ async def get_payees(
 
     if is_favorite is not None:
         stmt = stmt.where(Payee.is_favorite == is_favorite)
+
+    if needs_icon:
+        stmt = stmt.where(
+            Payee.icon.is_(None),
+            Payee.logo_url.is_(None),
+            func.coalesce(func.trim(Payee.website), "") == "",
+        )
 
     stmt = stmt.order_by(Payee.name)
     result = await session.execute(stmt)

@@ -849,10 +849,13 @@ async def _match_pluggy_category(
 
 
 def _fill_payee_website(payee: Payee, txn_data) -> None:
-    """Give a payee the provider's merchant website when it has none yet."""
+    """Give a payee the provider's merchant website and logo when it has none yet."""
     website = getattr(txn_data, "payee_website", None)
     if website and not payee.website:
         payee.website = str(website)[:255]
+    logo_url = getattr(txn_data, "payee_logo_url", None)
+    if logo_url and not payee.logo_url:
+        payee.logo_url = str(logo_url)[:500]
 
 
 # Hint keys a provider may send that no default category carries. Each one

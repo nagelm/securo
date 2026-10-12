@@ -1749,6 +1749,7 @@ async def test_sync_connection_writes_provider_notes_and_payee_website(
             external_id="notes-tx-1", description="Example Cafe",
             amount=Decimal("8.50"), date=date.today(), type="debit", currency="NZD",
             payee="Example Cafe", payee_website="https://cafe.example/",
+            payee_logo_url="https://logo.example/cafe.png",
             notes="Particulars: LUNCH · Reference: TEAM",
         ),
     ])
@@ -1764,6 +1765,7 @@ async def test_sync_connection_writes_provider_notes_and_payee_website(
     assert tx.notes == "Particulars: LUNCH · Reference: TEAM"
     payee = (await session.execute(select(Payee).where(Payee.id == tx.payee_id))).scalar_one()
     assert payee.website == "https://cafe.example/"
+    assert payee.logo_url == "https://logo.example/cafe.png"
 
 
 @pytest.mark.asyncio

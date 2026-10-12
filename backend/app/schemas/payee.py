@@ -3,9 +3,10 @@ from datetime import date as _Date, datetime
 from decimal import Decimal
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 from app.fiscal.registry import TaxIdKind
+from app.providers.favicon import favicon_url_for
 from app.schemas.category import CategoryRead
 
 #: A counterparty's legal nature, or null when it is not known. Closed, and
@@ -49,6 +50,7 @@ class PayeeCreate(BaseModel):
     phone: Optional[str] = Field(None, max_length=50)
     address: Optional[str] = Field(None, max_length=500)
     website: Optional[str] = Field(None, max_length=255)
+    icon: Optional[str] = Field(None, max_length=50)
     tax_ids: list[TaxIdInput] = []
 
 
@@ -61,6 +63,8 @@ class PayeeUpdate(BaseModel):
     phone: Optional[str] = Field(None, max_length=50)
     address: Optional[str] = Field(None, max_length=500)
     website: Optional[str] = Field(None, max_length=255)
+    # A name from the category icon set; null clears it, so the logo shows.
+    icon: Optional[str] = Field(None, max_length=50)
     # Absent leaves the documents alone. Present replaces the whole set, so
     # the caller sends what should remain rather than a diff.
     tax_ids: Optional[list[TaxIdInput]] = None
@@ -89,11 +93,20 @@ class PayeeRead(BaseModel):
     phone: Optional[str] = None
     address: Optional[str] = None
     website: Optional[str] = None
+    # Read-only: the merchant logo a provider supplied.
+    logo_url: Optional[str] = None
+    icon: Optional[str] = None
     tax_ids: list[TaxIdRead] = []
     created_at: datetime
     transaction_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def display_logo_url(self) -> Optional[str]:
+        """The logo shown for this payee: the provider's, else the website's favicon."""
+        return self.logo_url or favicon_url_for(self.website)
 
 
 class PayeeSummary(BaseModel):

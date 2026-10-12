@@ -795,6 +795,8 @@ export interface PayeeWritePayload {
   phone?: string | null
   address?: string | null
   website?: string | null
+  /** A name from the category icon set. Null clears it, so the logo shows. */
+  icon?: string | null
   is_favorite?: boolean
   /** Replaces the whole set. Omit to leave documents untouched. */
   tax_ids?: PayeeTaxId[]
@@ -862,7 +864,7 @@ export const products = {
 }
 
 export const payees = {
-  list: async (params?: { q?: string; type?: string; is_favorite?: boolean } | Record<string, unknown>): Promise<Payee[]> => {
+  list: async (params?: { q?: string; type?: string; is_favorite?: boolean; needs_icon?: boolean } | Record<string, unknown>): Promise<Payee[]> => {
     const cleanParams = params && !('queryKey' in params) ? params : undefined
     const { data } = await api.get('/payees', { params: cleanParams })
     return data
