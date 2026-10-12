@@ -29,6 +29,7 @@ from app.services.text_similarity import token_overlap
 from app.services.connection_service import (
     _find_existing_connected_account,
     _merge_sync_metadata,
+    _match_category_hint,
     _match_pluggy_category,
     create_connect_token,
     delete_connection,
@@ -232,6 +233,33 @@ async def test_match_pluggy_user_has_no_category(session: AsyncSession, test_wor
     # "Eating out" maps to "Alimentação" but we don't create it
     cat_id = await _match_pluggy_category(session, test_workspace.id, "Eating out")
     assert cat_id is None
+
+
+# ---------------------------------------------------------------------------
+# _match_category_hint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["Groceries", "Mercado", "Lebensmittel"])
+async def test_match_category_hint_any_language(
+    session: AsyncSession, test_user, test_workspace, name
+):
+    """A default-category key matches the seeded name in whatever language."""
+    category = await _make_category(session, test_user.id, name)
+    assert await _match_category_hint(session, test_workspace.id, "groceries") == category.id
+
+
+@pytest.mark.asyncio
+async def test_match_category_hint_misses(session: AsyncSession, test_user, test_workspace):
+    await _make_category(session, test_user.id, "Groceries")
+    assert await _match_category_hint(session, test_workspace.id, "unknown-key") is None
+    assert await _match_category_hint(session, test_workspace.id, None) is None
+    assert await _match_category_hint(session, test_workspace.id, "food") is None
+    assert (
+        await _match_category_hint(session, test_workspace.id, "groceries", enabled=False)
+        is None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1654,6 +1682,40 @@ async def test_sync_connection_with_category_mapping(session: AsyncSession, test
         result_conn, _ = await sync_connection(session, conn.id, test_workspace.id, test_user.id)
 
     assert result_conn.status == "active"
+
+
+@pytest.mark.asyncio
+async def test_sync_connection_resolves_category_hint(
+    session: AsyncSession, test_user, test_workspace
+):
+    conn = await _make_connection(session, test_user.id, "Hint Bank")
+    groceries = await _make_category(session, test_user.id, "Groceries")
+
+    mock_provider = AsyncMock()
+    mock_provider.refresh_credentials = AsyncMock(return_value={"token": "t"})
+    mock_provider.get_accounts = AsyncMock(return_value=[
+        AccountData(
+            external_id="hint-acc-1", name="Everyday",
+            type="checking", balance=Decimal("100"), currency="NZD",
+        ),
+    ])
+    mock_provider.get_transactions = AsyncMock(return_value=[
+        TransactionData(
+            external_id="hint-tx-1", description="Countdown",
+            amount=Decimal("42.50"), date=date.today(), type="debit",
+            currency="NZD", category_hint="groceries",
+        ),
+    ])
+
+    with patch("app.services.connection_service.get_provider", return_value=mock_provider),          patch("app.services.connection_service.detect_transfer_pairs", new_callable=AsyncMock),          patch("app.services.connection_service.stamp_primary_amount", new_callable=AsyncMock):
+        await sync_connection(session, conn.id, test_workspace.id, test_user.id)
+
+    tx = (
+        await session.execute(
+            select(Transaction).where(Transaction.external_id == "hint-tx-1")
+        )
+    ).scalar_one()
+    assert tx.category_id == groceries.id
 
 
 @pytest.mark.asyncio

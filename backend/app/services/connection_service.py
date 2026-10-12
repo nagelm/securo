@@ -848,6 +848,54 @@ async def _match_pluggy_category(
     return result.scalars().first()
 
 
+async def _match_category_hint(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    category_hint: Optional[str],
+    enabled: bool = True,
+) -> Optional[uuid.UUID]:
+    """Resolve a provider's default-category key to a workspace category.
+
+    Default categories are seeded under the workspace language's name, so the
+    key matches the category carrying any of its translated names. A renamed
+    or deleted category simply doesn't match; the transaction arrives
+    uncategorized and Rules still apply.
+    """
+    if not enabled or not category_hint:
+        return None
+    from app.services.category_service import DEFAULT_CATEGORIES_I18N
+
+    names = [
+        value
+        for key, value in (DEFAULT_CATEGORIES_I18N.get(category_hint) or {}).items()
+        if key not in ("icon", "color", "treat_as_transfer") and isinstance(value, str)
+    ]
+    if not names:
+        return None
+    result = await session.execute(
+        select(Category.id)
+        .where(Category.workspace_id == workspace_id, Category.name.in_(names))
+        .limit(1)
+    )
+    return result.scalars().first()
+
+
+async def _match_provider_category(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    txn_data,
+    enabled: bool = True,
+) -> Optional[uuid.UUID]:
+    category_id = await _match_pluggy_category(
+        session, workspace_id, txn_data.pluggy_category, enabled=enabled
+    )
+    if category_id is None:
+        category_id = await _match_category_hint(
+            session, workspace_id, getattr(txn_data, "category_hint", None), enabled=enabled
+        )
+    return category_id
+
+
 async def _find_installment_category(
     session: AsyncSession,
     account_id: uuid.UUID,
@@ -1197,11 +1245,8 @@ async def handle_oauth_callback(
                 session, account.id, txn_data
             )
             if category_id is None:
-                category_id = await _match_pluggy_category(
-                    session,
-                    workspace_id,
-                    txn_data.pluggy_category,
-                    enabled=use_provider_cats,
+                category_id = await _match_provider_category(
+                    session, workspace_id, txn_data, enabled=use_provider_cats
                 )
             # Resolve payee entity from raw payee text
             payee_id = None
@@ -2218,11 +2263,8 @@ async def sync_connection(
                     session, account.id, txn_data
                 )
                 if category_id is None:
-                    category_id = await _match_pluggy_category(
-                        session,
-                        workspace_id,
-                        txn_data.pluggy_category,
-                        enabled=use_provider_cats,
+                    category_id = await _match_provider_category(
+                        session, workspace_id, txn_data, enabled=use_provider_cats
                     )
 
                 sync_payee_id = None

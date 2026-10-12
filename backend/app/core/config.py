@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     simplefin_enabled: bool = False
     simplefin_api_url: str = "https://beta-bridge.simplefin.org"
 
+    # Akahu (New Zealand banks via an Akahu Personal App, paste-a-token flow).
+    # Off by default. The App ID Token is shared by every connection unless a
+    # connection pastes its own alongside the user token.
+    akahu_enabled: bool = False
+    akahu_app_token: SecretStr = SecretStr("")
+
     # Frontend
     frontend_url: str = "http://localhost:5173"
 

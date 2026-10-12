@@ -1348,6 +1348,13 @@
         "title": "Prepojiť cez SimpleFIN",
         "description": "SimpleFIN je protokol na bankové údaje len na čítanie. Prejdi na SimpleFIN Bridge, vyber svoju banku a skopíruj setup token sem."
       },
+      "akahu": {
+        "title": "Connect via Akahu",
+        "description": "Akahu reads New Zealand bank, card and KiwiSaver accounts. Create a Personal App at my.akahu.nz, link your accounts there, and paste its User Access Token here.",
+        "openBridge": "Open Akahu developer settings",
+        "tokenLabel": "User Access Token",
+        "tokenHelp": "Paste the token that starts with user_token_. To use a different Personal App than the server's, paste its App ID Token (app_token_…) as well. Both are stored encrypted."
+      },
       "reconnectTitle": "Znovu prepojiť s novým tokenom",
       "reconnectDescription": "Vlož nový setup token a obnov toto prepojenie na mieste. Existujúce účty, transakcie, kategórie a pravidlá zostanú zachované.",
       "reconnect": "Znovu prepojiť"
@@ -1361,6 +1368,9 @@
       },
       "simplefin": {
         "description": "Americké a medzinárodné banky cez SimpleFIN Bridge"
+      },
+      "akahu": {
+        "description": "New Zealand banks, cards and KiwiSaver via an Akahu Personal App"
       }
     },
     "reconnected": "Banka úspešne znovu prepojená",

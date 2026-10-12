@@ -101,6 +101,10 @@ class TransactionData:
     # Provider-side identifier of the bill this transaction belongs to.
     # Resolved to a credit_card_bills.id FK at sync time (issue #92).
     bill_external_id: Optional[str] = None
+    # A default-category key (category_service.DEFAULT_CATEGORIES_I18N, e.g.
+    # "groceries") for providers that classify transactions. The sync layer
+    # resolves it to the workspace's category of that name, in any language.
+    category_hint: Optional[str] = None
 
 
 @dataclass
