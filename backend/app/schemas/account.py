@@ -28,6 +28,9 @@ class AccountCreate(BaseModel):
     # Loan accounts only; a non-null value on any other type is a 400.
     loan_subtype: Optional[str] = None
     secured_asset_id: Optional[uuid.UUID] = None
+    # Akahu-shaped loan facts the user enters (app.services.loan_details);
+    # checked by the service so a bad key is a 400.
+    loan_details: Optional[dict[str, Any]] = None
 
 
 class AccountUpdate(BaseModel):
@@ -44,6 +47,8 @@ class AccountUpdate(BaseModel):
     card_level: Optional[str] = None
     loan_subtype: Optional[str] = None
     secured_asset_id: Optional[uuid.UUID] = None
+    # Replaces the stored loan details as a whole; null clears them.
+    loan_details: Optional[dict[str, Any]] = None
 
 
 class AccountRead(AccountBase):
@@ -75,8 +80,9 @@ class AccountRead(AccountBase):
     shared_balance_group: Optional[str] = None
     loan_subtype: Optional[str] = None
     secured_asset_id: Optional[uuid.UUID] = None
-    # Provider loan facts (rate, maturity, ...), written by sync. Read-only:
-    # absent from AccountCreate/AccountUpdate.
+    # Loan facts (rate, term, maturity, repayment), entered by the user or
+    # written by sync, in one Akahu-shaped object (app.services.loan_details).
+    # Display only.
     loan_details: Optional[dict[str, Any]] = None
     is_closed: bool = False
     closed_at: Optional[datetime] = None

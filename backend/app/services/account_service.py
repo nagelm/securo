@@ -23,6 +23,7 @@ from app.services._query_filters import (
     is_not_future,
 )
 from app.services.credit_card_service import apply_effective_date, compute_available_credit, get_cycle_dates
+from app.services.loan_details import normalize_user_loan_details
 from app.models.category import Category
 
 
@@ -79,14 +80,16 @@ async def _validate_loan_fields(
     account_type: str,
     loan_subtype: Optional[str],
     secured_asset_id: Optional[uuid.UUID],
+    loan_details: Optional[dict] = None,
 ) -> None:
     """Check the loan fields a request sets, before anything is written.
 
     Only a `loan` account carries them; a null value is always allowed (it
-    is how a field is cleared).
+    is how a field is cleared). Loan details are checked separately by
+    `normalize_user_loan_details`.
     """
     if account_type != "loan":
-        if loan_subtype is not None or secured_asset_id is not None:
+        if loan_subtype is not None or secured_asset_id is not None or loan_details is not None:
             raise ValueError("Loan fields can only be set on loan accounts")
         return
     if loan_subtype is not None and loan_subtype not in LOAN_SUBTYPES:
@@ -316,8 +319,9 @@ async def create_account(
 ) -> Account:
     is_cc = data.type == "credit_card"
     await _validate_loan_fields(
-        session, workspace_id, data.type, data.loan_subtype, data.secured_asset_id
+        session, workspace_id, data.type, data.loan_subtype, data.secured_asset_id, data.loan_details
     )
+    loan_details = normalize_user_loan_details(data.loan_details)
     account = Account(
         user_id=user_id,
         workspace_id=workspace_id,
@@ -333,6 +337,7 @@ async def create_account(
         card_level=data.card_level if is_cc else None,
         loan_subtype=data.loan_subtype,
         secured_asset_id=data.secured_asset_id,
+        loan_details=loan_details,
     )
     session.add(account)
     await session.flush()  # get account.id without committing
@@ -377,7 +382,10 @@ async def update_account(
         update_data.get("type", account.type),
         update_data.get("loan_subtype"),
         update_data.get("secured_asset_id"),
+        update_data.get("loan_details"),
     )
+    if "loan_details" in update_data:
+        update_data["loan_details"] = normalize_user_loan_details(update_data["loan_details"])
 
     # Track whether we need to recompute effective_date for all transactions.
     # Changes to the CC cycle days shift which bill each historical purchase
@@ -394,10 +402,11 @@ async def update_account(
     # account creation and never overwrites it afterwards, so the override
     # survives subsequent syncs without a separate field. A connected account
     # may become a `loan` (its provider balance is already negative, and no
-    # read site negates a loan), and its loan subtype and secured asset are
-    # the user's to set.
+    # read site negates a loan), and its loan subtype, secured asset and loan
+    # details are the user's to set (sync later replaces only the detail keys
+    # the provider sends: loan_details.merge_provider_details).
     if account.connection_id is not None:
-        loan_fields = {"loan_subtype", "secured_asset_id"}
+        loan_fields = {"loan_subtype", "secured_asset_id", "loan_details"}
         editable_fields = {
             "display_name",
             "type",

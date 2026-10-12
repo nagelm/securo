@@ -53,8 +53,9 @@ class Account(Base):
     # Loan accounts (type="loan"). A loan's balance is negative: the amount
     # owed. `loan_subtype` is display only. `secured_asset_id` links the loan
     # to the asset it is secured against (many loans per asset); deleting the
-    # asset unlinks it. `loan_details` holds provider loan facts written by
-    # sync and is never read by P&L, budget or net-worth code. All three are
+    # asset unlinks it. `loan_details` holds loan facts in Akahu's shape,
+    # entered by the user or merged in by sync (app.services.loan_details),
+    # and is never read by P&L, budget or net-worth code. All three are
     # cleared when the account stops being a loan.
     loan_subtype: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     secured_asset_id: Mapped[Optional[uuid.UUID]] = mapped_column(
