@@ -1282,11 +1282,11 @@
       },
       "akahu": {
         "title": "Connect via Akahu",
-        "description": "Akahu reads New Zealand bank, card and KiwiSaver accounts. Create a Personal App at my.akahu.nz, link your accounts to it, then enter both of its tokens. Akahu needs both for every request.",
-        "openBridge": "Open Akahu developer settings",
-        "appTokenLabel": "App ID Token",
+        "description": "Uses an Akahu personal app: 1 user, restricted to your own Akahu account. You can get your App + User tokens by signing into Akahu and going to the \"Developers\" page.",
+        "openBridge": "Open the Akahu Developers page",
         "userTokenLabel": "User Access Token",
-        "tokenHelp": "Both are shown on your Personal App's page at my.akahu.nz: the App ID Token starts with app_token_ and the User Access Token with user_token_. Securo stores them encrypted."
+        "appTokenLabel": "App ID Token",
+        "tokenHelp": "Akahu requires both on every request: the User Access Token in the Authorization header and the App ID Token in the X-Akahu-Id header. Securo stores them encrypted."
       },
       "reconnectTitle": "新しいトークンで再接続",
       "reconnectDescription": "新しいセットアップトークンを貼り付けて、この接続をその場で更新します。既存の口座、取引、カテゴリ、ルールは保持されます。",

@@ -34,8 +34,8 @@ const PROVIDER_BRIDGE_URLS: Record<string, string> = {
 // space for the provider, which picks them apart by their prefixes.
 const PROVIDER_TOKEN_FIELDS: Record<string, { key: string; placeholder: string }[]> = {
   akahu: [
-    { key: 'appToken', placeholder: 'app_token_…' },
     { key: 'userToken', placeholder: 'user_token_…' },
+    { key: 'appToken', placeholder: 'app_token_…' },
   ],
 }
 
