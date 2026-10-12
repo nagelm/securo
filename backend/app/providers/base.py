@@ -57,7 +57,7 @@ def mask_last4(value: Optional[str]) -> Optional[str]:
 class AccountData:
     external_id: str
     name: str
-    type: str  # checking, savings, credit_card
+    type: str  # checking, savings, credit_card, loan
     balance: Decimal
     currency: str
     credit_limit: Optional[Decimal] = None
@@ -78,6 +78,13 @@ class AccountData:
     institution_external_id: Optional[str] = None
     institution_name: Optional[str] = None
     institution_logo_url: Optional[str] = None
+    # Loans only (type="loan"). Provider loan facts (rate, term, maturity,
+    # repayment), JSON-safe and display only: the sync layer stores them on
+    # the account, and nothing that totals money reads them. `loan_subtype`
+    # is a suggestion (account_service.LOAN_SUBTYPES), used only while the
+    # account has none.
+    loan_details: Optional[dict] = None
+    loan_subtype: Optional[str] = None
 
 
 @dataclass
