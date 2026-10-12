@@ -614,7 +614,7 @@ RULE_PACKS: dict[str, dict[str, Any]] = {
 
             {"name": "NZ department and electronics stores", "conditions_op": "and", "conditions": [
                 {"field": "description", "op": "regex",
-                 "value": r"THE WAREHOUSE|\bKMART\b|BRISCOES|\bFARMERS\b|NOEL LEEMING|HARVEY NORMAN|JB HI|PB TECH|"
+                 "value": r"THE WAREHOUSE|\bKMART\b|BRISCOES|\bFARMERS(?! MARKET)|NOEL LEEMING|HARVEY NORMAN|JB HI|PB TECH|"
                           r"REBEL SPORT|TORPEDO7|TRADE ME"},
             ], "actions": [{"op": "set_category", "value": "shopping"}], "priority": 10},
 
