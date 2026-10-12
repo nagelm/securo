@@ -1335,10 +1335,11 @@
       },
       "akahu": {
         "title": "Connect via Akahu",
-        "description": "Akahu reads New Zealand bank, card and KiwiSaver accounts. Create a Personal App at my.akahu.nz, link your accounts there, and paste its User Access Token here.",
+        "description": "Akahu reads New Zealand bank, card and KiwiSaver accounts. Create a Personal App at my.akahu.nz, link your accounts to it, then enter both of its tokens. Akahu needs both for every request.",
         "openBridge": "Open Akahu developer settings",
-        "tokenLabel": "User Access Token",
-        "tokenHelp": "Paste the token that starts with user_token_. To use a different Personal App than the server's, paste its App ID Token (app_token_…) as well. Both are stored encrypted."
+        "appTokenLabel": "App ID Token",
+        "userTokenLabel": "User Access Token",
+        "tokenHelp": "Both are shown on your Personal App's page at my.akahu.nz: the App ID Token starts with app_token_ and the User Access Token with user_token_. Securo stores them encrypted."
       },
       "reconnectTitle": "Połącz ponownie za pomocą nowego tokenu",
       "reconnectDescription": "Wklej nowy token konfiguracji, aby odświeżyć to połączenie bez jego usuwania. Istniejące konta, transakcje, kategorie i reguły zostaną zachowane.",

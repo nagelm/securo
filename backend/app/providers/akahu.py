@@ -7,11 +7,10 @@ own accounts, and gets two tokens - an App ID Token (``app_token_...``) and a
 User Access Token (``user_token_...``). Every request carries
 ``Authorization: Bearer <user token>`` and ``X-Akahu-Id: <app token>``.
 
-The connection flow reuses the paste-a-token dialog (``flow_type = "token"``).
-The pasted text must contain the user token; it may also contain the app
-token, which then overrides ``AKAHU_APP_TOKEN`` for this connection (so two
-household members with their own Personal Apps can each connect). Both tokens
-are stored encrypted, never in plain text.
+The connection flow reuses the token dialog (``flow_type = "token"``), which
+asks for both tokens; Akahu needs both on every request. They are stored
+encrypted per connection, so each household member connects their own
+Personal App.
 
 What is mapped, and why some things are not:
 
@@ -147,16 +146,17 @@ _CARD_NUMBER_RE = re.compile(r"\b\d{4}[-\s]?[*xX]{4}[-\s]?[*xX]{4}[-\s]?\d{4}\b"
 _NZ_ACCOUNT_RE = re.compile(r"\b\d{2}[-\s]?\d{4}[-\s]?\d{7}[-\s]?\d{2,3}\b")
 
 
-def parse_tokens(raw: str) -> tuple[str, Optional[str]]:
-    """(user token, app token or None) from the pasted text."""
+def parse_tokens(raw: str) -> tuple[str, str]:
+    """(user token, app token) from the submitted text; both are required."""
     text = raw or ""
     user = _USER_TOKEN_RE.search(text)
-    if not user:
-        raise ValueError(
-            "Paste the Akahu User Access Token (it starts with user_token_)"
-        )
     app = _APP_TOKEN_RE.search(text)
-    return user.group(0), app.group(0) if app else None
+    if not user or not app:
+        raise ValueError(
+            "Akahu needs both the App ID Token (app_token_...) and the "
+            "User Access Token (user_token_...)"
+        )
+    return user.group(0), app.group(0)
 
 
 def _to_decimal(value: Any) -> Optional[Decimal]:
@@ -260,21 +260,10 @@ class AkahuProvider(BankProvider):
         return ""
 
     def _tokens(self, credentials: dict) -> tuple[str, str]:
-        from app.core.config import get_settings
-
         user_token = self._secret(credentials, "user_token")
-        if not user_token:
-            raise SessionExpiredError("Akahu user token is missing")
-        app_token = (
-            self._secret(credentials, "app_token")
-            or get_settings().akahu_app_token.get_secret_value()
-        )
-        if not app_token:
-            raise ProviderUserActionRequired(
-                "No Akahu App ID Token: set AKAHU_APP_TOKEN or paste both tokens",
-                code="credentials_invalid",
-                help_url=AKAHU_HELP_URL,
-            )
+        app_token = self._secret(credentials, "app_token")
+        if not user_token or not app_token:
+            raise SessionExpiredError("Akahu tokens are missing; reconnect with both tokens")
         return user_token, app_token
 
     async def _client(self, credentials: dict | None = None) -> httpx.AsyncClient:
@@ -330,11 +319,10 @@ class AkahuProvider(BankProvider):
         user_token, app_token = parse_tokens(code)
         credentials: dict[str, Any] = {
             "user_token_enc": encrypt(user_token),
+            "app_token_enc": encrypt(app_token),
             "connected_at": datetime.now(timezone.utc).isoformat(),
         }
-        if app_token:
-            credentials["app_token_enc"] = encrypt(app_token)
-        if not credentials["user_token_enc"] or (app_token and not credentials["app_token_enc"]):
+        if not credentials["user_token_enc"] or not credentials["app_token_enc"]:
             raise RuntimeError("Could not encrypt the Akahu tokens")
 
         me = (await self._request(credentials, "GET", "/me")).get("item") or {}

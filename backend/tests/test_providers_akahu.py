@@ -30,11 +30,8 @@ USER = "user_token_abc123"
 APP = "app_token_xyz789"
 
 
-def _creds(app: bool = True) -> dict:
-    creds = {"user_token_enc": encrypt(USER)}
-    if app:
-        creds["app_token_enc"] = encrypt(APP)
-    return creds
+def _creds() -> dict:
+    return {"user_token_enc": encrypt(USER), "app_token_enc": encrypt(APP)}
 
 
 def _patched(handler):
@@ -84,17 +81,15 @@ def _txn(**over) -> dict:
 # ----- pure helpers -----------------------------------------------------------
 
 
-def test_parse_tokens_user_only():
-    assert parse_tokens(f"  {USER}\n") == (USER, None)
-
-
 def test_parse_tokens_both_in_any_order():
     assert parse_tokens(f"{APP} {USER}") == (USER, APP)
+    assert parse_tokens(f"  {USER}\n{APP} ") == (USER, APP)
 
 
-def test_parse_tokens_requires_user_token():
+@pytest.mark.parametrize("raw", [USER, APP, "", "nonsense"])
+def test_parse_tokens_requires_both(raw):
     with pytest.raises(ValueError):
-        parse_tokens(APP)
+        parse_tokens(raw)
 
 
 def test_clean_description_drops_numbers_and_shouting():
@@ -147,31 +142,9 @@ async def test_requests_carry_both_tokens():
 
 
 @pytest.mark.asyncio
-async def test_app_token_falls_back_to_settings():
-    seen = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["app"] = request.headers.get("x-akahu-id")
-        return httpx.Response(200, json={"success": True, "items": []})
-
-    from app.core.config import get_settings
-    from pydantic import SecretStr
-
-    settings = get_settings()
-    with patch.object(settings, "akahu_app_token", SecretStr("app_token_from_env")), _patched(handler):
-        await AkahuProvider().get_accounts(_creds(app=False))
-    assert seen["app"] == "app_token_from_env"
-
-
-@pytest.mark.asyncio
-async def test_missing_app_token_needs_user_action():
-    from app.core.config import get_settings
-    from pydantic import SecretStr
-
-    settings = get_settings()
-    with patch.object(settings, "akahu_app_token", SecretStr("")):
-        with pytest.raises(ProviderUserActionRequired):
-            await AkahuProvider().get_accounts(_creds(app=False))
+async def test_missing_app_token_is_session_expired():
+    with pytest.raises(SessionExpiredError):
+        await AkahuProvider().get_accounts({"user_token_enc": encrypt(USER)})
 
 
 @pytest.mark.asyncio
