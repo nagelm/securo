@@ -1291,6 +1291,8 @@ async def test_install_nz_rule_pack_resolves_every_rule(session: AsyncSession, t
 
 @pytest.mark.parametrize("description,tx_type,expected", [
     ("Kmart Example Mall", "debit", "NZ department and electronics stores"),
+    ("Farmers Online Order 0001", "debit", "NZ department and electronics stores"),
+    ("Farmers Market Example", "debit", None),
     ("Unichem Example Pharmacy", "debit", "NZ pharmacies"),
     ("POS W/D Example Dental C-", "debit", "NZ doctors, dentists and optometrists"),
     ("Direct Debit -EXAMPLE CITY COUNCIL", "debit", "NZ council rates"),
