@@ -27,14 +27,13 @@ async def categorise_loan_repayment_legs(
     session: AsyncSession,
     workspace_id: uuid.UUID,
     legs: Iterable[Optional[Transaction]],
-    *,
-    fallback_to_transfers: bool = False,
 ) -> None:
     """Put a repayment pair's legs in Loan repayments. Writes nothing else.
 
     Does nothing unless a credit leg is on a loan account. When the workspace
-    has no Loan repayments category the legs are left alone, or with
-    ``fallback_to_transfers`` put in Transfers instead. The caller commits.
+    has no Loan repayments category the legs are left alone (the caller,
+    `categorise_pair_legs`, then puts an uncategorised leg in Transfers).
+    The caller commits.
     """
     rows = [leg for leg in legs if leg is not None]
     credit_accounts = {leg.account_id for leg in rows if leg.type == "credit"}
@@ -50,8 +49,6 @@ async def categorise_loan_repayment_legs(
 
     transfers_id = await find_default_category(session, workspace_id, "transfers")
     target = await find_default_category(session, workspace_id, LOAN_REPAYMENTS_KEY)
-    if target is None and fallback_to_transfers:
-        target = transfers_id
     if target is None:
         return
 

@@ -60,7 +60,7 @@ from app.models.transaction import Transaction
 from app.services import reconciliation_policy
 from app.services import reconciliation_rule_service as rule_service
 from app.services import reconciliation_suggestion_service as suggestions
-from app.services.loan_repayment_category import categorise_loan_repayment_legs
+from app.services.transfer_pair_category import categorise_pair_legs
 from app.services.reconciliation_engine import (
     Decision,
     Expectation,
@@ -342,7 +342,7 @@ async def detect_transfer_pairs(
         pair_id = uuid.uuid4()
         tx.transfer_pair_id = pair_id
         other_tx.transfer_pair_id = pair_id
-        await categorise_loan_repayment_legs(session, workspace_id, (tx, other_tx))
+        await categorise_pair_legs(session, workspace_id, (tx, other_tx))
         paired.update({tx_id, other_id})
         pairs_created += 1
 

@@ -36,7 +36,7 @@ from app.services import account_service
 from app.services._query_filters import counts_as_user_pnl
 from app.services.credit_card_service import apply_effective_date
 from app.services.fx_rate_service import stamp_primary_amount
-from app.services.loan_repayment_category import categorise_loan_repayment_legs
+from app.services.transfer_pair_category import categorise_pair_legs
 from app.services.transaction_service import _add_transfer_legs, _pair_with_counterpart
 
 DEFAULT_DESCRIPTION = "Loan payment"
@@ -280,9 +280,7 @@ async def record_payment(
         if data.notes is not None:
             loan_tx.notes = data.notes
         apply_effective_date(loan_tx, loan)
-    await categorise_loan_repayment_legs(
-        session, workspace_id, (cash_tx, loan_tx), fallback_to_transfers=True
-    )
+    await categorise_pair_legs(session, workspace_id, (cash_tx, loan_tx))
 
     interest_tx: Optional[Transaction] = None
     if interest > 0:

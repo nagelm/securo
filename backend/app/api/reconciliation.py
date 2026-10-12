@@ -65,7 +65,7 @@ from app.services import (
     reconciliation_rule_service as rules,
     reconciliation_suggestion_service as suggestions,
 )
-from app.services.loan_repayment_category import categorise_loan_repayment_legs
+from app.services.transfer_pair_category import categorise_pair_legs
 from app.services.module_service import resolve_modules
 
 router = APIRouter(prefix="/api/reconciliation", tags=["reconciliation"])
@@ -569,7 +569,7 @@ async def _settle(
         pair_id = uuid.uuid4()
         for leg in legs:
             leg.transfer_pair_id = pair_id
-        await categorise_loan_repayment_legs(session, ctx.workspace.id, legs)
+        await categorise_pair_legs(session, ctx.workspace.id, legs)
         return
 
     if row.expectation_kind == "invoice":

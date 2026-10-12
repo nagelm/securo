@@ -142,16 +142,16 @@ async def test_create_transfer_into_a_loan_uses_loan_repayments(session, ledger)
 
 
 @pytest.mark.asyncio
-async def test_other_transfers_are_left_alone(session, ledger):
+async def test_other_transfers_get_transfers_not_loan_repayments(session, ledger):
     """Only money into a loan is a repayment: a drawdown out of the loan and a
-    transfer between two cash accounts keep no category, as before."""
+    transfer between two cash accounts go in Transfers, like any other pair."""
     for source, dest in ((ledger.loan, ledger.checking), (ledger.checking, ledger.savings)):
         debit, credit = await transaction_service.create_transfer(
             session, ledger.workspace.id, ledger.user.id,
             TransferCreate(from_account_id=source.id, to_account_id=dest.id,
                            amount=Decimal("800"), date=app_today(), description="Move"),
         )
-        assert await _categories(session, debit, credit) == [None, None]
+        assert await _categories(session, debit, credit) == [ledger.transfers, ledger.transfers]
 
 
 @pytest.mark.asyncio
@@ -206,13 +206,13 @@ async def test_manual_payment_falls_back_to_transfers_without_the_category(
     leg = await _fresh(session, Transaction, payment.loan_transaction_id)
     assert (cash.category_id, leg.category_id) == (ledger.transfers, ledger.transfers)
 
-    # A generic transfer into the loan has no fallback: it stays as it was.
+    # A generic transfer into the loan gets Transfers too, as every pair does.
     debit, credit = await transaction_service.create_transfer(
         session, test_workspace.id, test_user.id,
         TransferCreate(from_account_id=ledger.checking.id, to_account_id=ledger.loan.id,
                        amount=Decimal("100"), date=app_today(), description="Extra"),
     )
-    assert await _categories(session, debit, credit) == [None, None]
+    assert await _categories(session, debit, credit) == [ledger.transfers, ledger.transfers]
 
 
 @pytest.mark.asyncio
