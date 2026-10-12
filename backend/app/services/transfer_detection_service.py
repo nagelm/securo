@@ -192,6 +192,9 @@ async def _pool(
     query = select(Transaction).where(
         Transaction.workspace_id == workspace_id,
         Transaction.transfer_pair_id.is_(None),
+        # An ignored row is out of every total, so it is nobody's other half:
+        # a duplicate copy left in the pool would make its real twin ambiguous.
+        Transaction.is_ignored.is_(False),
     )
     if ignored_sources:
         query = query.where(Transaction.source.not_in(ignored_sources))

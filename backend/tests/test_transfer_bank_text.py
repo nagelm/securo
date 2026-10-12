@@ -148,3 +148,23 @@ async def test_linking_one_pair_retires_rivals_and_pairs_the_rest(session: Async
     assert created == 1
     assert d2.transfer_pair_id == c2.transfer_pair_id is not None
     assert await _pending(session) == []
+
+
+@pytest.mark.asyncio
+async def test_ignored_copy_is_not_a_transfer_candidate(session: AsyncSession, test_user, test_workspace):
+    """A duplicate marked Ignored no longer makes its real twin ambiguous."""
+    current = await _account(session, test_user.id, "Current", "1001")
+    rainy = await _account(session, test_user.id, "Rainy 90 Day", "1004")
+    debit = await _txn(session, test_user.id, current, 20, "debit", "AP#10000002 TO B JONES, A SMITH Rainy")
+    copy = await _txn(session, test_user.id, current, 20, "debit", "AP#10000002 TO B JONES, A SMITH Rainy")
+    credit = await _txn(session, test_user.id, rainy, 20, "credit", "AP#10000002 FROM A SMITH, B JONES Rainy")
+    copy.is_ignored = True
+    await session.commit()
+
+    assert await detect_transfer_pairs(session, test_workspace.id) == 1
+    await session.commit()
+    for tx in (debit, copy, credit):
+        await session.refresh(tx)
+    assert debit.transfer_pair_id == credit.transfer_pair_id is not None
+    assert copy.transfer_pair_id is None
+    assert await _pending(session) == []
