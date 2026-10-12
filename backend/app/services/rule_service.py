@@ -556,6 +556,100 @@ RULE_PACKS: dict[str, dict[str, Any]] = {
             ], "actions": [{"op": "set_category", "value": "housing"}], "priority": 10},
         ],
     },
+    "NZ": {
+        "name": "New Zealand",
+        "flag": "\U0001F1F3\U0001F1FF",
+        # NZ bank text puts the merchant anywhere in the line ("POS W/D",
+        # "Direct Debit -", "Windcave", card suffixes), so these match words,
+        # not prefixes. Power, phone and broadband go to Housing, as Akahu's
+        # NZFCC groups do.
+        "rules": [
+            {"name": "NZ supermarkets", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"WOOLWORTHS|COUNTDOWN|NEW WORLD|PAK ?N ?SAVE|FOUR SQUARE|FRESH CHOICE|SUPERVALUE|\bCOSTCO\b"},
+            ], "actions": [{"op": "set_category", "value": "groceries"}], "priority": 10},
+
+            {"name": "NZ food delivery", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"UBER ?EATS|DOORDASH|MENULOG|DELIVEREASY"},
+            ], "actions": [{"op": "set_category", "value": "food"}], "priority": 10},
+
+            {"name": "NZ takeaway and cafe chains", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"MCDONALD|\bKFC\b|BURGER KING|BURGER ?FUEL|\bSUBWAY\b|DOMINO|PIZZA HUT|HELL PIZZA|STARBUCKS|"
+                          r"MUFFIN BREAK|COFFEE CULTURE|\bMOJO\b"},
+            ], "actions": [{"op": "set_category", "value": "food"}], "priority": 10},
+
+            {"name": "NZ fuel", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"Z ENERGY|^Z |\bBP\b|\bMOBIL\b|\bGULL\b|WAITOMO|\bNPD\b|CALTEX|ALLIED PETROLEUM"},
+            ], "actions": [{"op": "set_category", "value": "transport"}], "priority": 10},
+
+            {"name": "NZ public transport", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"METLINK|AT HOP|SNAPPER|BEE CARD|KIWIRAIL|INTERCITY|\bMETRO CARD\b"},
+            ], "actions": [{"op": "set_category", "value": "transport"}], "priority": 10},
+
+            {"name": "NZ parking", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"WILSON PARKING|PARKMATE|CAREPARK|PAYBYPHONE|SMARTPARK"},
+            ], "actions": [{"op": "set_category", "value": "transport"}], "priority": 10},
+
+            {"name": "NZ power and gas", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"MERIDIAN|MERCURY|GENESIS|CONTACT ENERGY|TRUSTPOWER|ELECTRIC KIWI|FLICK ELECTRIC|NOVA ENERGY|"
+                          r"POWERSHOP|PULSE ENERGY|ROCKGAS"},
+            ], "actions": [{"op": "set_category", "value": "housing"}], "priority": 10},
+
+            {"name": "NZ phone and broadband", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"\bSPARK\b|ONE NZ|VODAFONE|2DEGREES|SKINNY|ORCON|SLINGSHOT|NOW NZ|VOYAGER|STUFF FIBRE"},
+            ], "actions": [{"op": "set_category", "value": "housing"}], "priority": 10},
+
+            {"name": "NZ council rates", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"CITY COUNCIL|DISTRICT COUNCIL|REGIONAL COUNCIL"},
+            ], "actions": [{"op": "set_category", "value": "housing"}], "priority": 10},
+
+            {"name": "NZ hardware stores", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"BUNNINGS|MITRE ?10|PLACEMAKERS"},
+            ], "actions": [{"op": "set_category", "value": "housing"}], "priority": 10},
+
+            {"name": "NZ department and electronics stores", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"THE WAREHOUSE|\bKMART\b|BRISCOES|\bFARMERS\b|NOEL LEEMING|HARVEY NORMAN|JB HI|PB TECH|"
+                          r"REBEL SPORT|TORPEDO7|TRADE ME"},
+            ], "actions": [{"op": "set_category", "value": "shopping"}], "priority": 10},
+
+            {"name": "NZ pharmacies", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"UNICHEM|LIFE PHARMACY|CHEMIST WAREHOUSE|PHARMACY"},
+            ], "actions": [{"op": "set_category", "value": "health"}], "priority": 10},
+
+            {"name": "NZ doctors, dentists and optometrists", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"MEDICAL CENTRE|HEALTH CENTRE|\bDENTAL\b|DENTIST|PHYSIO|SPECSAVERS|\bOPSM\b"},
+            ], "actions": [{"op": "set_category", "value": "health"}], "priority": 10},
+
+            {"name": "NZ gyms", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"LES MILLS|CITYFITNESS|ANYTIME FITNESS|\bJETTS\b|SNAP FITNESS"},
+            ], "actions": [{"op": "set_category", "value": "health"}], "priority": 10},
+
+            {"name": "NZ streaming", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"\bNEON\b|SKY NETWORK|SKY TV|\bSKY GO\b|TVNZ"},
+            ], "actions": [{"op": "set_category", "value": "subscriptions"}], "priority": 10},
+
+            {"name": "NZ early childhood", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"KINDERGARTEN|PLAYCENTRE|\bKINDY\b|EDUCARE"},
+                {"field": "type", "op": "equals", "value": "debit"},
+            ], "actions": [{"op": "set_category", "value": "education"}], "priority": 10},
+
+            {"name": "Inland Revenue (IRD)", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"INLAND REVENUE|\bIRD\b"},
+            ], "actions": [{"op": "set_category", "value": "taxes"}], "priority": 10},
+
+            {"name": "NZ charities", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"GIVEALITTLE|RED CROSS|\bSPCA\b|WORLD VISION|UNICEF|STARSHIP FOUNDATION|CANCER SOCIETY|DONATION"},
+            ], "actions": [{"op": "set_category", "value": "donations"}], "priority": 10},
+        ],
+    },
 }
 
 # Map currency code -> default rule pack country
@@ -564,6 +658,7 @@ CURRENCY_TO_PACK = {
     "USD": "US",
     "EUR": "EU",
     "GBP": "GB",
+    "NZD": "NZ",
 }
 
 

@@ -1280,6 +1280,41 @@ async def test_install_rule_pack_works_across_languages(session: AsyncSession, t
 
 
 @pytest.mark.asyncio
+async def test_install_nz_rule_pack_resolves_every_rule(session: AsyncSession, test_user, test_workspace):
+    await create_default_categories(session, test_user.id, lang="en")
+
+    result = await install_rule_pack(session, test_workspace.id, test_user.id, "NZ", lang="en")
+
+    assert len(result.rules) == len(RULE_PACKS["NZ"]["rules"])
+    assert result.unresolved == 0
+
+
+@pytest.mark.parametrize("description,tx_type,expected", [
+    ("Kmart Example Mall", "debit", "NZ department and electronics stores"),
+    ("Unichem Example Pharmacy", "debit", "NZ pharmacies"),
+    ("POS W/D Example Dental C-", "debit", "NZ doctors, dentists and optometrists"),
+    ("Direct Debit -EXAMPLE CITY COUNCIL", "debit", "NZ council rates"),
+    ("Pak N Save Example", "debit", "NZ supermarkets"),
+    ("BP 2go Example", "debit", "NZ fuel"),
+    ("2degrees Mobile Example", "debit", "NZ phone and broadband"),
+    ("Example Playcentre", "debit", "NZ early childhood"),
+    ("IRD tax deduction example", "debit", "Inland Revenue (IRD)"),
+    ("SkyCity Auckland", "debit", None),
+    ("Benefit payment MSD", "credit", None),
+])
+def test_nz_rule_pack_matches_nz_bank_text(description, tx_type, expected):
+    from types import SimpleNamespace
+
+    from app.services.rule_engine import evaluate_conditions
+
+    tx = SimpleNamespace(description=description, type=tx_type, payee=None, notes=None, amount=Decimal("10"),
+                         account_id=None, payee_id=None, date=date(2026, 10, 12), status="posted")
+    hits = [r["name"] for r in RULE_PACKS["NZ"]["rules"]
+            if evaluate_conditions(r["conditions_op"], r["conditions"], tx)]
+    assert hits == ([expected] if expected else [])
+
+
+@pytest.mark.asyncio
 async def test_install_rule_pack_reports_unresolved_when_categories_missing(
     session: AsyncSession, test_user, test_workspace
 ):
