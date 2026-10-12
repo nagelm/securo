@@ -590,3 +590,132 @@ async def test_card_debt_sign_depends_on_connection_type():
     with _patched(lambda r: httpx.Response(200, json={"success": True, "items": accounts})):
         result = {a.external_id: a.balance for a in await AkahuProvider().get_accounts(_creds())}
     assert result == {"acc_classic": Decimal("1234.56"), "acc_official": Decimal("250.0")}
+
+
+# ----- loans ------------------------------------------------------------------
+
+
+def _loan(**over) -> dict:
+    """A fictional Akahu home loan: every figure is made up."""
+    loan = _account(
+        _id="acc_loan",
+        name="Home Loan",
+        type="LOAN",
+        formatted_account="12-3456-0999999-90",
+        balance={"currency": "NZD", "current": -300000.0},
+        meta={"loan_details": {
+            "purpose": "HOME",
+            "type": "TABLE",
+            "interest": {"rate": 5.25, "type": "FIXED", "expires_at": "2027-06-01T00:00:00Z",
+                         "margin": "not documented"},
+            "is_interest_only": False,
+            "term": {"years": 25, "months": 0},
+            "matures_at": "2049-01-01T00:00:00Z",
+            "initial_principal": 350000,
+            "repayment": {"frequency": "MONTHLY", "next_date": "2026-11-01T00:00:00Z",
+                          "next_amount": 2000.0, "account": "12-3456-0123456-00"},
+            "borrower": {"name": "Not documented"},
+        }},
+    )
+    loan.update(over)
+    return loan
+
+
+@pytest.mark.asyncio
+async def test_loan_becomes_a_loan_account_with_its_details():
+    with _patched(lambda r: httpx.Response(200, json={"success": True, "items": [_loan()]})):
+        (loan,) = await AkahuProvider().get_accounts(_creds())
+    assert loan.type == "loan"
+    assert loan.balance == Decimal("-300000.0")  # Akahu's sign: negative = owed
+    assert loan.loan_subtype == "mortgage"
+    assert loan.loan_details == {
+        "purpose": "HOME",
+        "type": "TABLE",
+        "interest": {"rate": 5.25, "type": "FIXED", "expires_at": "2027-06-01T00:00:00Z"},
+        "is_interest_only": False,
+        "term": {"years": 25, "months": 0},
+        "matures_at": "2049-01-01T00:00:00Z",
+        "initial_principal": 350000,
+        "repayment": {"frequency": "MONTHLY", "next_date": "2026-11-01T00:00:00Z",
+                      "next_amount": 2000.0},
+    }
+    assert loan.credit_limit is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("purpose", ["PERSONAL", "UNKNOWN", None])
+async def test_loan_subtype_only_from_a_home_purpose(purpose):
+    raw = _loan(meta={"loan_details": {"purpose": purpose, "interest": {"rate": 9.9}}})
+    with _patched(lambda r: httpx.Response(200, json={"success": True, "items": [raw]})):
+        (loan,) = await AkahuProvider().get_accounts(_creds())
+    assert loan.loan_subtype is None
+    assert loan.loan_details is not None
+    assert loan.loan_details["interest"] == {"rate": 9.9}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("meta", [None, {}, {"loan_details": None}, {"loan_details": "n/a"},
+                                  {"loan_details": {"borrower": "x", "interest": {"bank": "x"}}}])
+async def test_loan_without_usable_details(meta):
+    raw = _loan(meta=meta)
+    with _patched(lambda r: httpx.Response(200, json={"success": True, "items": [raw]})):
+        (loan,) = await AkahuProvider().get_accounts(_creds())
+    assert loan.type == "loan"
+    assert loan.loan_details is None
+    assert loan.loan_subtype is None
+
+
+@pytest.mark.asyncio
+async def test_loan_details_only_on_loans():
+    raw = _account(meta={"loan_details": {"purpose": "HOME"}})
+    with _patched(lambda r: httpx.Response(200, json={"success": True, "items": [raw]})):
+        (acc,) = await AkahuProvider().get_accounts(_creds())
+    assert acc.type == "checking"
+    assert acc.loan_details is None and acc.loan_subtype is None
+
+
+@pytest.mark.parametrize("akahu_type,amount,expected", [
+    ("TRANSFER", 2000, "transfers"),       # repayment into the loan
+    ("CREDIT", 2000, "transfers"),         # any money in is a repayment
+    ("LOAN", -1200, "loan_interest"),      # interest charged on the loan
+    ("INTEREST", -1200, "loan_interest"),
+    ("FEE", -10, "taxes"),                 # anything else falls through
+])
+def test_category_hints_on_a_loan_account(akahu_type, amount, expected):
+    raw = _txn(type=akahu_type, amount=amount, category=None, merchant=None)
+    assert category_hint_for(raw, account_type="LOAN") == expected
+
+
+def test_loan_hints_apply_only_on_loan_accounts():
+    raw = _txn(type="LOAN", amount=-1200, category=None, merchant=None)
+    assert category_hint_for(raw) is None
+    assert category_hint_for(raw, account_type="CHECKING") is None
+    interest = _txn(type="INTEREST", amount=-3, category=None, merchant=None)
+    assert category_hint_for(interest, account_type="CHECKING") == "taxes"
+
+
+def test_loan_interest_beats_a_lending_category():
+    raw = _txn(type="LOAN", amount=-1200, merchant=None,
+               category={"name": "Lending services"})
+    assert category_hint_for(raw, account_type="LOAN") == "loan_interest"
+    assert category_hint_for(raw, account_type="CHECKING") == "other"
+
+
+@pytest.mark.asyncio
+async def test_get_transactions_on_a_loan_uses_the_loan_hints():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/accounts"):
+            return httpx.Response(200, json={"success": True, "items": [_account(), _loan()]})
+        return httpx.Response(200, json={"success": True, "cursor": {}, "items": [
+            _txn(_id="t_rep", _account="acc_loan", type="TRANSFER", amount=2000,
+                 category=None, merchant=None),
+            _txn(_id="t_int", _account="acc_loan", type="LOAN", amount=-1200,
+                 category=None, merchant=None),
+        ]})
+
+    with _patched(handler):
+        txns = await AkahuProvider().get_transactions(_creds(), "acc_loan")
+    assert {t.external_id: (t.type, t.category_hint) for t in txns} == {
+        "t_rep": ("credit", "transfers"),
+        "t_int": ("debit", "loan_interest"),
+    }

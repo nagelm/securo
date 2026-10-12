@@ -34,6 +34,13 @@ What is mapped, and why some things are not:
   accounts), payments into an investment account (its ``payment_details``
   account number), the NZFCC category or its personal-finance group, and for
   rows Akahu leaves uncategorised the transaction type (interest, fees, tax).
+  On a loan account, money in is a repayment (``transfers``) and money out of
+  Akahu type ``LOAN`` or ``INTEREST`` is the lender's interest
+  (``loan_interest``: a "Loan interest" category, else Taxes & Fees).
+* **Loans** become ``loan`` accounts with the balance Akahu sends (negative =
+  owed). ``meta.loan_details`` (rate, term, maturity, repayment) is kept as
+  the account's ``loan_details``, display only; a ``HOME`` purpose makes the
+  loan a mortgage.
 * **Particulars, code and reference** go to the transaction's notes, and the
   merchant's website to its payee.
 
@@ -91,11 +98,30 @@ _ACCOUNT_TYPE_MAP = {
     "SAVINGS": "savings",
     "TERMDEPOSIT": "savings",
     "CREDITCARD": "credit_card",
-    "LOAN": "checking",
+    "LOAN": "loan",
     "FOREIGN": "checking",
     "TAX": "checking",
     "REWARDS": "checking",
 }
+
+# The documented keys of an account's `meta.loan_details`
+# (https://developers.akahu.nz/docs/the-account-model); every one is optional.
+# A nested object lists its own keys; None means an object of any scalar
+# fields, or a scalar (the shape of `term` is not documented).
+_LOAN_DETAIL_KEYS: dict[str, Optional[tuple[str, ...]]] = {
+    "purpose": (),
+    "type": (),
+    "interest": ("rate", "type", "expires_at"),
+    "is_interest_only": (),
+    "interest_only_expires_at": (),
+    "term": None,
+    "matures_at": (),
+    "initial_principal": (),
+    "repayment": ("frequency", "next_date", "next_amount"),
+}
+# Akahu loan purpose -> Securo loan subtype. Only HOME has a clear meaning;
+# any other purpose leaves the subtype for the user to pick.
+_LOAN_PURPOSE_SUBTYPES = {"HOME": "mortgage"}
 
 _USER_TOKEN_RE = re.compile(r"user_token_[A-Za-z0-9_\-]+")
 _APP_TOKEN_RE = re.compile(r"app_token_[A-Za-z0-9_\-]+")
@@ -253,17 +279,73 @@ def account_digits(value: Any) -> str:
     return digits if len(digits) >= 8 else ""
 
 
+def _loan_scalar(value: Any) -> Any:
+    """A JSON-safe scalar from the feed, or None for anything else."""
+    if isinstance(value, (bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if Decimal(str(value)).is_finite() else None
+    if isinstance(value, str):
+        return value[:100]
+    return None
+
+
+def loan_details_for(raw_account: dict) -> Optional[dict]:
+    """The documented keys of ``meta.loan_details``, JSON-safe, or None.
+
+    Display only: nothing that totals money reads it.
+    """
+    details = (raw_account.get("meta") or {}).get("loan_details")
+    if not isinstance(details, dict):
+        return None
+    kept: dict[str, Any] = {}
+    for key, sub_keys in _LOAN_DETAIL_KEYS.items():
+        value = details.get(key)
+        if isinstance(value, dict) and sub_keys != ():
+            nested = {
+                k: scalar
+                for k, v in value.items()
+                if isinstance(k, str)
+                and (sub_keys is None or k in sub_keys)
+                and (scalar := _loan_scalar(v)) is not None
+            }
+            if nested:
+                kept[key] = dict(list(nested.items())[:10])
+        elif not isinstance(value, dict):
+            scalar = _loan_scalar(value)
+            if scalar is not None:
+                kept[key] = scalar
+    return kept or None
+
+
+def loan_subtype_for(loan_details: Optional[dict]) -> Optional[str]:
+    """Securo loan subtype from the loan's purpose, or None when it isn't clear."""
+    purpose = (loan_details or {}).get("purpose")
+    return _LOAN_PURPOSE_SUBTYPES.get(str(purpose).upper()) if purpose else None
+
+
 def category_hint_for(
     raw: dict,
     own_accounts: frozenset[str] = frozenset(),
     investment_accounts: frozenset[str] = frozenset(),
+    account_type: Optional[str] = None,
 ) -> Optional[str]:
     """Securo default-category key for an Akahu transaction, or None.
 
     ``own_accounts`` are the digits of the user's own account numbers;
     ``investment_accounts`` the digits of the bank accounts their investment
     and KiwiSaver providers take payments into (account ``payment_details``).
+    ``account_type`` is the Akahu type of the account the row is on. On a
+    ``LOAN`` account money in is a repayment, and money out of type ``LOAN``
+    or ``INTEREST`` is interest; any other row on a loan falls through to the
+    ordinary rules.
     """
+    if str(account_type or "").upper() == "LOAN":
+        loan_amount = _to_decimal(raw.get("amount"))
+        if loan_amount is not None and loan_amount > 0:
+            return "transfers"
+        if loan_amount is not None and loan_amount < 0 and raw.get("type") in ("LOAN", "INTEREST"):
+            return "loan_interest"
     other = account_digits((raw.get("meta") or {}).get("other_account"))
     if raw.get("type") == "TRANSFER" or (other and other in own_accounts):
         return "transfers"
@@ -559,6 +641,7 @@ class AkahuProvider(BankProvider):
             balance_obj = raw.get("balance") or {}
             balance = _to_decimal(balance_obj.get("current")) or Decimal("0")
             account_type = _ACCOUNT_TYPE_MAP.get(akahu_type, "checking")
+            loan_details = loan_details_for(raw) if account_type == "loan" else None
             connection = raw.get("connection") or {}
             if account_type == "credit_card" and connection.get("connection_type") != "official":
                 # Securo's convention is a positive number for card debt.
@@ -582,6 +665,8 @@ class AkahuProvider(BankProvider):
                     institution_external_id=str(connection["_id"]) if connection.get("_id") else None,
                     institution_name=connection.get("name"),
                     institution_logo_url=connection.get("logo"),
+                    loan_details=loan_details,
+                    loan_subtype=loan_subtype_for(loan_details),
                 )
             )
         return accounts
@@ -629,6 +714,7 @@ class AkahuProvider(BankProvider):
         }
 
         currency = _iso_currency((raw_acc.get("balance") or {}).get("currency"), "NZD")
+        akahu_account_type = str(raw_acc.get("type") or "").upper()
         transactions: list[TransactionData] = []
         seen: set[str] = set()
         path = f"/accounts/{account_external_id}/transactions"
@@ -639,7 +725,8 @@ class AkahuProvider(BankProvider):
                 raise RuntimeError("Akahu returned no transaction list")
             for raw in items:
                 parsed = self._build_transaction(
-                    raw, currency, payee_source, own_accounts, investment_accounts
+                    raw, currency, payee_source, own_accounts, investment_accounts,
+                    akahu_account_type,
                 )
                 if parsed and parsed.external_id not in seen:
                     seen.add(parsed.external_id)
@@ -657,6 +744,7 @@ class AkahuProvider(BankProvider):
         payee_source: str,
         own_accounts: frozenset[str] = frozenset(),
         investment_accounts: frozenset[str] = frozenset(),
+        account_type: Optional[str] = None,
     ) -> Optional[TransactionData]:
         if not isinstance(raw, dict) or not raw.get("_id"):
             return None
@@ -702,7 +790,9 @@ class AkahuProvider(BankProvider):
             status="posted",
             payee=payee,
             raw_data=raw,
-            category_hint=category_hint_for(raw, own_accounts, investment_accounts),
+            category_hint=category_hint_for(
+                raw, own_accounts, investment_accounts, account_type=account_type
+            ),
             notes=notes_for(raw),
             payee_website=payee_website,
             payee_logo_url=payee_logo_url,
