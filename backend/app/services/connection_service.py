@@ -904,6 +904,13 @@ EXTRA_CATEGORY_HINTS = {
     "loan_interest": ("Loan interest", "taxes"),
 }
 
+# Hint keys that name a default category a workspace seeded before that
+# default existed may lack: hint -> (default-category key, fallback key).
+FALLBACK_CATEGORY_HINTS = {
+    # Money into a loan account: principal repaid (Akahu).
+    "loan_repayment": ("loan_repayments", "transfers"),
+}
+
 
 async def _match_category_hint(
     session: AsyncSession,
@@ -933,21 +940,16 @@ async def _match_category_hint(
         if found is not None:
             return found
         category_hint = fallback
-    from app.services.category_service import DEFAULT_CATEGORIES_I18N
+    from app.services.category_service import find_default_category
 
-    names = [
-        value
-        for key, value in (DEFAULT_CATEGORIES_I18N.get(category_hint) or {}).items()
-        if key not in ("icon", "color", "treat_as_transfer") and isinstance(value, str)
-    ]
-    if not names:
-        return None
-    result = await session.execute(
-        select(Category.id)
-        .where(Category.workspace_id == workspace_id, Category.name.in_(names))
-        .limit(1)
-    )
-    return result.scalars().first()
+    preferred = FALLBACK_CATEGORY_HINTS.get(category_hint)
+    if preferred is not None:
+        key, fallback = preferred
+        found = await find_default_category(session, workspace_id, key)
+        if found is not None:
+            return found
+        category_hint = fallback
+    return await find_default_category(session, workspace_id, category_hint)
 
 
 async def _match_provider_category(

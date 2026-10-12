@@ -34,9 +34,10 @@ What is mapped, and why some things are not:
   accounts), payments into an investment account (its ``payment_details``
   account number), the NZFCC category or its personal-finance group, and for
   rows Akahu leaves uncategorised the transaction type (interest, fees, tax).
-  On a loan account, money in is a repayment (``transfers``) and money out of
-  Akahu type ``LOAN`` or ``INTEREST`` is the lender's interest
-  (``loan_interest``: a "Loan interest" category, else Taxes & Fees).
+  On a loan account, money in is a repayment of principal (``loan_repayment``:
+  the Loan repayments category, else Transfers) and money out of Akahu type
+  ``LOAN`` or ``INTEREST`` is the lender's interest (``loan_interest``: a
+  "Loan interest" category, else Taxes & Fees).
 * **Loans** become ``loan`` accounts with the balance Akahu sends (negative =
   owed). ``meta.loan_details`` (rate, term, maturity, repayment) is kept as
   the account's ``loan_details``, display only; a ``HOME`` purpose makes the
@@ -128,7 +129,8 @@ _APP_TOKEN_RE = re.compile(r"app_token_[A-Za-z0-9_\-]+")
 
 # NZFCC (https://nzfcc.org) category or personal-finance group -> Securo
 # default-category key (app.services.category_service.DEFAULT_CATEGORIES_I18N),
-# or an extra hint key the sync layer resolves (connection_service.EXTRA_CATEGORY_HINTS).
+# or an extra hint key the sync layer resolves (connection_service.EXTRA_CATEGORY_HINTS,
+# FALLBACK_CATEGORY_HINTS).
 # Specific categories first; the group catches the rest. Income categories
 # have no personal-finance group, so they are matched by name.
 NZFCC_CATEGORY_HINTS = {
@@ -343,7 +345,7 @@ def category_hint_for(
     if str(account_type or "").upper() == "LOAN":
         loan_amount = _to_decimal(raw.get("amount"))
         if loan_amount is not None and loan_amount > 0:
-            return "transfers"
+            return "loan_repayment"
         if loan_amount is not None and loan_amount < 0 and raw.get("type") in ("LOAN", "INTEREST"):
             return "loan_interest"
     other = account_digits((raw.get("meta") or {}).get("other_account"))

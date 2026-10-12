@@ -675,8 +675,8 @@ async def test_loan_details_only_on_loans():
 
 
 @pytest.mark.parametrize("akahu_type,amount,expected", [
-    ("TRANSFER", 2000, "transfers"),       # repayment into the loan
-    ("CREDIT", 2000, "transfers"),         # any money in is a repayment
+    ("TRANSFER", 2000, "loan_repayment"),  # repayment into the loan
+    ("CREDIT", 2000, "loan_repayment"),    # any money in is a repayment
     ("LOAN", -1200, "loan_interest"),      # interest charged on the loan
     ("INTEREST", -1200, "loan_interest"),
     ("FEE", -10, "taxes"),                 # anything else falls through
@@ -716,6 +716,6 @@ async def test_get_transactions_on_a_loan_uses_the_loan_hints():
     with _patched(handler):
         txns = await AkahuProvider().get_transactions(_creds(), "acc_loan")
     assert {t.external_id: (t.type, t.category_hint) for t in txns} == {
-        "t_rep": ("credit", "transfers"),
+        "t_rep": ("credit", "loan_repayment"),
         "t_int": ("debit", "loan_interest"),
     }

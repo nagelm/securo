@@ -5874,3 +5874,64 @@ async def test_new_loan_interest_rows_take_the_hint_unless_a_rule_categorises_th
         ).scalars()
     }
     assert cats == {"int-1": loan_interest.id, "int-2": ruled.id}
+
+
+# ---------------------------------------------------------------------------
+# Akahu loans: loan-repayment hint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transfers,repayments", [
+    ("Transfers", "Loan repayments"),
+    ("Umbuchungen", "Kredittilgungen"),
+])
+async def test_match_category_hint_loan_repayment_prefers_loan_repayments_then_transfers(
+    session: AsyncSession, test_user, test_workspace, transfers, repayments
+):
+    """A workspace seeded before Loan repayments existed falls back to Transfers."""
+    assert await _match_category_hint(session, test_workspace.id, "loan_repayment") is None
+    transfers_cat = await _make_category(session, test_user.id, transfers)
+    assert await _match_category_hint(session, test_workspace.id, "loan_repayment") == transfers_cat.id
+    own = await _make_category(session, test_user.id, repayments)
+    assert await _match_category_hint(session, test_workspace.id, "loan_repayment") == own.id
+    assert await _match_category_hint(session, test_workspace.id, "loan_repayment", enabled=False) is None
+
+
+@pytest.mark.asyncio
+async def test_new_loan_repayment_rows_take_the_hint_unless_a_rule_categorises_them(
+    session: AsyncSession, test_user, test_workspace
+):
+    conn = await _akahu_connection(session, test_user.id)
+    await _make_category(session, test_user.id, "Transfers")
+    repayments = await _make_category(session, test_user.id, "Loan repayments")
+    ruled = await _make_category(session, test_user.id, "Extra repayments")
+    await create_rule(
+        session,
+        test_workspace.id,
+        test_user.id,
+        RuleCreate(
+            name="Extra repayments",
+            conditions=[RuleCondition(field="description", op="contains", value="RULED")],
+            actions=[RuleAction(op="set_category", value=str(ruled.id))],
+            apply_to_existing=False,
+        ),
+    )
+    incoming = [
+        TransactionData(
+            external_id=f"rep-{n}", description=desc, amount=Decimal("2000"),
+            date=date.today(), type="credit", currency="NZD", category_hint="loan_repayment",
+        )
+        for n, desc in ((1, "Repayment"), (2, "RULED repayment"))
+    ]
+    await _sync_with(
+        session, conn, test_workspace.id, test_user.id,
+        _loan_provider(_loan_data(), transactions=incoming),
+    )
+    cats = {
+        t.external_id: t.category_id
+        for t in (
+            await session.execute(select(Transaction).where(Transaction.external_id.like("rep-%")))
+        ).scalars()
+    }
+    assert cats == {"rep-1": repayments.id, "rep-2": ruled.id}
