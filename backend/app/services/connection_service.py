@@ -53,6 +53,7 @@ from app.services.rule_engine import merge_notes
 from app.services.rule_service import apply_rules_to_transaction, preview_rules_for_transaction
 from app.services.transfer_detection_service import detect_transfer_pairs
 from app.services.fx_rate_service import stamp_primary_amount
+from app.services.loan_details import merge_provider_details
 from app.services.payee_service import get_or_create_payee
 from app.services.transaction_match_service import find_unique_transaction_match
 
@@ -876,9 +877,10 @@ def _sync_loan_fields(provider: str, account: Account, acc_data: AccountData) ->
     becomes a ``loan``. Any other stored type is the user's choice and stays.
     The balance needs no change: a loan keeps the provider's negative sign.
 
-    On a loan, the provider's loan facts replace the stored ones whenever it
-    sends some (display only), and its subtype fills an empty one. Nothing
-    here touches a transaction.
+    On a loan, each loan-detail key the provider sends replaces the stored
+    one, and keys it doesn't send (often ones the user typed in) are kept
+    (``loan_details.merge_provider_details``; display only). Its subtype fills
+    an empty one. Nothing here touches a transaction.
     """
     if acc_data.type != "loan":
         return
@@ -887,8 +889,8 @@ def _sync_loan_fields(provider: str, account: Account, acc_data: AccountData) ->
         logger.info("Sync: Akahu account %s is a loan; type checking -> loan", account.id)
     if account.type != "loan":
         return
-    if acc_data.loan_details is not None:
-        account.loan_details = acc_data.loan_details
+    if acc_data.loan_details:
+        account.loan_details = merge_provider_details(account.loan_details, acc_data.loan_details)
     if account.loan_subtype is None and acc_data.loan_subtype in LOAN_SUBTYPES:
         account.loan_subtype = acc_data.loan_subtype
 

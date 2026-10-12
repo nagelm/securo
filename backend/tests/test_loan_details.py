@@ -7,6 +7,7 @@ writes it. Every figure here is made up.
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.app_clock import app_today
 from app.providers.akahu import _LOAN_DETAIL_KEYS
@@ -14,10 +15,18 @@ from app.schemas.account import AccountCreate, AccountUpdate
 from app.services.account_service import create_account, update_account
 from app.services.loan_details import (
     USER_LOAN_DETAIL_FIELDS,
+    merge_provider_details,
     normalize_user_loan_details,
 )
 from app.services.report_service import _net_worth_at
 from tests import test_loan_pnl_invariant as invariant
+from tests.test_connection_service import (
+    _akahu_connection,
+    _connected_account,
+    _loan_data,
+    _loan_provider,
+    _sync_with,
+)
 from tests.test_loan_accounts import _balance, _connection
 from tests.test_loan_pnl_guard import sqlite_to_char  # noqa: F401  (fixture)
 from tests.test_recurring_loan_payments import PROJECTION_PROBES, _schedule
@@ -238,6 +247,73 @@ async def test_turning_into_a_loan_with_details_in_one_request(session, test_use
     )
     assert updated is not None
     assert updated.loan_details == {"repayment": {"frequency": "MONTHLY"}}
+
+
+# ---------------------------------------------------------------------------
+# sync merge: the provider's keys win, the user's other keys stay
+# ---------------------------------------------------------------------------
+
+
+def test_merge_rule():
+    stored = {
+        "purpose": "PERSONAL",
+        "interest": {"rate": 6.0, "type": "FIXED", "expires_at": "2027-01-01"},
+        "term": {"years": 5},
+        "initial_principal": 20000,
+    }
+    incoming = {"purpose": "HOME", "interest": {"rate": 5.25}, "term": 3}
+    merged = merge_provider_details(stored, incoming)
+    assert merged == {
+        "purpose": "HOME",
+        "interest": {"rate": 5.25, "type": "FIXED", "expires_at": "2027-01-01"},
+        "term": 3,
+        "initial_principal": 20000,
+    }
+    assert merged is not stored
+    assert stored["interest"]["rate"] == 6.0  # the stored dict is not mutated
+    assert merge_provider_details(stored, None) is stored
+    assert merge_provider_details(None, incoming) == incoming
+
+
+@pytest.mark.asyncio
+async def test_sync_keeps_user_keys_the_provider_does_not_send(
+    session: AsyncSession, test_user, test_workspace
+):
+    conn = await _akahu_connection(session, test_user.id)
+    account = _connected_account(conn, test_user.id, test_workspace.id, "loan-1", "loan")
+    session.add(account)
+    await session.commit()
+
+    # The user types details in before the bank sends any.
+    await update_account(
+        session, account.id, test_workspace.id,
+        AccountUpdate(loan_details={
+            "purpose": "PERSONAL",
+            "interest": {"rate": 6.0, "expires_at": "2027-01-01"},
+            "initial_principal": 20000,
+            "repayment": {"frequency": "MONTHLY", "next_amount": 500},
+        }),
+    )
+
+    # The bank sends purpose and the interest rate and type
+    # (_LOAN_DETAILS = HOME, 5.25, FIXED).
+    await _sync_with(session, conn, test_workspace.id, test_user.id, _loan_provider(_loan_data()))
+    await session.refresh(account)
+    assert account.loan_details == {
+        "purpose": "HOME",
+        "interest": {"rate": 5.25, "type": "FIXED", "expires_at": "2027-01-01"},
+        "initial_principal": 20000,
+        "repayment": {"frequency": "MONTHLY", "next_amount": 500},
+    }
+
+    # A sync without details changes nothing.
+    await _sync_with(
+        session, conn, test_workspace.id, test_user.id,
+        _loan_provider(_loan_data(loan_details=None, loan_subtype=None)),
+    )
+    await session.refresh(account)
+    assert account.loan_details["initial_principal"] == 20000
+    assert account.loan_details["interest"]["rate"] == 5.25
 
 
 # ---------------------------------------------------------------------------
