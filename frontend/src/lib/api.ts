@@ -16,6 +16,10 @@ import type {
   Account,
   AccountSummary,
   LoanSubtype,
+  LoanPayment,
+  LoanPaymentCreate,
+  LoanPaymentUpdate,
+  LoanSummary,
   Collection,
   CreditCardBill,
   Transaction,
@@ -500,6 +504,50 @@ export const accounts = {
   reopen: async (id: string): Promise<Account> => {
     const { data } = await api.post(`/accounts/${id}/reopen`)
     return data
+  },
+  /** Paid / interest / principal per month for a loan, from the ledger. */
+  loanSummary: async (id: string, months = 12): Promise<LoanSummary> => {
+    const { data } = await api.get(`/accounts/${id}/loan-summary`, { params: { months } })
+    return data
+  },
+}
+
+// Loan payments (manual loans). The API sends the derived amounts as decimal
+// strings; turn them into numbers once, here.
+type LoanPaymentWire = Omit<LoanPayment, 'total' | 'interest' | 'principal'> & {
+  total: string | number
+  interest: string | number
+  principal: string | number
+}
+
+function toLoanPayment(raw: LoanPaymentWire): LoanPayment {
+  return {
+    ...raw,
+    total: Number(raw.total),
+    interest: Number(raw.interest),
+    principal: Number(raw.principal),
+  }
+}
+
+export const loanPayments = {
+  list: async (loanAccountId: string): Promise<LoanPayment[]> => {
+    const { data } = await api.get('/loan-payments', { params: { loan_account_id: loanAccountId } })
+    return (data as LoanPaymentWire[]).map(toLoanPayment)
+  },
+  get: async (id: string): Promise<LoanPayment> => {
+    const { data } = await api.get(`/loan-payments/${id}`)
+    return toLoanPayment(data)
+  },
+  create: async (payment: LoanPaymentCreate): Promise<LoanPayment> => {
+    const { data } = await api.post('/loan-payments', payment)
+    return toLoanPayment(data)
+  },
+  update: async (id: string, payment: LoanPaymentUpdate): Promise<LoanPayment> => {
+    const { data } = await api.patch(`/loan-payments/${id}`, payment)
+    return toLoanPayment(data)
+  },
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/loan-payments/${id}`)
   },
 }
 

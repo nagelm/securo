@@ -847,6 +847,83 @@ export interface AssetLinkedLoan {
   debt: number
 }
 
+/**
+ * A recorded payment on a manual loan (backend `LoanPaymentRead`).
+ *
+ * `total` is the cash leg's amount, `interest` the interest row's amount (0
+ * without one) and `principal = total - interest`. All three are derived from
+ * the payment's rows for display; nothing stores principal. The API sends them
+ * as decimal strings; `lib/api.ts` turns them into numbers.
+ */
+export interface LoanPayment {
+  id: string
+  loan_account_id: string
+  cash_account_id: string
+  cash_transaction_id: string
+  loan_transaction_id: string
+  interest_transaction_id: string | null
+  interest_category_id: string | null
+  /** False when the payment paired a debit that was already on the paying
+   *  account (synced or imported): its date and total are then the bank's. */
+  cash_leg_created: boolean
+  recurring_transaction_id: string | null
+  date: string
+  description: string
+  currency: string
+  total: number
+  interest: number
+  principal: number
+  created_at: string
+}
+
+/** Body of `POST /api/loan-payments`. Amounts are two-decimal strings. Give
+ *  either `cash_account_id` (writes the cash debit; `date` required) or
+ *  `existing_transaction_id` (pairs that debit; `date` defaults to its date). */
+export interface LoanPaymentCreate {
+  loan_account_id: string
+  date?: string
+  total_amount: string
+  interest_amount: string
+  interest_category_id?: string | null
+  cash_account_id?: string
+  existing_transaction_id?: string
+  description?: string
+  notes?: string
+}
+
+/** Body of `PATCH /api/loan-payments/{id}`. Omitted fields keep their value; a
+ *  payment that paired a bank row refuses a new date or total. */
+export interface LoanPaymentUpdate {
+  date?: string
+  total_amount?: string
+  interest_amount?: string
+  interest_category_id?: string | null
+  description?: string
+}
+
+/** One month of `GET /api/accounts/{id}/loan-summary`, read from the ledger. */
+export interface LoanSummaryMonth {
+  /** YYYY-MM */
+  month: string
+  /** Credits on the loan: repayments. */
+  paid: number
+  /** Debits on the loan that count in P&L (interest and fees). */
+  interest: number
+  /** How much the amount owed fell. */
+  principal_reduction: number
+}
+
+export interface LoanSummary {
+  account_id: string
+  currency: string
+  /** False for loans that sync their own rows: no manual payment form. */
+  manual_payments_allowed: boolean
+  months: LoanSummaryMonth[]
+  total_paid: number
+  total_interest: number
+  total_principal_reduction: number
+}
+
 /** One order read from a broker CSV, before it reaches a holding. */
 export interface AssetOrderImport {
   row: number
