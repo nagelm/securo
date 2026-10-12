@@ -1719,6 +1719,43 @@ async def test_sync_connection_resolves_category_hint(
 
 
 @pytest.mark.asyncio
+async def test_sync_connection_writes_provider_notes_and_payee_website(
+    session: AsyncSession, test_user, test_workspace
+):
+    from app.models.payee import Payee
+
+    conn = await _make_connection(session, test_user.id, "Notes Bank")
+    mock_provider = AsyncMock()
+    mock_provider.refresh_credentials = AsyncMock(return_value={"token": "t"})
+    mock_provider.get_accounts = AsyncMock(return_value=[
+        AccountData(
+            external_id="notes-acc-1", name="Everyday",
+            type="checking", balance=Decimal("100"), currency="NZD",
+        ),
+    ])
+    mock_provider.get_transactions = AsyncMock(return_value=[
+        TransactionData(
+            external_id="notes-tx-1", description="Example Cafe",
+            amount=Decimal("8.50"), date=date.today(), type="debit", currency="NZD",
+            payee="Example Cafe", payee_website="https://cafe.example/",
+            notes="Particulars: LUNCH · Reference: TEAM",
+        ),
+    ])
+
+    with patch("app.services.connection_service.get_provider", return_value=mock_provider), \
+         patch("app.services.connection_service.detect_transfer_pairs", new_callable=AsyncMock), \
+         patch("app.services.connection_service.stamp_primary_amount", new_callable=AsyncMock):
+        await sync_connection(session, conn.id, test_workspace.id, test_user.id)
+
+    tx = (
+        await session.execute(select(Transaction).where(Transaction.external_id == "notes-tx-1"))
+    ).scalar_one()
+    assert tx.notes == "Particulars: LUNCH · Reference: TEAM"
+    payee = (await session.execute(select(Payee).where(Payee.id == tx.payee_id))).scalar_one()
+    assert payee.website == "https://cafe.example/"
+
+
+@pytest.mark.asyncio
 async def test_sync_keeps_provider_category_while_normalizing_description(
     session: AsyncSession, test_user, test_workspace
 ):

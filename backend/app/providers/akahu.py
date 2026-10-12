@@ -18,13 +18,21 @@ What is mapped, and why some things are not:
   id, and their date and text still change; Securo's pending/posted twin
   match needs the same date, so an imported pending row would usually
   linger next to its settled version. Settled rows arrive within a day or two.
-* **Amounts stay in the account currency.** ``meta.conversion`` (the foreign
-  amount of a card purchase) is kept in ``raw_data`` only.
+* **Foreign purchases.** ``meta.conversion`` holds the amount and currency
+  actually charged abroad; that becomes the transaction amount and currency,
+  and the account-currency amount becomes ``amount_in_account_currency``.
 * **Investment, KiwiSaver and wallet accounts become holdings, not accounts.**
   Their balance is a market value, and listing them as accounts as well would
-  count them twice in net worth.
-* **NZFCC categories** become a ``category_hint`` (a default-category key),
-  resolved by the sync layer to the workspace's category of that name.
+  count them twice in net worth. The provider's portfolio, breakdown and
+  profile are kept in the holding's metadata.
+* **Categories** become a ``category_hint`` (a default-category key), resolved
+  by the sync layer to the workspace's category of that name: transfers
+  (Akahu type ``TRANSFER``, or the other party is one of the user's own
+  accounts), payments into an investment account (its ``payment_details``
+  account number), the NZFCC category or its personal-finance group, and for
+  rows Akahu leaves uncategorised the transaction type (interest, fees, tax).
+* **Particulars, code and reference** go to the transaction's notes, and the
+  merchant's website to its payee.
 
 All Akahu-specific shapes are contained in this module.
 """
@@ -107,9 +115,17 @@ NZFCC_CATEGORY_HINTS = {
     "Automotive repair and servicing": "transport",
     "Internet services": "housing",
     "Telecommunication services": "housing",
+    "Supermarkets and grocery stores": "groceries",
+    "Meal kit stores": "groceries",
     "Pharmacies": "health",
     "Gyms, fitness, aquatic facilities, yoga, pilates": "health",
     "Media and entertainment streaming services": "subscriptions",
+    "Business software and cloud services": "subscriptions",
+    "General retail stores": "shopping",
+    "Specialty retail stores (not elsewhere classified)": "shopping",
+    "Haircuts and treatments": "personal_care",
+    "Financial asset brokers, exchanges, and managed funds": "investments",
+    "National government services": "taxes",
     "Hotels, motels, and other temporary accommodation": "leisure",
     "Air transport services": "leisure",
     "Travel agencies and tour operators": "leisure",
@@ -127,6 +143,15 @@ NZFCC_CATEGORY_HINTS = {
     "Investment withdrawals": "investments",
     "Kiwisaver withdrawals": "investments",
     "Property rental income": "salary",
+}
+# Akahu transaction types that say what an otherwise uncategorised row is
+# (the-transaction-model: INTEREST "an interest payment from the account
+# provider", FEE "a fee from the account provider", TAX "a tax payment").
+TYPE_HINTS = {
+    ("INTEREST", "in"): "investments",
+    ("INTEREST", "out"): "taxes",
+    ("FEE", "out"): "taxes",
+    ("TAX", "out"): "taxes",
 }
 NZFCC_GROUP_HINTS = {
     "Food": "groceries",
@@ -216,16 +241,63 @@ def clean_description(raw: Any) -> str:
     return text[:500]
 
 
-def category_hint_for(raw: dict) -> Optional[str]:
-    """Securo default-category key for an Akahu transaction, or None."""
-    if raw.get("type") == "TRANSFER":
+def account_digits(value: Any) -> str:
+    """Digits of an NZ account number ('12-3456-...' and '123456...' compare equal); '' if none."""
+    if not isinstance(value, str) or re.search(r"[*xX]", value):
+        return ""
+    digits = re.sub(r"\D", "", value)
+    return digits if len(digits) >= 8 else ""
+
+
+def category_hint_for(
+    raw: dict,
+    own_accounts: frozenset[str] = frozenset(),
+    investment_accounts: frozenset[str] = frozenset(),
+) -> Optional[str]:
+    """Securo default-category key for an Akahu transaction, or None.
+
+    ``own_accounts`` are the digits of the user's own account numbers;
+    ``investment_accounts`` the digits of the bank accounts their investment
+    and KiwiSaver providers take payments into (account ``payment_details``).
+    """
+    other = account_digits((raw.get("meta") or {}).get("other_account"))
+    if raw.get("type") == "TRANSFER" or (other and other in own_accounts):
         return "transfers"
+    if other and other in investment_accounts:
+        return "investments"
     category = raw.get("category") or {}
     name = category.get("name")
     if name in NZFCC_CATEGORY_HINTS:
         return NZFCC_CATEGORY_HINTS[name]
     group = ((category.get("groups") or {}).get("personal_finance") or {}).get("name")
-    return NZFCC_GROUP_HINTS.get(group)
+    if group in NZFCC_GROUP_HINTS:
+        return NZFCC_GROUP_HINTS[group]
+    amount = _to_decimal(raw.get("amount"))
+    if amount is None:
+        return None
+    return TYPE_HINTS.get((str(raw.get("type") or ""), "out" if amount < 0 else "in"))
+
+
+def notes_for(raw: dict) -> Optional[str]:
+    """Particulars, code and reference as one line, or None."""
+    meta = raw.get("meta") or {}
+    parts = [
+        f"{label}: {str(meta[key]).strip()}"
+        for key, label in (("particulars", "Particulars"), ("code", "Code"), ("reference", "Reference"))
+        if isinstance(meta.get(key), (str, int)) and str(meta[key]).strip()
+    ]
+    return " · ".join(parts)[:1000] or None
+
+
+def account_number_sets(raw_accounts: list[dict]) -> tuple[frozenset[str], frozenset[str]]:
+    """(own account numbers, investment payment account numbers) as digit strings."""
+    own = {account_digits(a.get("formatted_account")) for a in raw_accounts}
+    invest = {
+        account_digits(((a.get("meta") or {}).get("payment_details") or {}).get("account_number"))
+        for a in raw_accounts
+        if str(a.get("type") or "").upper() in INVESTMENT_TYPES
+    }
+    return frozenset(own - {""}), frozenset(invest - {""})
 
 
 def _has_transactions(raw_acc: dict) -> bool:
@@ -396,7 +468,9 @@ class AkahuProvider(BankProvider):
         since: Optional[date] = None,
         payee_source: str = "auto",
     ) -> list[TransactionData]:
-        accounts = {str(a["_id"]): a for a in await self._list_accounts(credentials)}
+        raw_accounts = await self._list_accounts(credentials)
+        own_accounts, investment_accounts = account_number_sets(raw_accounts)
+        accounts = {str(a["_id"]): a for a in raw_accounts}
         raw_acc = accounts.get(account_external_id)
         if raw_acc is None or not _has_transactions(raw_acc):
             return []
@@ -427,7 +501,9 @@ class AkahuProvider(BankProvider):
             if not isinstance(items, list):
                 raise RuntimeError("Akahu returned no transaction list")
             for raw in items:
-                parsed = self._build_transaction(raw, currency, payee_source)
+                parsed = self._build_transaction(
+                    raw, currency, payee_source, own_accounts, investment_accounts
+                )
                 if parsed and parsed.external_id not in seen:
                     seen.add(parsed.external_id)
                     transactions.append(parsed)
@@ -439,7 +515,11 @@ class AkahuProvider(BankProvider):
 
     @staticmethod
     def _build_transaction(
-        raw: Any, currency: Optional[str], payee_source: str
+        raw: Any,
+        currency: Optional[str],
+        payee_source: str,
+        own_accounts: frozenset[str] = frozenset(),
+        investment_accounts: frozenset[str] = frozenset(),
     ) -> Optional[TransactionData]:
         if not isinstance(raw, dict) or not raw.get("_id"):
             return None
@@ -447,22 +527,45 @@ class AkahuProvider(BankProvider):
         txn_date = _local_date(raw.get("date"))
         if amount is None or txn_date is None:
             return None
-        merchant = (raw.get("merchant") or {}).get("name")
+        merchant_obj = raw.get("merchant") or {}
+        merchant = merchant_obj.get("name")
         description = clean_description(raw.get("description")) or merchant or raw.get("type") or "Transaction"
         payee = None
+        payee_website = None
         if payee_source != "none" and isinstance(merchant, str) and merchant.strip():
             payee = merchant.strip()[:500]
+            website = merchant_obj.get("website")
+            if isinstance(website, str) and website.startswith(("http://", "https://")):
+                payee_website = website[:255]
+
+        # A purchase made abroad: Akahu's conversion holds the amount and
+        # currency actually charged ("a payment of GBP 2.15"); the row's own
+        # amount is what the account was debited in its currency.
+        txn_amount = amount.copy_abs()
+        txn_currency = currency
+        in_account_currency = None
+        conversion = (raw.get("meta") or {}).get("conversion") or {}
+        foreign_amount = _to_decimal(conversion.get("amount"))
+        foreign_currency = _iso_currency(conversion.get("currency"), None)
+        if foreign_amount and foreign_currency and foreign_currency != currency:
+            txn_amount = foreign_amount.copy_abs()
+            txn_currency = foreign_currency
+            in_account_currency = amount.copy_abs()
+
         return TransactionData(
             external_id=str(raw["_id"]),
             description=str(description)[:500],
-            amount=amount.copy_abs(),
+            amount=txn_amount,
             date=txn_date,
             type="debit" if amount < 0 else "credit",
-            currency=currency,
+            currency=txn_currency,
+            amount_in_account_currency=in_account_currency,
             status="posted",
             payee=payee,
             raw_data=raw,
-            category_hint=category_hint_for(raw),
+            category_hint=category_hint_for(raw, own_accounts, investment_accounts),
+            notes=notes_for(raw),
+            payee_website=payee_website,
         )
 
     # ----- investments ------------------------------------------------------
@@ -490,6 +593,7 @@ class AkahuProvider(BankProvider):
                         "provider": (raw.get("connection") or {}).get("name"),
                         "portfolio": meta.get("portfolio"),
                         "breakdown": meta.get("breakdown"),
+                        "profile": meta.get("profile"),
                     },
                     account_external_id=str(raw["_id"]),
                     account_name=name,

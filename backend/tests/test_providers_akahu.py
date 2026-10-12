@@ -391,3 +391,108 @@ async def test_refresh_requested_and_polled_when_stale():
 async def test_refresh_reports_user_action_on_bad_tokens():
     with _patched(lambda r: httpx.Response(401)):
         assert await AkahuProvider().trigger_refresh(_creds()) == "needs_user_action"
+
+
+# ----- richer mapping -------------------------------------------------------------
+
+
+def test_other_party_own_account_is_a_transfer():
+    own = frozenset({"123456012345600"})
+    raw = _txn(type="DIRECT CREDIT", category=None, amount=50,
+               meta={"other_account": "12-3456-0123456-00"})
+    assert category_hint_for(raw, own) == "transfers"
+
+
+def test_payment_into_investment_provider_is_investments():
+    invest = frozenset({"389000123456700"})
+    raw = _txn(type="PAYMENT", category=None, meta={"other_account": "38-9000-1234567-00"})
+    assert category_hint_for(raw, frozenset(), invest) == "investments"
+
+
+@pytest.mark.parametrize("akahu_type,amount,expected", [
+    ("INTEREST", 3.2, "investments"),
+    ("INTEREST", -12.0, "taxes"),
+    ("FEE", -5.0, "taxes"),
+    ("TAX", -0.9, "taxes"),
+    ("DIRECT CREDIT", 500.0, None),
+])
+def test_uncategorised_rows_fall_back_to_type(akahu_type, amount, expected):
+    assert category_hint_for(_txn(type=akahu_type, amount=amount, category=None)) == expected
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("Business software and cloud services", "subscriptions"),
+    ("General retail stores", "shopping"),
+    ("Haircuts and treatments", "personal_care"),
+    ("Financial asset brokers, exchanges, and managed funds", "investments"),
+])
+def test_specific_nzfcc_categories_beat_their_group(name, expected):
+    raw = _txn(category={"name": name, "groups": {"personal_finance": {"name": "Professional Services"}}})
+    assert category_hint_for(raw) == expected
+
+
+def test_masked_account_numbers_never_match():
+    raw = _txn(type="PAYMENT", category=None, meta={"other_account": "12-****-*******-00"})
+    assert category_hint_for(raw, frozenset({"120000000000000"})) is None
+
+
+def test_notes_carry_particulars_code_reference():
+    from app.providers.akahu import notes_for
+
+    raw = _txn(meta={"particulars": "RENT", "code": "OCT", "reference": "FLAT 2", "card_suffix": "1234"})
+    assert notes_for(raw) == "Particulars: RENT · Code: OCT · Reference: FLAT 2"
+    assert notes_for(_txn(meta={})) is None
+
+
+def _built(raw, **kw):
+    t = AkahuProvider._build_transaction(raw, "NZD", "auto", **kw)
+    assert t is not None
+    return t
+
+
+def test_merchant_website_reaches_the_payee():
+    t = _built(_txn(merchant={"name": "Countdown", "website": "https://www.countdown.co.nz/"}))
+    assert t.payee_website == "https://www.countdown.co.nz/"
+    assert _built(_txn(merchant={"name": "Countdown", "website": "javascript:x"})).payee_website is None
+
+
+def test_foreign_purchase_uses_the_conversion():
+    t = _built(_txn(amount=-5.4, meta={"conversion": {"amount": 2.15, "currency": "GBP", "rate": 0.49}}))
+    assert (t.amount, t.currency, t.amount_in_account_currency) == (Decimal("2.15"), "GBP", Decimal("5.4"))
+    assert t.type == "debit"
+
+
+def test_conversion_in_account_currency_is_ignored():
+    t = _built(_txn(amount=-5.4, meta={"conversion": {"amount": 5.4, "currency": "NZD"}}))
+    assert (t.amount, t.currency, t.amount_in_account_currency) == (Decimal("5.4"), "NZD", None)
+
+
+@pytest.mark.asyncio
+async def test_get_transactions_uses_the_users_own_account_numbers():
+    accounts = [
+        _account(),
+        _account(_id="acc_2", formatted_account="12-3456-7654321-00"),
+        _account(_id="acc_ks", type="KIWISAVER", attributes=[], formatted_account=None,
+                 meta={"payment_details": {"account_number": "38-9000-1234567-00"}}),
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/accounts"):
+            return httpx.Response(200, json={"success": True, "items": accounts})
+        return httpx.Response(200, json={"success": True, "cursor": {}, "items": [
+            _txn(_id="t_own", type="DEBIT", category=None, meta={"other_account": "12-3456-7654321-00"}),
+            _txn(_id="t_ks", type="PAYMENT", category=None, meta={"other_account": "38-9000-1234567-00"}),
+        ]})
+
+    with _patched(handler):
+        txns = await AkahuProvider().get_transactions(_creds(), "acc_1")
+    assert {t.external_id: t.category_hint for t in txns} == {"t_own": "transfers", "t_ks": "investments"}
+
+
+@pytest.mark.asyncio
+async def test_holding_metadata_keeps_the_profile():
+    accounts = [_account(_id="acc_ks", type="KIWISAVER", attributes=[], meta={"profile": {"pir": 0.28}})]
+    with _patched(lambda r: httpx.Response(200, json={"success": True, "items": accounts})):
+        holdings = await AkahuProvider().get_holdings(_creds())
+    assert holdings[0].metadata is not None
+    assert holdings[0].metadata["profile"] == {"pir": 0.28}

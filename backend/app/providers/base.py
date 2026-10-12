@@ -105,6 +105,13 @@ class TransactionData:
     # "groceries") for providers that classify transactions. The sync layer
     # resolves it to the workspace's category of that name, in any language.
     category_hint: Optional[str] = None
+    # Text the bank attaches to a payment (particulars, code, reference) for
+    # providers that expose it. Written to the new row's notes, so Rules and
+    # search can use it; never overwrites notes on an existing row.
+    notes: Optional[str] = None
+    # The merchant's website, when the provider enriches transactions. Fills
+    # Payee.website on a payee that doesn't have one yet.
+    payee_website: Optional[str] = None
 
 
 @dataclass

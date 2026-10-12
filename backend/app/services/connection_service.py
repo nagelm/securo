@@ -848,6 +848,13 @@ async def _match_pluggy_category(
     return result.scalars().first()
 
 
+def _fill_payee_website(payee: Payee, txn_data) -> None:
+    """Give a payee the provider's merchant website when it has none yet."""
+    website = getattr(txn_data, "payee_website", None)
+    if website and not payee.website:
+        payee.website = str(website)[:255]
+
+
 async def _match_category_hint(
     session: AsyncSession,
     workspace_id: uuid.UUID,
@@ -1254,6 +1261,7 @@ async def handle_oauth_callback(
                 payee_entity = await get_or_create_payee(
                     session, user_id, txn_data.payee, workspace_id=workspace_id
                 )
+                _fill_payee_website(payee_entity, txn_data)
                 payee_id = payee_entity.id
 
             bill = (
@@ -1276,6 +1284,7 @@ async def handle_oauth_callback(
                 status=txn_data.status,
                 payee=txn_data.payee,
                 payee_id=payee_id,
+                notes=getattr(txn_data, "notes", None),
                 raw_data=txn_data.raw_data,
                 category_id=None,
                 installment_number=txn_data.installment_number,
@@ -2275,6 +2284,7 @@ async def sync_connection(
                         txn_data.payee,
                         workspace_id=workspace_id,
                     )
+                    _fill_payee_website(sync_payee_entity, txn_data)
                     sync_payee_id = sync_payee_entity.id
 
                 bill = (
@@ -2297,6 +2307,7 @@ async def sync_connection(
                     status=txn_data.status,
                     payee=txn_data.payee,
                     payee_id=sync_payee_id,
+                    notes=getattr(txn_data, "notes", None),
                     raw_data=txn_data.raw_data,
                     category_id=None,
                     installment_number=txn_data.installment_number,
