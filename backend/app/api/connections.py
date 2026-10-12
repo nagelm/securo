@@ -28,7 +28,11 @@ from app.schemas.bank_connection import (
     ReconnectTokenResponse,
 )
 from app.services import connection_service
-from app.services.transfer_detection_service import detect_transfer_pairs, unlink_transfer_pair
+from app.services.transfer_detection_service import (
+    TransferPairLocked,
+    detect_transfer_pairs,
+    unlink_transfer_pair,
+)
 
 router = APIRouter(prefix="/api/connections", tags=["connections"])
 
@@ -280,7 +284,10 @@ async def unlink_transfer(
     session: AsyncSession = Depends(get_async_session),
 ):
     """Manual unlink: remove a transfer pair link so both transactions are treated normally."""
-    unlinked = await unlink_transfer_pair(session, ctx.workspace.id, pair_id)
+    try:
+        unlinked = await unlink_transfer_pair(session, ctx.workspace.id, pair_id)
+    except TransferPairLocked as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     if not unlinked:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transfer pair not found")
     await session.commit()

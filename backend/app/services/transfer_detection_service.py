@@ -51,10 +51,11 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Any, Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.account import Account
+from app.models.loan_payment import LoanPayment
 from app.models.transaction import Transaction
 from app.services import reconciliation_policy
 from app.services import reconciliation_rule_service as rule_service
@@ -391,12 +392,22 @@ async def recheck_after_link(
     return await detect_transfer_pairs(session, workspace_id, candidate_ids=list(freed))
 
 
+class TransferPairLocked(Exception):
+    """The pair is a recorded loan payment and can't be unlinked (409)."""
+
+
 async def unlink_transfer_pair(
     session: AsyncSession,
     workspace_id: uuid.UUID,
     pair_id: uuid.UUID,
 ) -> int:
-    """Remove a transfer pair link. Returns number of transactions unlinked."""
+    """Remove a transfer pair link. Returns number of transactions unlinked.
+
+    Refused with `TransferPairLocked` when either leg belongs to a recorded
+    loan payment: unpairing would turn the principal into an unpaired,
+    possibly uncategorised debit that counts as an expense. Deleting the
+    loan payment is the way to undo it.
+    """
     result = await session.execute(
         select(Transaction).where(
             Transaction.workspace_id == workspace_id,
@@ -404,6 +415,25 @@ async def unlink_transfer_pair(
         )
     )
     transactions = list(result.scalars().all())
+
+    leg_ids = [tx.id for tx in transactions]
+    if leg_ids:
+        locked = (
+            await session.execute(
+                select(LoanPayment.id)
+                .where(
+                    or_(
+                        LoanPayment.cash_transaction_id.in_(leg_ids),
+                        LoanPayment.loan_transaction_id.in_(leg_ids),
+                    )
+                )
+                .limit(1)
+            )
+        ).first()
+        if locked is not None:
+            raise TransferPairLocked(
+                "This transfer is a recorded loan payment; delete the loan payment instead"
+            )
 
     for tx in transactions:
         tx.transfer_pair_id = None
