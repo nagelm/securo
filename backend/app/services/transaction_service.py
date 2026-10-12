@@ -24,6 +24,7 @@ from app.schemas.transaction import (
 from app.schemas.transaction_split import TransactionSplitInput, TransactionSplitsInput
 from app.services import reconciliation_service, split_service
 from app.services.credit_card_service import apply_effective_date
+from app.services.loan_repayment_category import categorise_loan_repayment_legs
 from app.services.payee_display import apply_payee_display
 from app.services.rule_service import apply_rules_to_transaction
 from app.services.fx_rate_service import stamp_primary_amount, convert as fx_convert
@@ -972,6 +973,7 @@ async def _add_transfer_legs(
         if credit_tx.amount and Decimal(str(credit_tx.amount)):
             credit_tx.fx_rate_used = debit_tx.amount_primary / Decimal(str(credit_tx.amount))
 
+    await categorise_loan_repayment_legs(session, workspace_id, (debit_tx, credit_tx))
     return debit_tx, credit_tx
 
 
@@ -1197,6 +1199,7 @@ async def link_existing_as_transfer(
     transfer_pair_id = uuid.uuid4()
     for tx in txns:
         tx.transfer_pair_id = transfer_pair_id
+    await categorise_loan_repayment_legs(session, workspace_id, txns)
 
     await session.commit()
     for tx in txns:
@@ -1272,6 +1275,7 @@ async def _pair_with_counterpart(
 
     debit_tx = anchor if anchor.type == "debit" else counterpart_tx
     credit_tx = counterpart_tx if anchor.type == "debit" else anchor
+    await categorise_loan_repayment_legs(session, workspace_id, (debit_tx, credit_tx))
     return debit_tx, credit_tx
 
 

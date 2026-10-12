@@ -4,6 +4,8 @@ A payment of 2,000 with 1,200 interest writes
   1. a debit of 2,000 on the paying account (or pairs a debit that already
      exists there),
   2. a credit of 2,000 on the loan, paired with 1 (`transfer_pair_id`),
+     both in Loan repayments (else Transfers) unless the bank's row already
+     has a category of its own,
   3. a debit of 1,200 on the loan in the user's interest category,
 and one `loan_payments` row linking them. The loan moves by the 800 of
 principal; P&L moves by the 1,200 of interest only, because every P&L filter
@@ -34,6 +36,7 @@ from app.services import account_service
 from app.services._query_filters import counts_as_user_pnl
 from app.services.credit_card_service import apply_effective_date
 from app.services.fx_rate_service import stamp_primary_amount
+from app.services.loan_repayment_category import categorise_loan_repayment_legs
 from app.services.transaction_service import _add_transfer_legs, _pair_with_counterpart
 
 DEFAULT_DESCRIPTION = "Loan payment"
@@ -268,14 +271,18 @@ async def record_payment(
             cash_tx.recurring_transaction_id = recurring_transaction_id
     else:
         when = data.date or anchor.date
-        # The bank's row keeps its date, description and category; it is
-        # excluded from P&L by the pair.
+        # The bank's row keeps its date and description, and its category
+        # unless it has none or is in Transfers; it is excluded from P&L by
+        # the pair.
         cash_tx, loan_tx = await _pair_with_counterpart(session, workspace_id, user_id, anchor, loan)
         loan_tx.date = when
         loan_tx.description = (data.description or "").strip() or anchor.description
         if data.notes is not None:
             loan_tx.notes = data.notes
         apply_effective_date(loan_tx, loan)
+    await categorise_loan_repayment_legs(
+        session, workspace_id, (cash_tx, loan_tx), fallback_to_transfers=True
+    )
 
     interest_tx: Optional[Transaction] = None
     if interest > 0:
@@ -428,7 +435,9 @@ async def delete_payment(session: AsyncSession, workspace_id: uuid.UUID, payment
 
     Deletes the loan leg, the interest row and the record. The cash leg is
     deleted when the payment wrote it; a bank row it paired is unpaired
-    instead, back to how it was before the payment was recorded.
+    instead. That row keeps its category: if recording the payment moved it
+    into Loan repayments (it had none, or Transfers), it stays there, out of
+    P&L, because nothing records which of the two it was.
     """
     from app.services.attachment_service import cleanup_attachment_files
 

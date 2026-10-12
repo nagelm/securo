@@ -26,6 +26,7 @@ from app.core.app_clock import app_today
 from app.models.account import Account
 from app.models.category import Category
 from app.models.loan_payment import LoanPayment
+from app.models.payee import Payee
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.models.workspace import Workspace
@@ -35,12 +36,14 @@ from app.services import account_service, loan_payment_service, transaction_serv
 from app.services._query_filters import counts_as_user_pnl
 from app.services.account_service import create_account, get_account_summary
 from app.services.budget_service import get_budget_vs_actual
+from app.services.category_service import create_default_categories, find_default_category
 from app.services.dashboard_service import (
     _counts_as_user_pnl_row,
     get_spending_by_category,
     get_summary,
 )
 from app.services.loan_payment_service import LoanPaymentConflict, record_payment
+from app.services.loan_repayment_category import LOAN_REPAYMENTS_KEY
 from app.services.report_service import get_cash_flow_report, get_income_expenses_report
 from mcp_server.auth import CallContext
 from mcp_server.registry import REGISTRY
@@ -652,6 +655,152 @@ async def test_atomic_on_failure(session, book, monkeypatch):
     assert (await session.execute(select(func.count()).select_from(LoanPayment))).scalar_one() == 0
     accounts = await account_service.get_accounts(session, workspace_id)
     assert next(a["current_balance"] for a in accounts if a["id"] == checking_id) == pytest.approx(10000.0)
+
+
+# ---------------------------------------------------------------------------
+# the Loan repayments category: principal in it never reaches P&L, paired or not
+# ---------------------------------------------------------------------------
+
+
+class SeededBook(Book):
+    def __init__(self, book: Book, repayments: Category, transfers: Category):
+        super().__init__(book.user, book.workspace, book.checking, book.loan, book.interest)
+        self.repayments = repayments
+        self.transfers = transfers
+
+    def measuring(self, category: Category) -> Book:
+        """The same book with the probes' category bucket pointed at `category`."""
+        return Book(self.user, self.workspace, self.checking, self.loan, category)
+
+
+@pytest_asyncio.fixture
+async def seeded(session: AsyncSession, test_user: User, test_workspace: Workspace) -> SeededBook:
+    """A workspace seeded with the default categories the way sign-up seeds
+    them, so Loan repayments carries the template's flags."""
+    await create_default_categories(session, test_user.id, "en", workspace_id=test_workspace.id)
+    checking = await _checking(session, test_workspace, test_user)
+    loan = await _manual_loan(session, test_workspace, test_user, "300000")
+    interest = await _category(session, test_workspace, test_user, "Loan interest")
+    repayments_id = await find_default_category(session, test_workspace.id, LOAN_REPAYMENTS_KEY)
+    transfers_id = await find_default_category(session, test_workspace.id, "transfers")
+    assert repayments_id is not None and transfers_id is not None
+    repayments = await session.get(Category, repayments_id)
+    transfers = await session.get(Category, transfers_id)
+    assert repayments is not None and transfers is not None
+    return SeededBook(Book(test_user, test_workspace, checking, loan, interest), repayments, transfers)
+
+
+async def _mcp_by_payee(session, book):
+    start, end = _month()
+    handler = REGISTRY["aggregate"].handler
+    ctx = CallContext(user_id=book.user.id, workspace_id=book.workspace.id)
+    common = dict(metric="sum", group_by="payee", from_date=start.isoformat(), to_date=end.isoformat())
+    expense = await handler(session=session, ctx=ctx, tx_type="expense", **common)
+    income = await handler(session=session, ctx=ctx, tx_type="income", **common)
+    with_payee = sum(i["value"] for i in expense["items"] + income["items"] if i["bucket"] is not None)
+    return (
+        sum(i["value"] for i in income["items"]),
+        sum(i["value"] for i in expense["items"]),
+        with_payee,
+    )
+
+
+REPAYMENT_PROBES: dict[str, Probe] = {**PROBES, "mcp_aggregate_by_payee": _mcp_by_payee}
+
+
+@pytest.mark.asyncio
+async def test_seeded_loan_repayments_is_a_transfer_category_beside_transfers(seeded):
+    assert seeded.repayments.name == "Loan repayments"
+    assert seeded.repayments.treat_as_transfer is True
+    assert seeded.repayments.is_ignored is False
+    assert seeded.repayments.group_id is not None
+    assert seeded.repayments.group_id == seeded.transfers.group_id
+
+
+@pytest.mark.asyncio
+async def test_payment_legs_land_in_loan_repayments(session, seeded):
+    payment = await _pay(session, seeded)
+
+    cash = await _fresh(session, Transaction, payment.cash_transaction_id)
+    leg = await _fresh(session, Transaction, payment.loan_transaction_id)
+    interest = await _fresh(session, Transaction, payment.interest_transaction_id)
+    assert cash is not None and leg is not None and interest is not None
+    assert cash.category_id == seeded.repayments.id and leg.category_id == seeded.repayments.id
+    assert interest.category_id == seeded.interest.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("probe", list(PROBES), ids=list(PROBES))
+async def test_paired_legs_in_loan_repayments_leave_only_interest(session, seeded, sqlite_to_char, probe):  # noqa: F811
+    measure = PROBES[probe]
+    by_repayments = seeded.measuring(seeded.repayments)
+    before = await measure(session, seeded)
+    repayments_before = (await measure(session, by_repayments))[2]
+
+    await _pay(session, seeded)
+
+    income, expenses, interest = (a - b for a, b in zip(await measure(session, seeded), before))
+    assert income == pytest.approx(0.0)
+    assert expenses == pytest.approx(float(INTEREST))
+    assert interest == pytest.approx(float(INTEREST))
+    # Nothing lands in the Loan repayments bucket. (The cash flow chart and
+    # the account stats have no category split: their third figure is all
+    # outflow, which is the interest.)
+    in_repayments = (await measure(session, by_repayments))[2] - repayments_before
+    expected = float(INTEREST) if probe in ("report_cash_flow", "account_stats") else 0.0
+    assert in_repayments == pytest.approx(expected)
+
+
+UNPAIRED_LEGS = {
+    "cash_debit": ("checking", "debit"),
+    "cash_credit": ("checking", "credit"),
+    "loan_credit": ("loan", "credit"),
+    "loan_debit": ("loan", "debit"),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("leg", list(UNPAIRED_LEGS), ids=list(UNPAIRED_LEGS))
+@pytest.mark.parametrize("probe", list(REPAYMENT_PROBES), ids=list(REPAYMENT_PROBES))
+async def test_unpaired_row_in_loan_repayments_never_reaches_pnl(session, seeded, sqlite_to_char, probe, leg):  # noqa: F811
+    """The flag alone keeps principal out: a leg that lost (or never had)
+    its pair, on either account and in either direction, moves nothing."""
+    measure = REPAYMENT_PROBES[probe]
+    view = seeded.measuring(seeded.repayments)
+    before = await measure(session, view)
+    account_attr, tx_type = UNPAIRED_LEGS[leg]
+    lender = Payee(id=uuid.uuid4(), user_id=seeded.user.id, workspace_id=seeded.workspace.id, name="Example Lender")
+    session.add(lender)
+    await session.commit()
+    row = await _tx(
+        session, seeded.user, getattr(seeded, account_attr), "777", tx_type, source="sync",
+        category_id=seeded.repayments.id,
+    )
+    row.payee_id = lender.id
+    await session.commit()
+    assert row.transfer_pair_id is None
+
+    after = await measure(session, view)
+    assert [a - b for a, b in zip(after, before)] == pytest.approx([0.0, 0.0, 0.0])
+
+
+@pytest.mark.asyncio
+async def test_unpaired_loan_repayments_rows_agree_with_the_python_twin(session, seeded):
+    for attr, tx_type in UNPAIRED_LEGS.values():
+        await _tx(session, seeded.user, getattr(seeded, attr), "777", tx_type, category_id=seeded.repayments.id)
+
+    scoped = Transaction.workspace_id == seeded.workspace.id
+    sql_ids = set((await session.execute(select(Transaction.id).where(scoped, counts_as_user_pnl()))).scalars())
+    rows = (
+        await session.execute(
+            select(Transaction).where(scoped, Transaction.category_id == seeded.repayments.id).options(
+                selectinload(Transaction.account), selectinload(Transaction.category)
+            )
+        )
+    ).scalars().all()
+    assert len(rows) == 4
+    assert not {tx.id for tx in rows} & sql_ids
+    assert not [tx for tx in rows if _counts_as_user_pnl_row(tx)]
 
 
 # ---------------------------------------------------------------------------
