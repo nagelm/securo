@@ -340,9 +340,9 @@ class AkahuProvider(BankProvider):
         me = (await self._request(credentials, "GET", "/me")).get("item") or {}
         raw_accounts = await self._list_accounts(credentials)
         connections = {
-            (acc.get("connection") or {}).get("name")
+            str(name)
             for acc in raw_accounts
-            if (acc.get("connection") or {}).get("name")
+            if (name := (acc.get("connection") or {}).get("name"))
         }
         institution_name = connections.pop() if len(connections) == 1 else "Akahu"
         user_id = me.get("_id") or hashlib.sha256(user_token.encode()).hexdigest()[:24]

@@ -287,6 +287,7 @@ async def test_transactions_paginate_and_map():
     assert first.status == "posted"
     assert first.currency == "NZD"
     assert first.category_hint == "groceries"
+    assert first.raw_data is not None
     assert first.raw_data["description"] == "COUNTDOWN EXAMPLETOWN"
     assert second.type == "credit" and second.payee is None
     assert second.category_hint == "salary"
@@ -372,6 +373,7 @@ async def test_investment_accounts_become_one_holding_each():
     assert h.external_id == "acc_ks"
     assert h.current_value == Decimal("54321.0")
     assert h.account_external_id == "acc_ks"
+    assert h.metadata is not None
     assert h.metadata["portfolio"][0]["name"] == "Growth Fund"
 
 
