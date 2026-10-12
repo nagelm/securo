@@ -24,7 +24,10 @@ What is mapped, and why some things are not:
 * **Investment, KiwiSaver and wallet accounts become holdings, not accounts.**
   Their balance is a market value, and listing them as accounts as well would
   count them twice in net worth. The provider's portfolio, breakdown and
-  profile are kept in the holding's metadata.
+  profile are kept in the holding's metadata. A brokerage account whose
+  portfolio lists share positions becomes one holding per position (ticker,
+  shares, cost); its uninvested cash is counted once, by the wallet account
+  when the connection has one.
 * **Categories** become a ``category_hint`` (a default-category key), resolved
   by the sync layer to the workspace's category of that name: transfers
   (Akahu type ``TRANSFER``, or the other party is one of the user's own
@@ -307,6 +310,109 @@ def _has_transactions(raw_acc: dict) -> bool:
     return True
 
 
+def _share_positions(portfolio: Any, currency: str) -> list[dict]:
+    """The share positions in an investment account's `meta.portfolio`.
+
+    Only entries with a share count and a value count: a brokerage (Hatch,
+    Sharesies) lists positions, while a fund manager's portfolio is a fund
+    split of one balance and stays a single holding. Akahu can list one
+    position more than once under different fund ids when a ticker maps to
+    two funds (seen with Hatch: same symbol, shares, value and returns, and
+    the account's own `breakdown` totals match one position). Those collapse
+    into one, named after the later entry.
+    """
+    if not isinstance(portfolio, list):
+        return []
+    positions: dict[tuple, dict] = {}
+    for entry in portfolio:
+        if not isinstance(entry, dict):
+            continue
+        shares = _to_decimal(entry.get("shares"))
+        value = _to_decimal(entry.get("value"))
+        if shares is None or value is None:
+            continue
+        symbol = str(entry.get("symbol") or "").strip().upper() or None
+        key = (symbol or entry.get("fund_id") or entry.get("name"), shares, value,
+               _to_decimal(entry.get("returns")),
+               _iso_currency(entry.get("currency"), currency))
+        fund_ids = positions.get(key, {}).get("fund_ids", [])
+        positions[key] = {
+            **entry,
+            "symbol": symbol,
+            "shares": shares,
+            "value": value,
+            "returns": key[3],
+            "currency": key[4],
+            "fund_ids": fund_ids + [entry.get("fund_id")],
+        }
+    return list(positions.values())
+
+
+def _position_holdings(
+    raw: dict,
+    name: str,
+    currency: str,
+    balance: Decimal,
+    positions: list[dict],
+    raw_accounts: list[dict],
+) -> list[HoldingData]:
+    """One holding per share position, plus any cash the balance holds beyond them.
+
+    The leftover is the account's uninvested cash. When the same connection
+    lists that cash as its own WALLET account (Hatch does), the wallet already
+    carries it, so it is not added a second time.
+    """
+    account_id = str(raw["_id"])
+    provider = (raw.get("connection") or {}).get("name")
+    holdings = []
+    for pos in positions:
+        returns = pos["returns"]
+        shares = pos["shares"]
+        holdings.append(
+            HoldingData(
+                external_id=f"{account_id}::{pos['symbol'] or pos.get('fund_id') or pos.get('name')}",
+                name=str(pos.get("name") or pos["symbol"] or "Holding")[:255],
+                currency=pos["currency"] or currency,
+                current_value=pos["value"],
+                quantity=shares,
+                unit_price=pos["value"] / shares if shares else None,
+                purchase_price=pos["value"] - returns if returns is not None else None,
+                ticker=pos["symbol"],
+                metadata={
+                    "akahu_type": raw.get("type"),
+                    "provider": provider,
+                    "fund_ids": [f for f in pos["fund_ids"] if f],
+                    "returns": float(returns) if returns is not None else None,
+                },
+                account_external_id=account_id,
+                account_name=name,
+            )
+        )
+    cash = balance - sum((pos["value"] for pos in positions), Decimal("0"))
+    connection_id = (raw.get("connection") or {}).get("_id")
+    wallet_holds_it = any(
+        str(acc.get("type") or "").upper() == "WALLET"
+        and (acc.get("connection") or {}).get("_id") == connection_id
+        and _iso_currency((acc.get("balance") or {}).get("currency"), currency) == currency
+        and (wallet := _to_decimal((acc.get("balance") or {}).get("current"))) is not None
+        and abs(wallet - cash) < Decimal("0.01")
+        for acc in raw_accounts
+    )
+    if cash >= Decimal("0.01") and not wallet_holds_it:
+        holdings.append(
+            HoldingData(
+                external_id=f"{account_id}::cash",
+                name=f"{name} cash"[:255],
+                currency=currency,
+                current_value=cash,
+                metadata={"akahu_type": raw.get("type"), "provider": provider},
+                account_external_id=account_id,
+                account_name=name,
+            )
+        )
+    return holdings
+
+
 class AkahuProvider(BankProvider):
     """Akahu Personal App connector."""
 
@@ -583,7 +689,8 @@ class AkahuProvider(BankProvider):
 
     async def get_holdings(self, credentials: dict) -> list[HoldingData]:
         holdings: list[HoldingData] = []
-        for raw in await self._list_accounts(credentials):
+        raw_accounts = await self._list_accounts(credentials)
+        for raw in raw_accounts:
             if str(raw.get("type") or "").upper() not in INVESTMENT_TYPES:
                 continue
             balance_obj = raw.get("balance") or {}
@@ -593,6 +700,12 @@ class AkahuProvider(BankProvider):
             currency = _iso_currency(balance_obj.get("currency"), "NZD") or "NZD"
             meta = raw.get("meta") or {}
             name = str(raw.get("name") or "Investment")[:255]
+            positions = _share_positions(meta.get("portfolio"), currency)
+            if positions:
+                holdings.extend(
+                    _position_holdings(raw, name, currency, value, positions, raw_accounts)
+                )
+                continue
             holdings.append(
                 HoldingData(
                     external_id=str(raw["_id"]),
@@ -611,6 +724,7 @@ class AkahuProvider(BankProvider):
                 )
             )
         return holdings
+
 
     # ----- refresh ----------------------------------------------------------
 

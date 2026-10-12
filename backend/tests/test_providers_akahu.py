@@ -489,6 +489,48 @@ async def test_get_transactions_uses_the_users_own_account_numbers():
     assert {t.external_id: t.category_hint for t in txns} == {"t_own": "transfers", "t_ks": "investments"}
 
 
+def _hatch_accounts(wallet_cash: float = 1000.00) -> list[dict]:
+    """Hatch as Akahu sends it: the investment balance includes the wallet's cash,
+    and one position is listed twice under two fund ids sharing a ticker."""
+    position = {"symbol": "XMPL", "shares": 10, "value": 1500.0, "currency": "USD", "returns": 400.0}
+    conn = {"_id": "conn_hatch", "name": "Hatch"}
+    return [
+        _account(_id="acc_hatch", name="Individual account", type="INVESTMENT", attributes=[], connection=conn,
+                 balance={"currency": "USD", "current": 2500.00},
+                 meta={"breakdown": {"returns": 400.0, "cost_basis": 1100},
+                       "portfolio": [{**position, "fund_id": "f_etf", "name": "EXAMPLE ETF"},
+                                     {**position, "fund_id": "f_example", "name": "Example Holdings Corp"}]}),
+        _account(_id="acc_wallet", name="Individual account wallet", type="WALLET", attributes=[], connection=conn,
+                 balance={"currency": "USD", "current": wallet_cash}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_share_portfolio_becomes_one_holding_per_position_and_cash_counts_once():
+    accounts = _hatch_accounts()
+    with _patched(lambda r: httpx.Response(200, json={"success": True, "items": accounts})):
+        holdings = await AkahuProvider().get_holdings(_creds())
+    by_id = {h.external_id: h for h in holdings}
+    assert set(by_id) == {"acc_hatch::XMPL", "acc_wallet"}
+    pos = by_id["acc_hatch::XMPL"]
+    assert pos.name == "Example Holdings Corp"
+    assert (pos.ticker, pos.quantity, pos.current_value, pos.purchase_price) == (
+        "XMPL", Decimal("10"), Decimal("1500.0"), Decimal("1100.0"))
+    assert pos.currency == "USD" and pos.account_external_id == "acc_hatch"
+    assert pos.metadata is not None and pos.metadata["fund_ids"] == ["f_etf", "f_example"]
+    assert sum(h.current_value for h in holdings) == Decimal("2500.00")
+
+
+@pytest.mark.asyncio
+async def test_share_portfolio_cash_not_in_a_wallet_is_its_own_holding():
+    accounts = _hatch_accounts(wallet_cash=50.0)
+    with _patched(lambda r: httpx.Response(200, json={"success": True, "items": accounts})):
+        holdings = await AkahuProvider().get_holdings(_creds())
+    by_id = {h.external_id: h for h in holdings}
+    assert set(by_id) == {"acc_hatch::XMPL", "acc_hatch::cash", "acc_wallet"}
+    assert by_id["acc_hatch::cash"].current_value == Decimal("1000.00")
+
+
 @pytest.mark.asyncio
 async def test_holding_metadata_keeps_the_profile():
     accounts = [_account(_id="acc_ks", type="KIWISAVER", attributes=[], meta={"profile": {"pir": 0.28}})]
