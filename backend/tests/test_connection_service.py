@@ -3897,6 +3897,40 @@ def _institution_provider(institution_name: str) -> AsyncMock:
 
 
 @pytest.mark.asyncio
+async def test_sync_keeps_account_names_for_providers_that_send_nicknames(
+    session: AsyncSession, test_user, test_workspace,
+):
+    """A provider that passes the user's own account names (Akahu) never gets
+    the institution copied into display_name, on create or on backfill."""
+    conn = await _make_connection(session, test_user.id, "Nickname Bank")
+    existing = Account(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        connection_id=conn.id, external_id="acc-1", name="House Fund",
+        type="savings", balance=Decimal("0"), currency="NZD",
+    )
+    session.add(existing)
+    await session.commit()
+
+    mock = _institution_provider("Kiwibank")
+    mock.names_accounts_by_institution = False
+    mock.get_accounts.return_value.append(AccountData(
+        external_id="acc-2", name="Car Fund", type="savings",
+        balance=Decimal("0"), currency="NZD",
+        institution_external_id="CON-1", institution_name="Kiwibank",
+    ))
+    with patch("app.services.connection_service.get_provider", return_value=mock), \
+         patch("app.services.connection_service.detect_transfer_pairs", new_callable=AsyncMock), \
+         patch("app.services.connection_service.stamp_primary_amount", new_callable=AsyncMock):
+        await sync_connection(session, conn.id, test_workspace.id, test_user.id)
+
+    rows = (
+        await session.execute(select(Account).where(Account.connection_id == conn.id))
+    ).scalars().all()
+    assert {a.external_id: a.display_name for a in rows} == {"acc-1": None, "acc-2": None}
+    assert all(a.institution_id is not None for a in rows)
+
+
+@pytest.mark.asyncio
 async def test_sync_wires_account_institutions_and_reaps_orphans(
     session: AsyncSession, test_user, test_workspace,
 ):

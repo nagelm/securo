@@ -1174,7 +1174,11 @@ async def handle_oauth_callback(
             connection_id=connection.id,
             external_id=acc_data.external_id,
             name=acc_data.name,
-            display_name=institution.name if institution else None,
+            display_name=(
+                institution.name
+                if institution and provider.names_accounts_by_institution
+                else None
+            ),
             masked_number=acc_data.masked_number,
             type=acc_data.type,
             balance=acc_data.balance,
@@ -2088,7 +2092,10 @@ async def sync_connection(
                     account.institution_id = institution.id
                     # Only when the user hasn't named the account themselves —
                     # never overwrite a manual display_name.
-                    if account.display_name is None:
+                    if (
+                        account.display_name is None
+                        and provider.names_accounts_by_institution
+                    ):
                         account.display_name = institution.name
                 if acc_data.type == "credit_card":
                     # Preserve existing CC metadata when the provider doesn't
@@ -2122,7 +2129,11 @@ async def sync_connection(
                     connection_id=connection.id,
                     external_id=acc_data.external_id,
                     name=acc_data.name,
-                    display_name=institution.name if institution else None,
+                    display_name=(
+                        institution.name
+                        if institution and provider.names_accounts_by_institution
+                        else None
+                    ),
                     masked_number=acc_data.masked_number,
                     type=acc_data.type,
                     balance=acc_data.balance,

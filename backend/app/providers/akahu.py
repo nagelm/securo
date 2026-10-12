@@ -320,6 +320,13 @@ class AkahuProvider(BankProvider):
     def flow_type(self) -> str:
         return "token"
 
+    @property
+    def names_accounts_by_institution(self) -> bool:
+        # Akahu's account `name` is the user's nickname where the bank allows
+        # one ("Spending Account"), else the product name; the institution
+        # already shows with its logo next to the connection.
+        return False
+
     # ----- credentials ------------------------------------------------------
 
     @staticmethod

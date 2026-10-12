@@ -284,6 +284,16 @@ class BankProvider(ABC):
         return "oauth"
 
     @property
+    def names_accounts_by_institution(self) -> bool:
+        """Whether a synced account is displayed under its institution's name.
+
+        True suits providers whose account names are generic product labels
+        (issue #724). Providers that pass the user's own account nicknames
+        return False, so the nickname is what the user sees.
+        """
+        return True
+
+    @property
     def redirect_uri(self) -> str:
         """Provider-specific OAuth redirect URI.
 
