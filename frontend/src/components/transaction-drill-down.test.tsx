@@ -4,7 +4,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { TransactionDrillDown } from '@/components/transaction-drill-down'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { admin, dashboard, transactions } from '@/lib/api'
-import { renderWithProviders } from '@/test/utils'
+import { renderWithProviders, t } from '@/test/utils'
 
 vi.mock('@/contexts/auth-context', () => ({
   useAuth: () => ({ user: { preferences: { currency_display: 'USD' } } }),
@@ -84,5 +84,73 @@ describe('TransactionDrillDown', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
 
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+  })
+})
+
+describe('TransactionDrillDown with a recurring loan payment', () => {
+  // Made-up figures: a 2,000 payment of which 1,200 is interest.
+  const loanPayment = {
+    recurring_id: 'rec-1',
+    account_id: 'chk-1',
+    description: 'Mortgage payment',
+    amount: 2000,
+    amount_primary: null,
+    currency: 'USD',
+    type: 'debit' as const,
+    date: '2026-03-20',
+    category_id: null,
+    category_name: null,
+    category_icon: null,
+    category_color: null,
+    kind: 'loan_payment' as const,
+    transfer_account_id: 'loan-1',
+    interest_amount: 1200,
+    interest_amount_primary: null,
+    interest_category_id: 'cat-interest',
+    interest_category_name: 'Loan interest',
+    interest_category_icon: 'percent',
+    interest_category_color: '#f43f5e',
+  }
+
+  beforeEach(() => {
+    vi.mocked(transactions.list).mockResolvedValue({ items: [], total: 0 } as never)
+    vi.mocked(dashboard.projectedTransactions).mockResolvedValue([loanPayment])
+    vi.mocked(admin.accountingMode).mockResolvedValue({ mode: 'cash' } as never)
+  })
+
+  afterEach(() => {
+    vi.resetAllMocks()
+  })
+
+  it('lists only the interest, in the interest category', async () => {
+    renderWithProviders(
+      <TransactionDrillDown
+        filter={{ title: 'Expenses', type: 'debit', from: '2026-03-01', to: '2026-03-31' }}
+        onClose={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByText('Mortgage payment')).toBeInTheDocument()
+    expect(screen.getByText(/Loan interest/)).toBeInTheDocument()
+    expect(screen.getAllByText(/1,200\.00/).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/2,000\.00/)).not.toBeInTheDocument()
+  })
+
+  it('never shows the payment as an uncategorised expense', async () => {
+    vi.mocked(dashboard.projectedTransactions).mockResolvedValue([
+      loanPayment,
+      { ...loanPayment, recurring_id: 'rec-2', description: 'Interest-free loan', interest_amount: 0 },
+    ])
+    renderWithProviders(
+      <TransactionDrillDown
+        filter={{ title: 'Uncategorized', uncategorized: true, from: '2026-03-01', to: '2026-03-31' }}
+        onClose={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(dashboard.projectedTransactions).toHaveBeenCalled())
+    expect(await screen.findByText(t('dashboard.drillDownEmpty'))).toBeInTheDocument()
+    expect(screen.queryByText('Mortgage payment')).not.toBeInTheDocument()
+    expect(screen.queryByText('Interest-free loan')).not.toBeInTheDocument()
   })
 })

@@ -1,4 +1,4 @@
-import type { Account, Category, Transaction } from '@/types'
+import type { Account, Category, ProjectedTransaction, Transaction } from '@/types'
 
 /**
  * Form helpers for recording a loan payment. The backend validates every
@@ -57,4 +57,41 @@ export function isExistingDebitCandidate(tx: Transaction, totalCents: number): b
     tx.transfer_pair_id == null &&
     Math.round(tx.amount * 100) === totalCents
   )
+}
+
+/**
+ * The part of a projected recurring transaction that is income or expense.
+ *
+ * A recurring loan payment projects the whole payment leaving the paying
+ * account, but only its interest is an expense: the rest is principal, a
+ * transfer to the loan. P&L views must show the interest, in its own
+ * category, and nothing else. Returns null when none of it is P&L (a loan
+ * payment with no interest). Any other projection is returned unchanged.
+ */
+export function projectedPnlShare<T extends ProjectedTransaction>(pt: T): T | null {
+  if (pt.kind !== 'loan_payment') return pt
+  const interest = Number(pt.interest_amount ?? 0)
+  if (!(interest > 0)) return null
+  return {
+    ...pt,
+    amount: interest,
+    amount_primary: pt.interest_amount_primary ?? null,
+    category_id: pt.interest_category_id ?? null,
+    category_name: pt.interest_category_name ?? null,
+    category_icon: pt.interest_category_icon ?? null,
+    category_color: pt.interest_category_color ?? null,
+  }
+}
+
+/** What stops a recurring loan payment from being saved, as a locale key, or null. */
+export function loanScheduleProblem(
+  totalCents: number | null,
+  interestCents: number | null,
+  interestCategoryId: string,
+): string | null {
+  if (totalCents == null || totalCents <= 0) return 'loans.recurring.totalRequired'
+  if (interestCents != null && interestCents < 0) return 'loans.recurring.interestNegative'
+  if ((interestCents ?? 0) > totalCents) return 'loans.payment.interestTooHigh'
+  if ((interestCents ?? 0) > 0 && !interestCategoryId) return 'loans.recurring.interestCategoryRequired'
+  return null
 }

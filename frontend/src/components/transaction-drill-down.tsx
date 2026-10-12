@@ -6,6 +6,7 @@ import { transactions as transactionsApi, dashboard, admin } from '@/lib/api'
 import { AlertTriangle, Clock, Info, Paperclip, X } from 'lucide-react'
 import { CategoryIcon } from '@/components/category-icon'
 import { ProjectedTransactionBadge } from '@/components/projected-transaction-badge'
+import { projectedPnlShare } from '@/lib/loan-payments'
 import { sumDrillDownTotals } from '@/lib/drill-down-totals'
 import { hasOpenDialog, isInsideOverlayLayer } from '@/lib/overlay-layers'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -116,7 +117,11 @@ export function TransactionDrillDown({
       })
     }
 
-    for (const pt of projectedTxs ?? []) {
+    for (const projected of projectedTxs ?? []) {
+      // This panel lists income and expenses: a recurring loan payment
+      // counts only its interest, never the principal.
+      const pt = projectedPnlShare(projected)
+      if (!pt) continue
       // Filter projected txs by drill-down criteria
       if (filter?.type && pt.type !== filter.type) continue
       if (filter?.category_id && String(pt.category_id) !== filter.category_id) continue

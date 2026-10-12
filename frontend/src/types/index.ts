@@ -638,6 +638,15 @@ export interface RecurringTransaction {
   next_occurrence: string
   amount_primary: number | null
   fx_rate_used: number | null
+  /**
+   * `loan_payment`: pays the loan `transfer_account_id` from `account_id`.
+   * `amount` is the whole payment, `interest_amount` its fixed interest share
+   * (booked in `interest_category_id`); only the interest is an expense.
+   */
+  kind?: 'standard' | 'loan_payment'
+  transfer_account_id?: string | null
+  interest_amount?: number | string | null
+  interest_category_id?: string | null
 }
 
 export interface ProjectedTransaction {
@@ -653,6 +662,15 @@ export interface ProjectedTransaction {
   category_name: string | null
   category_icon: string | null
   category_color: string | null
+  /** A recurring loan payment: `amount` is the whole payment, only the interest is an expense. */
+  kind?: 'standard' | 'loan_payment'
+  transfer_account_id?: string | null
+  interest_amount?: number | null
+  interest_amount_primary?: number | null
+  interest_category_id?: string | null
+  interest_category_name?: string | null
+  interest_category_icon?: string | null
+  interest_category_color?: string | null
 }
 
 export interface TransactionCalendarItem {
