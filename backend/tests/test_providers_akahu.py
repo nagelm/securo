@@ -496,3 +496,18 @@ async def test_holding_metadata_keeps_the_profile():
         holdings = await AkahuProvider().get_holdings(_creds())
     assert holdings[0].metadata is not None
     assert holdings[0].metadata["profile"] == {"pir": 0.28}
+
+
+@pytest.mark.asyncio
+async def test_card_debt_sign_depends_on_connection_type():
+    accounts = [
+        _account(_id="acc_classic", type="CREDITCARD",
+                 connection={"_id": "c1", "name": "Amex", "connection_type": "classic"},
+                 balance={"currency": "NZD", "current": -1234.56, "limit": 10000}),
+        _account(_id="acc_official", type="CREDITCARD",
+                 connection={"_id": "c2", "name": "Kiwibank", "connection_type": "official"},
+                 balance={"currency": "NZD", "current": 250.0, "available": 4750.0}),
+    ]
+    with _patched(lambda r: httpx.Response(200, json={"success": True, "items": accounts})):
+        result = {a.external_id: a.balance for a in await AkahuProvider().get_accounts(_creds())}
+    assert result == {"acc_classic": Decimal("1234.56"), "acc_official": Decimal("250.0")}

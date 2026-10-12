@@ -433,11 +433,15 @@ class AkahuProvider(BankProvider):
             balance_obj = raw.get("balance") or {}
             balance = _to_decimal(balance_obj.get("current")) or Decimal("0")
             account_type = _ACCOUNT_TYPE_MAP.get(akahu_type, "checking")
-            if account_type == "credit_card":
-                # Akahu reports card debt as a negative balance; Securo's
-                # convention is a positive number for debt.
-                balance = -balance
             connection = raw.get("connection") or {}
+            if account_type == "credit_card" and connection.get("connection_type") != "official":
+                # Securo's convention is a positive number for card debt.
+                # Akahu documents debt as negative, and classic connections
+                # follow that (a card owing 1,234.56 reports -1234.56).
+                # Official open-banking connections already report the debt
+                # as positive (a card owing 250.00 reports +250.00
+                # with 4,750.00 available), so only classic balances flip.
+                balance = -balance
             accounts.append(
                 AccountData(
                     external_id=str(raw["_id"]),
