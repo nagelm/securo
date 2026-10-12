@@ -17,6 +17,7 @@ from app.models.budget import Budget
 from app.models.category import Category
 from app.models.category_group import CategoryGroup
 from app.models.import_log import ImportLog
+from app.models.loan_payment import LoanPayment
 from app.models.recurring_transaction import RecurringTransaction
 from app.models.rule import Rule
 from app.models.transaction import Transaction
@@ -54,6 +55,7 @@ async def _collect(ctx: WorkspaceContext, session: AsyncSession) -> dict[str, ob
     budgets = (await session.execute(select(Budget).where(Budget.workspace_id == ws_id))).scalars().all()
     assets = (await session.execute(select(Asset).where(Asset.workspace_id == ws_id))).scalars().all()
     import_logs = (await session.execute(select(ImportLog).where(ImportLog.workspace_id == ws_id))).scalars().all()
+    loan_payments = (await session.execute(select(LoanPayment).where(LoanPayment.workspace_id == ws_id))).scalars().all()
 
     asset_ids = [a.id for a in assets]
     if asset_ids:
@@ -72,6 +74,7 @@ async def _collect(ctx: WorkspaceContext, session: AsyncSession) -> dict[str, ob
         "assets": assets,
         "asset_values": asset_values,
         "import_logs": import_logs,
+        "loan_payments": loan_payments,
     }
 
     files: dict[str, object] = {}
