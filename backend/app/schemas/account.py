@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -25,6 +25,9 @@ class AccountCreate(BaseModel):
     minimum_payment: Optional[Decimal] = None
     card_brand: Optional[str] = None
     card_level: Optional[str] = None
+    # Loan accounts only; a non-null value on any other type is a 400.
+    loan_subtype: Optional[str] = None
+    secured_asset_id: Optional[uuid.UUID] = None
 
 
 class AccountUpdate(BaseModel):
@@ -39,6 +42,8 @@ class AccountUpdate(BaseModel):
     minimum_payment: Optional[Decimal] = None
     card_brand: Optional[str] = None
     card_level: Optional[str] = None
+    loan_subtype: Optional[str] = None
+    secured_asset_id: Optional[uuid.UUID] = None
 
 
 class AccountRead(AccountBase):
@@ -68,6 +73,11 @@ class AccountRead(AccountBase):
     card_brand: Optional[str] = None
     card_level: Optional[str] = None
     shared_balance_group: Optional[str] = None
+    loan_subtype: Optional[str] = None
+    secured_asset_id: Optional[uuid.UUID] = None
+    # Provider loan facts (rate, maturity, ...), written by sync. Read-only:
+    # absent from AccountCreate/AccountUpdate.
+    loan_details: Optional[dict[str, Any]] = None
     is_closed: bool = False
     closed_at: Optional[datetime] = None
 

@@ -49,6 +49,7 @@ _ACCOUNT_TYPE_COLORS: dict[str, str] = {
     "credit_card": "#F43F5E",
     "investment": "#8B5CF6",
     "wallet": "#F59E0B",
+    "loan": "#E11D48",
 }
 _ASSET_TYPE_COLORS: dict[str, str] = {
     "real_estate": "#0EA5E9",

@@ -9,6 +9,7 @@ from sqlalchemy.orm import contains_eager
 
 from app.core.app_clock import app_today
 from app.models.account import Account
+from app.models.asset import Asset
 from app.models.bank_connection import BankConnection
 from app.models.credit_card_bill import CreditCardBill
 from app.models.transaction import Transaction
@@ -44,10 +45,60 @@ def _simplefin_to_internal_balance(provider: str, account_type: str, balance: De
     return balance
 
 
+#: Account types whose user-entered balance is an amount owed: a positive
+#: figure is booked as a debit opening row, so the balance reads negative.
+_DEBT_ENTRY_TYPES = frozenset({"credit_card", "loan"})
+
+#: The kinds of loan a `loan` account may be. Display only.
+LOAN_SUBTYPES = ("mortgage", "vehicle", "student", "personal", "line_of_credit", "other")
+
+#: Columns that only mean something on a `loan` account.
+_LOAN_FIELDS = ("loan_subtype", "secured_asset_id", "loan_details")
+
+
 def _opening_balance_values(account_type: str, balance: Decimal) -> tuple[Decimal, str]:
     amount = abs(balance)
-    is_credit = (balance > 0) == (account_type != "credit_card")
+    is_credit = (balance > 0) == (account_type not in _DEBT_ENTRY_TYPES)
     return amount, "credit" if is_credit else "debit"
+
+
+async def _validate_secured_asset(
+    session: AsyncSession, asset_id: uuid.UUID, workspace_id: uuid.UUID
+) -> None:
+    """A loan may be secured against any asset of its own workspace."""
+    found = await session.execute(
+        select(Asset.id).where(Asset.id == asset_id, Asset.workspace_id == workspace_id)
+    )
+    if found.scalar_one_or_none() is None:
+        raise ValueError("Linked asset not found")
+
+
+async def _validate_loan_fields(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    account_type: str,
+    loan_subtype: Optional[str],
+    secured_asset_id: Optional[uuid.UUID],
+) -> None:
+    """Check the loan fields a request sets, before anything is written.
+
+    Only a `loan` account carries them; a null value is always allowed (it
+    is how a field is cleared).
+    """
+    if account_type != "loan":
+        if loan_subtype is not None or secured_asset_id is not None:
+            raise ValueError("Loan fields can only be set on loan accounts")
+        return
+    if loan_subtype is not None and loan_subtype not in LOAN_SUBTYPES:
+        raise ValueError(f"Invalid loan subtype: {loan_subtype}")
+    if secured_asset_id is not None:
+        await _validate_secured_asset(session, secured_asset_id, workspace_id)
+
+
+def _clear_loan_fields_unless_loan(account: Account) -> None:
+    if account.type != "loan":
+        for field in _LOAN_FIELDS:
+            setattr(account, field, None)
 
 
 async def get_accounts(session: AsyncSession, workspace_id: uuid.UUID, include_closed: bool = False) -> list[dict]:
@@ -193,6 +244,9 @@ def serialize_account(
         "card_brand": acc.card_brand,
         "card_level": acc.card_level,
         "shared_balance_group": acc.shared_balance_group,
+        "loan_subtype": acc.loan_subtype,
+        "secured_asset_id": acc.secured_asset_id,
+        "loan_details": acc.loan_details,
         "institution_name": institution_name,
         "institution_logo_url": institution_logo_url,
         "available_credit": None,
@@ -261,6 +315,9 @@ async def create_account(
     data: AccountCreate,
 ) -> Account:
     is_cc = data.type == "credit_card"
+    await _validate_loan_fields(
+        session, workspace_id, data.type, data.loan_subtype, data.secured_asset_id
+    )
     account = Account(
         user_id=user_id,
         workspace_id=workspace_id,
@@ -274,6 +331,8 @@ async def create_account(
         minimum_payment=data.minimum_payment if is_cc else None,
         card_brand=data.card_brand if is_cc else None,
         card_level=data.card_level if is_cc else None,
+        loan_subtype=data.loan_subtype,
+        secured_asset_id=data.secured_asset_id,
     )
     session.add(account)
     await session.flush()  # get account.id without committing
@@ -309,6 +368,17 @@ async def update_account(
     update_data = data.model_dump(exclude_unset=True)
     balance_date = update_data.pop("balance_date", None)
 
+    # Validate loan fields against the type the account will have, before
+    # anything is written. Fields left out of the request keep their value,
+    # unless the type leaves `loan` (then they are cleared below).
+    await _validate_loan_fields(
+        session,
+        workspace_id,
+        update_data.get("type", account.type),
+        update_data.get("loan_subtype"),
+        update_data.get("secured_asset_id"),
+    )
+
     # Track whether we need to recompute effective_date for all transactions.
     # Changes to the CC cycle days shift which bill each historical purchase
     # belongs to, so stored effective_dates need to be rebuilt.
@@ -322,8 +392,12 @@ async def update_account(
     # sometimes misreport it (e.g. Enable Banking labels an mBank savings
     # account as "checking"; issue #271). Sync only writes `type` on initial
     # account creation and never overwrites it afterwards, so the override
-    # survives subsequent syncs without a separate field.
+    # survives subsequent syncs without a separate field. A connected account
+    # may become a `loan` (its provider balance is already negative, and no
+    # read site negates a loan), and its loan subtype and secured asset are
+    # the user's to set.
     if account.connection_id is not None:
+        loan_fields = {"loan_subtype", "secured_asset_id"}
         editable_fields = {
             "display_name",
             "type",
@@ -333,13 +407,13 @@ async def update_account(
             "minimum_payment",
             "card_brand",
             "card_level",
-        }
+        } | loan_fields
         disallowed = set(update_data.keys()) - editable_fields
         if disallowed:
             raise ValueError("Cannot edit bank-connected accounts")
         old_type = account.type
         new_type = update_data.get("type", account.type)
-        cc_fields = editable_fields - {"display_name", "type"}
+        cc_fields = editable_fields - {"display_name", "type"} - loan_fields
         cc_update = {k: v for k, v in update_data.items() if k in cc_fields}
         if cc_update and new_type != "credit_card":
             raise ValueError("Credit card fields can only be set on credit card accounts")
@@ -370,6 +444,7 @@ async def update_account(
             account.minimum_payment = None
             account.card_brand = None
             account.card_level = None
+        _clear_loan_fields_unless_loan(account)
         if cycle_fields_changed:
             await _recompute_effective_dates(session, account)
         await session.commit()
@@ -386,6 +461,7 @@ async def update_account(
         account.minimum_payment = None
         account.card_brand = None
         account.card_level = None
+    _clear_loan_fields_unless_loan(account)
 
     # When balance changes, sync the opening_balance transaction
     if "balance" in update_data:

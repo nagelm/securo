@@ -5,11 +5,12 @@ from decimal import Decimal
 from typing import Any, Optional, cast
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, func, desc
+from sqlalchemy import select, func, desc, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.app_clock import app_today
+from app.models.account import Account
 from app.models.asset import Asset
 from app.models.asset_transaction import AssetTransaction
 from app.models.asset_value import AssetValue
@@ -741,6 +742,14 @@ async def delete_asset(
     asset = result.scalar_one_or_none()
     if not asset:
         return False
+    # Unlink loans secured against this asset. The foreign key does the same
+    # (ON DELETE SET NULL); doing it here keeps the ORM state right and holds
+    # on databases that do not enforce foreign keys.
+    await session.execute(
+        update(Account)
+        .where(Account.secured_asset_id == asset.id)
+        .values(secured_asset_id=None)
+    )
     await session.delete(asset)
     await session.commit()
     return True

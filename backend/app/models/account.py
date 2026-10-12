@@ -1,9 +1,9 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, SmallInteger, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Numeric, SmallInteger, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,7 +31,7 @@ class Account(Base):
     # the provider exposes one. Provider-owned like `name`: refreshed on sync,
     # not user-editable. Never holds the full identifier.
     masked_number: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
-    type: Mapped[str] = mapped_column(String(50))  # checking, savings, credit_card
+    type: Mapped[str] = mapped_column(String(50))  # checking, savings, credit_card, loan, ...
     balance: Mapped[Decimal] = mapped_column(Numeric(precision=15, scale=2), default=Decimal("0.00"))
     currency: Mapped[str] = mapped_column(String(3), default="USD")
     balance_primary: Mapped[Optional[Decimal]] = mapped_column(Numeric(precision=15, scale=2), nullable=True)
@@ -50,6 +50,20 @@ class Account(Base):
         UUID(as_uuid=True), ForeignKey("institutions.id", ondelete="SET NULL"),
         nullable=True, index=True,
     )
+    # Loan accounts (type="loan"). A loan's balance is negative: the amount
+    # owed. `loan_subtype` is display only. `secured_asset_id` links the loan
+    # to the asset it is secured against (many loans per asset); deleting the
+    # asset unlinks it. `loan_details` holds provider loan facts written by
+    # sync and is never read by P&L, budget or net-worth code. All three are
+    # cleared when the account stops being a loan.
+    loan_subtype: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    secured_asset_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("assets.id", ondelete="SET NULL", name="fk_accounts_secured_asset_id_assets"),
+        nullable=True,
+        index=True,
+    )
+    loan_details: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
     is_closed: Mapped[bool] = mapped_column(Boolean, default=False)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
