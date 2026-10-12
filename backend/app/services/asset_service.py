@@ -21,7 +21,14 @@ from app.providers.market_price import (
     MarketPriceRateLimitedError,
     get_market_price_provider,
 )
-from app.schemas.asset import AssetCreate, AssetUpdate, AssetValueCreate, AssetRead, AssetValueRead
+from app.schemas.asset import (
+    AssetCreate,
+    AssetRead,
+    AssetUpdate,
+    AssetValueCreate,
+    AssetValueRead,
+    LinkedLoanRead,
+)
 from app.services.asset_group_service import ensure_group_in_workspace
 from app.services.fx_rate_service import convert, stamp_primary_amount
 
@@ -378,6 +385,66 @@ async def _get_transaction_counts(
     return {row[0]: row[1] for row in result.all()}
 
 
+async def _attach_equity(session: AsyncSession, reads: list[AssetRead]) -> None:
+    """Fill the linked-loan and equity fields of each AssetRead in place.
+
+    Loans are open accounts of type "loan" whose secured_asset_id points at
+    the asset, loaded in one query. Each loan's balance comes from
+    dashboard_service._account_balance_at, the function net worth uses, so
+    the debt shown here agrees with the liability net worth counts. Debt is
+    max(0, -balance) converted to the asset's currency; equity is the asset's
+    current value minus that debt. Equity is display only and never summed
+    into any total (the loan is already a liability in net worth).
+    """
+    if not reads:
+        return
+    # dashboard_service imports this module, so import it here.
+    from app.services.dashboard_service import _account_balance_at
+
+    by_id = {r.id: r for r in reads}
+    result = await session.execute(
+        select(Account)
+        .where(
+            Account.secured_asset_id.in_(list(by_id)),
+            Account.type == "loan",
+            Account.is_closed == False,
+        )
+        .order_by(Account.name, Account.id)
+    )
+    loans = list(result.scalars().all())
+    if not loans:
+        return
+
+    today = app_today()
+    debt_by_asset: dict[uuid.UUID, Decimal] = {}
+    for loan in loans:
+        read = by_id[cast(uuid.UUID, loan.secured_asset_id)]
+        balance = Decimal(str(await _account_balance_at(session, loan, today)))
+        owed = max(Decimal("0"), -balance)
+        debt, _ = await convert(session, owed, loan.currency, read.currency)
+        read.linked_loan_ids.append(loan.id)
+        read.linked_loans.append(
+            LinkedLoanRead(
+                id=loan.id,
+                name=loan.display_name or loan.name,
+                currency=loan.currency,
+                balance=float(balance),
+                debt=float(debt),
+            )
+        )
+        debt_by_asset[read.id] = debt_by_asset.get(read.id, Decimal("0")) + debt
+
+    for asset_id, debt in debt_by_asset.items():
+        read = by_id[asset_id]
+        read.linked_debt = float(debt)
+        if (
+            read.current_value is not None
+            and not read.is_archived
+            and read.sell_date is None
+        ):
+            read.equity = float(Decimal(str(read.current_value)) - debt)
+
+
 async def get_assets(
     session: AsyncSession, workspace_id: uuid.UUID, include_archived: bool = False
 ) -> list[AssetRead]:
@@ -396,6 +463,7 @@ async def get_assets(
         latest = await _get_latest_value(session, asset.id)
         count = await _get_value_count(session, asset.id)
         reads.append(_asset_to_read(asset, latest, count, tx_counts.get(asset.id, 0)))
+    await _attach_equity(session, reads)
     return reads
 
 
@@ -416,7 +484,9 @@ async def get_asset(
         .select_from(AssetTransaction)
         .where(AssetTransaction.asset_id == asset.id)
     )
-    return _asset_to_read(asset, latest, count, tx_count or 0)
+    read = _asset_to_read(asset, latest, count, tx_count or 0)
+    await _attach_equity(session, [read])
+    return read
 
 
 async def create_asset(
@@ -729,7 +799,9 @@ async def update_asset(
     await session.refresh(asset)
     latest = await _get_latest_value(session, asset.id)
     count = await _get_value_count(session, asset.id)
-    return _asset_to_read(asset, latest, count, tx_count)
+    read = _asset_to_read(asset, latest, count, tx_count)
+    await _attach_equity(session, [read])
+    return read
 
 
 async def delete_asset(

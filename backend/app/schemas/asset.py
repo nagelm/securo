@@ -3,7 +3,7 @@ from datetime import date as _date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class AssetCreate(BaseModel):
@@ -72,6 +72,18 @@ class AssetUpdate(BaseModel):
     ticker_exchange: Optional[str] = None
 
 
+class LinkedLoanRead(BaseModel):
+    """A loan account secured against an asset (account.secured_asset_id)."""
+
+    id: uuid.UUID
+    name: str
+    currency: str
+    # The loan's balance in its own currency (negative = amount owed).
+    balance: float
+    # max(0, -balance), converted to the asset's currency.
+    debt: float
+
+
 class AssetRead(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
@@ -114,6 +126,17 @@ class AssetRead(BaseModel):
     total_invested: Optional[float] = None
     realized_gain: Optional[float] = None
     transaction_count: int = 0
+    # Equity against linked loans. Display only: never added to any total,
+    # since net worth already counts the loan as a liability and the asset at
+    # its value. linked_debt is in the asset's currency and is None when no
+    # open loan is linked; equity = current_value - linked_debt, None when the
+    # asset has no value, is archived or sold, or has no linked loan.
+    linked_loan_ids: list[uuid.UUID] = Field(default_factory=list)
+    linked_loans: list[LinkedLoanRead] = Field(default_factory=list)
+    linked_debt: Optional[float] = None
+    linked_debt_primary: Optional[float] = None
+    equity: Optional[float] = None
+    equity_primary: Optional[float] = None
 
     model_config = ConfigDict(from_attributes=True)
 
