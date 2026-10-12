@@ -1,7 +1,7 @@
 """loan accounts: subtype, secured asset and provider loan facts
 
 Revision ID: f002
-Revises: 096
+Revises: f001
 Create Date: 2026-10-12
 
 A loan is an account with `type = "loan"`; its balance is negative (the
@@ -27,8 +27,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "f002"
-# Re-pointed to "f001" once the payee-logo migration lands as f001.
-down_revision: Union[str, None] = "096"
+down_revision: Union[str, None] = "f001"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
