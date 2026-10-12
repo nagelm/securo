@@ -146,7 +146,8 @@ def counts_as_pnl():
       - transactions flagged `is_ignored=True` (user-marked as not to be reported),
       - transactions flagged `exclude_from_pnl=True` (kept in balance,
         omitted from income and expense calculations),
-      - transactions in categories flagged `is_ignored=True` (user-marked as not to be reported).
+      - transactions in categories flagged `is_ignored=True` (user-marked as not to be reported),
+      - credits on `loan` accounts (see `is_loan_credit`).
 
     Does NOT exclude `source='opening_balance'` — callers that already
     filter those keep doing so; this helper only handles the transfer-like
@@ -163,6 +164,7 @@ def counts_as_pnl():
         # over-recorded expense from when the receiver paid the full
         # parent transaction. So we keep credits, drop debits.
         ~and_(Transaction.source == "settlement", Transaction.type == "debit"),
+        ~is_loan_credit(),
         or_(
             Transaction.category_id.is_(None),
             Transaction.category_id.not_in(
@@ -174,6 +176,25 @@ def counts_as_pnl():
                 )
             ),
         ),
+    )
+
+
+def is_loan_credit():
+    """SQL filter: a credit on a `loan` account.
+
+    A credit on a loan lowers the amount owed: it is a repayment of
+    principal, never income. A recorded repayment is a transfer pair and
+    already fails `transfer_pair_id IS NULL`; this catches the one that was
+    never paired (a synced repayment whose cash leg was not matched), so
+    principal can never reach P&L as income whatever state the pairing is
+    in. Trade-off: a genuine refund credited to a loan also stays out of P&L.
+
+    The Python twin is `dashboard_service._counts_as_user_pnl_row`; keep the
+    two in step.
+    """
+    return and_(
+        Transaction.type == "credit",
+        Transaction.account_id.in_(select(Account.id).where(Account.type == "loan")),
     )
 
 

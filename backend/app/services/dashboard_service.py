@@ -198,13 +198,19 @@ async def _get_forecast_transactions(
 
 
 def _counts_as_user_pnl_row(tx: Transaction) -> bool:
-    """Python equivalent of ``counts_as_user_pnl`` for loaded forecast rows."""
+    """Python equivalent of ``counts_as_user_pnl`` for loaded forecast rows.
+
+    Rows must come with ``account`` and ``category`` loaded, as
+    ``_get_forecast_transactions`` does.
+    """
     category = tx.category
     return not (
         tx.transfer_pair_id
         or tx.is_ignored
         or tx.exclude_from_pnl
         or tx.source == "settlement"
+        # Twin of `is_loan_credit`: a credit on a loan repays principal.
+        or (tx.type == "credit" and tx.account is not None and tx.account.type == "loan")
         or (category and (category.treat_as_transfer or category.is_ignored))
     )
 
