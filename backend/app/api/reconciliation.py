@@ -461,6 +461,15 @@ async def accept_suggestion(
         await suggestions.mark_accepted(session, member, ctx.user_id)
     # One event for the whole question, written where the whole act is known.
     await suggestions.answered(session, members, "accepted", ctx.user_id)
+    if row.expectation_kind == "transaction":
+        from app.services.transfer_detection_service import recheck_after_link
+
+        await recheck_after_link(
+            session,
+            ctx.workspace.id,
+            {m.transaction_id for m in members} | {m.expectation_id for m in members},
+            keep=frozenset(m.id for m in members),
+        )
     await session.commit()
     return await _with_label(session, row)
 

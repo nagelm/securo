@@ -340,6 +340,9 @@ async def detect_transfer_pairs(
         paired.update({tx_id, other_id})
         pairs_created += 1
 
+    # Questions already open about rows that just paired can only fail now.
+    await suggestions.expire_transfer_questions(session, workspace_id, paired)
+
     # Pass two: everything that looked like a transfer and was not certain.
     # Keyed on the unordered pair, because the same two rows reach here
     # from both ends and a person should be asked once.
@@ -366,6 +369,23 @@ async def detect_transfer_pairs(
         )
 
     return pairs_created
+
+
+async def recheck_after_link(
+    session: AsyncSession, workspace_id: uuid.UUID, leg_ids: set[uuid.UUID], *, keep: frozenset[uuid.UUID] = frozenset()
+) -> int:
+    """After two rows become a transfer: retire the questions that offered
+    either of them, and look again at the rows those questions offered.
+
+    A row that just lost a competing claim may now have a single best
+    answer (two identical payments on one day, one of them linked by hand,
+    leave the other with exactly one candidate), so it links or becomes a
+    fresh question. Returns the number of new pairs.
+    """
+    freed = await suggestions.expire_transfer_questions(session, workspace_id, leg_ids, keep=keep)
+    if not freed:
+        return 0
+    return await detect_transfer_pairs(session, workspace_id, candidate_ids=list(freed))
 
 
 async def unlink_transfer_pair(

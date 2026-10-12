@@ -355,6 +355,10 @@ async def link_transfer(
         debit_tx, credit_tx = await transaction_service.link_existing_as_transfer(
             session, ctx.workspace.id, data.transaction_ids
         )
+        from app.services.transfer_detection_service import recheck_after_link
+
+        await recheck_after_link(session, ctx.workspace.id, {debit_tx.id, credit_tx.id})
+        await session.commit()
         debit_full = await transaction_service.get_transaction(session, debit_tx.id, ctx.workspace.id)
         credit_full = await transaction_service.get_transaction(session, credit_tx.id, ctx.workspace.id)
         primary_currency = ctx.user.primary_currency
