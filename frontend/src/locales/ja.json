@@ -878,7 +878,8 @@
     "fxRateUsed": "為替レート: {{rate}}",
     "refreshRates": "為替レートを更新",
     "ratesRefreshed": "為替レートを更新しました",
-    "ratesError": "為替レートの更新に失敗しました"
+    "ratesError": "為替レートの更新に失敗しました",
+    "loanBalance": "Loans and mortgages"
   },
   "transactions": {
     "title": "取引",
@@ -1311,6 +1312,24 @@
       "active": "有効",
       "error": "エラー",
       "expired": "期限切れ"
+    },
+    "loan": {
+      "type": "Loan",
+      "subtype": "Loan type",
+      "subtypeNone": "Not specified",
+      "subtypes": {
+        "mortgage": "Mortgage",
+        "vehicle": "Vehicle loan",
+        "student": "Student loan",
+        "personal": "Personal loan",
+        "line_of_credit": "Line of credit",
+        "other": "Other loan"
+      },
+      "linkedAsset": "Linked asset",
+      "linkedAssetNone": "None",
+      "linkedAssetHint": "The asset this loan is secured against, such as the house for a mortgage.",
+      "amountOwed": "Amount owed",
+      "amountOwedHint": "Enter what you owe as a positive number. It shows as a negative balance."
     }
   },
   "connections": {

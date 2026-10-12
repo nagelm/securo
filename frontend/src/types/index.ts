@@ -185,9 +185,17 @@ export interface Account {
   card_brand: string | null
   card_level: string | null
   shared_balance_group: string | null
+  // Loan accounts only (type === 'loan'); null on every other type.
+  loan_subtype: LoanSubtype | null
+  secured_asset_id: string | null
+  // Provider loan facts (rate, maturity, ...) written by sync. Read-only.
+  loan_details: Record<string, unknown> | null
   is_closed: boolean
   closed_at: string | null
 }
+
+// The kinds of loan a `loan` account may be (backend account_service.LOAN_SUBTYPES).
+export type LoanSubtype = 'mortgage' | 'vehicle' | 'student' | 'personal' | 'line_of_credit' | 'other'
 
 export interface CreditCardBill {
   id: string
@@ -1614,7 +1622,7 @@ export interface ReconciliationConditions {
   /** Only pairs where one of the two legs sits on an account of this
    *  kind. Either leg is enough: a rule that exists to be careful about
    *  credit cards has to fire whichever end the card is on. */
-  account_types?: ('checking' | 'savings' | 'credit_card' | 'investment' | 'wallet')[]
+  account_types?: ('checking' | 'savings' | 'credit_card' | 'investment' | 'wallet' | 'loan')[]
   /** One side's statement text has to name the other side's account. The
    *  signal that tells two same-day transfers of the same amount apart,
    *  when one line reads "To FORTUNEO ACCOUNT" and the other does not. */

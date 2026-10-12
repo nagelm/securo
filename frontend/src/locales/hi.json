@@ -878,7 +878,8 @@
     "fxRateUsed": "FX दर: {{rate}}",
     "refreshRates": "FX दरें रीफ़्रेश करें",
     "ratesRefreshed": "FX दरें अपडेट हुईं",
-    "ratesError": "FX दरें अपडेट करने में विफल"
+    "ratesError": "FX दरें अपडेट करने में विफल",
+    "loanBalance": "Loans and mortgages"
   },
   "transactions": {
     "title": "लेन-देन",
@@ -1311,6 +1312,24 @@
       "active": "सक्रिय",
       "error": "त्रुटि",
       "expired": "समाप्त"
+    },
+    "loan": {
+      "type": "Loan",
+      "subtype": "Loan type",
+      "subtypeNone": "Not specified",
+      "subtypes": {
+        "mortgage": "Mortgage",
+        "vehicle": "Vehicle loan",
+        "student": "Student loan",
+        "personal": "Personal loan",
+        "line_of_credit": "Line of credit",
+        "other": "Other loan"
+      },
+      "linkedAsset": "Linked asset",
+      "linkedAssetNone": "None",
+      "linkedAssetHint": "The asset this loan is secured against, such as the house for a mortgage.",
+      "amountOwed": "Amount owed",
+      "amountOwedHint": "Enter what you owe as a positive number. It shows as a negative balance."
     }
   },
   "connections": {
