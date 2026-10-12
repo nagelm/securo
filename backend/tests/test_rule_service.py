@@ -1312,7 +1312,7 @@ def test_nz_rule_pack_matches_nz_bank_text(description, tx_type, expected):
     tx = SimpleNamespace(description=description, type=tx_type, payee=None, notes=None, amount=Decimal("10"),
                          account_id=None, payee_id=None, date=date(2026, 10, 12), status="posted")
     hits = [r["name"] for r in RULE_PACKS["NZ"]["rules"]
-            if evaluate_conditions(r["conditions_op"], r["conditions"], tx)]
+            if evaluate_conditions(r["conditions_op"], r["conditions"], tx)]  # ty: ignore[invalid-argument-type]
     assert hits == ([expected] if expected else [])
 
 
