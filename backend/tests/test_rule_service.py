@@ -1290,19 +1290,19 @@ async def test_install_nz_rule_pack_resolves_every_rule(session: AsyncSession, t
 
 
 @pytest.mark.parametrize("description,tx_type,expected", [
-    ("Kmart Example Mall", "debit", "NZ department and electronics stores"),
+    ("Kmart Riccarton Christchurch", "debit", "NZ department and electronics stores"),
     ("Farmers Online Order 0001", "debit", "NZ department and electronics stores"),
-    ("Farmers Market Example", "debit", None),
-    ("Unichem Example Pharmacy", "debit", "NZ pharmacies"),
+    ("Farmers Market Nelson", "debit", None),
+    ("Unichem Central Pharmacy Dunedin", "debit", "NZ pharmacies"),
     ("POS W/D Example Dental C-", "debit", "NZ doctors, dentists and optometrists"),
     ("Direct Debit -EXAMPLE CITY COUNCIL", "debit", "NZ council rates"),
-    ("Pak N Save Example", "debit", "NZ supermarkets"),
-    ("BP 2go Example", "debit", "NZ fuel"),
+    ("Pak N Save Hamilton", "debit", "NZ supermarkets"),
+    ("BP 2go Rotorua", "debit", "NZ fuel"),
     ("2degrees Mobile Example", "debit", "NZ phone and broadband"),
-    ("Example Playcentre", "debit", "NZ early childhood"),
+    ("Example Kindergarten Napier", "debit", "NZ early childhood"),
     ("IRD tax deduction example", "debit", "Inland Revenue (IRD)"),
     ("SkyCity Auckland", "debit", None),
-    ("Benefit payment MSD", "credit", None),
+    ("Refund Example Store", "credit", None),
 ])
 def test_nz_rule_pack_matches_nz_bank_text(description, tx_type, expected):
     from types import SimpleNamespace
