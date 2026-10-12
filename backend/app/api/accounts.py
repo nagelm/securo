@@ -19,7 +19,8 @@ from app.schemas.account import (
     AccountUpdate,
     CreditCardBillRead,
 )
-from app.services import account_service
+from app.schemas.loan_payment import LoanSummary
+from app.services import account_service, loan_payment_service
 from app.services.fx_rate_service import convert
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
@@ -128,6 +129,23 @@ async def get_account_bills(
     if bills is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
     return bills
+
+
+@router.get("/{account_id}/loan-summary", response_model=LoanSummary)
+async def get_loan_summary(
+    account_id: uuid.UUID,
+    months: int = Query(12, ge=1, le=120),
+    ctx: WorkspaceContext = Depends(current_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Paid, interest and principal reduction per month for a loan, read
+    from the ledger (synced and manual loans alike). Never writes."""
+    try:
+        return await loan_payment_service.get_loan_summary(session, ctx.workspace.id, account_id, months)
+    except loan_payment_service.LoanPaymentNotFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.get("/{account_id}", response_model=AccountRead)
