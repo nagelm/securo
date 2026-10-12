@@ -25,7 +25,11 @@ from app.services._query_filters import (
 )
 from app.services import invoice_forecast_service
 from app.services.admin_service import get_credit_card_accounting_mode
-from app.services.recurring_transaction_service import get_occurrences_in_range
+from app.services.recurring_transaction_service import (
+    LOAN_PAYMENT,
+    get_occurrences_in_range,
+    recurring_loan_legs,
+)
 from app.services.asset_service import get_asset_values_at
 from app.services.fx_rate_service import _resolve_rate, convert
 from app.models.user import User
@@ -85,7 +89,14 @@ async def _get_recurring_projections(
     Transfer-like categories are excluded by default because most callers use
     these rows for P&L, budgets, reports, or spending. Balance projections can
     opt in because transfers and investment applications still move cash in
-    the affected account. Ignored categories never participate."""
+    the affected account. Ignored categories never participate.
+
+    A recurring loan payment (``kind`` LOAN_PAYMENT) is a transfer of
+    the whole payment plus an interest debit on the loan, and is projected
+    leg by leg (design 4.2). P&L callers get only the interest, in its own
+    category: principal is never an expense, projected or not. The balance
+    projection gets every leg whose account is in scope, so with both
+    accounts in scope it nets to minus the interest, as net worth does."""
     if account_ids is not None and len(account_ids) == 0:
         return []
     filters = [
@@ -108,9 +119,17 @@ async def _get_recurring_projections(
         .where(*filters)
     )
     if account_ids:
-        stmt = stmt.where(RecurringTransaction.account_id.in_(account_ids))
+        stmt = stmt.where(
+            or_(
+                RecurringTransaction.account_id.in_(account_ids),
+                RecurringTransaction.transfer_account_id.in_(account_ids),
+            )
+        )
     result = await session.execute(stmt)
     recurring_list = list(result.scalars().all())
+    excluded_interest = await _excluded_interest_categories(
+        session, recurring_list, include_transfer_like=include_transfer_like
+    )
 
     # A recurrence may already have been materialized without its nominal
     # pointer being advanced yet (for example by generate-ahead workflows).
@@ -140,6 +159,22 @@ async def _get_recurring_projections(
         for occ_date in occurrences:
             if (rec.id, occ_date) in materialized_occurrences:
                 continue
+            if rec.kind == LOAN_PAYMENT:
+                for leg in recurring_loan_legs(rec):
+                    if account_ids is not None and leg.account_id not in account_ids:
+                        continue
+                    if leg.is_transfer and not include_transfer_like:
+                        continue
+                    if not leg.is_transfer and leg.category_id in excluded_interest:
+                        continue
+                    projections.append({
+                        "category_id": leg.category_id,
+                        "amount": float(leg.amount),
+                        "type": leg.type,
+                        "currency": rec.currency,
+                        "date": occ_date,
+                    })
+                continue
             projections.append({
                 "category_id": rec.category_id,
                 "amount": float(rec.amount),
@@ -148,6 +183,37 @@ async def _get_recurring_projections(
                 "date": occ_date,
             })
     return projections
+
+
+async def _excluded_interest_categories(
+    session: AsyncSession,
+    recurring_list: list[RecurringTransaction],
+    *,
+    include_transfer_like: bool,
+) -> set[uuid.UUID]:
+    """Interest categories of loan payment schedules whose interest is left out.
+
+    The same rule the schedule's own category gets: ignored never counts,
+    transfer-like counts only in the balance projection. Validation refuses
+    both when the schedule is saved; this covers a category changed later.
+    """
+    ids = {
+        rec.interest_category_id
+        for rec in recurring_list
+        if rec.kind == LOAN_PAYMENT and rec.interest_category_id is not None
+    }
+    if not ids:
+        return set()
+    rows = await session.execute(
+        select(Category.id, Category.is_ignored, Category.treat_as_transfer).where(
+            Category.id.in_(ids)
+        )
+    )
+    return {
+        cat_id
+        for cat_id, is_ignored, treat_as_transfer in rows.all()
+        if is_ignored or (treat_as_transfer and not include_transfer_like)
+    }
 
 
 async def _get_forecast_transactions(
@@ -1116,7 +1182,11 @@ async def get_projected_transactions(
     )
 
     # Pre-fetch categories for all recurring templates that have one
-    cat_ids = {r.category_id for r in recurring_list if r.category_id}
+    cat_ids = {r.category_id for r in recurring_list if r.category_id} | {
+        r.interest_category_id
+        for r in recurring_list
+        if r.kind == LOAN_PAYMENT and r.interest_category_id
+    }
     cat_map: dict[uuid.UUID, tuple[str, str, str]] = {}
     if cat_ids:
         cat_result = await session.execute(
@@ -1152,6 +1222,34 @@ async def get_projected_transactions(
                     (Decimal(str(rec.amount)) * rate).quantize(Decimal("0.01"))
                 )
 
+        # A loan payment lists once, as the whole payment leaving the paying
+        # account, with its loan and fixed interest attached. Only that
+        # interest is an expense; P&L views must read `interest_amount`,
+        # never `amount` (design 4.2).
+        loan_fields: dict = {}
+        if rec.kind == LOAN_PAYMENT:
+            interest = Decimal(str(rec.interest_amount or 0))
+            interest_primary = None
+            if amt_primary is not None and rec.amount:
+                interest_primary = float(
+                    (interest * Decimal(str(amt_primary)) / Decimal(str(rec.amount))).quantize(Decimal("0.01"))
+                )
+            i_name, i_icon, i_color = (
+                cat_map.get(rec.interest_category_id, (None, None, None))
+                if rec.interest_category_id
+                else (None, None, None)
+            )
+            loan_fields = dict(
+                kind=LOAN_PAYMENT,
+                transfer_account_id=str(rec.transfer_account_id) if rec.transfer_account_id else None,
+                interest_amount=float(interest),
+                interest_amount_primary=interest_primary,
+                interest_category_id=str(rec.interest_category_id) if rec.interest_category_id else None,
+                interest_category_name=i_name,
+                interest_category_icon=i_icon,
+                interest_category_color=i_color,
+            )
+
         for occ_date in occurrences:
             if (rec.id, occ_date) in materialized_occurrences:
                 continue
@@ -1168,6 +1266,7 @@ async def get_projected_transactions(
                 category_name=cat_name,
                 category_icon=cat_icon,
                 category_color=cat_color,
+                **loan_fields,
             ))
 
     return projections

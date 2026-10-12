@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 WeekendAdjustment = Literal["none", "previous_friday", "next_monday"]
 RecurringFrequency = Literal["weekly", "biweekly", "monthly", "quarterly", "semiannual", "yearly"]
 DayOfMonth = Annotated[int, Field(ge=1, le=31)]
+RecurringKind = Literal["standard", "loan_payment"]
 
 
 class RecurringTransactionCreate(BaseModel):
@@ -24,6 +25,13 @@ class RecurringTransactionCreate(BaseModel):
     category_id: Optional[uuid.UUID] = None
     skip_first: bool = False  # Set true when first occurrence already created as a transaction
     auto_generate: bool = True  # Materialize occurrences; when false, wait for the real charge
+    # A loan payment: `account_id` pays the loan `transfer_account_id`;
+    # `amount` is the whole payment and `interest_amount` its fixed interest
+    # share, booked in `interest_category_id`. The service validates them.
+    kind: RecurringKind = "standard"
+    transfer_account_id: Optional[uuid.UUID] = None
+    interest_amount: Optional[Decimal] = None
+    interest_category_id: Optional[uuid.UUID] = None
 
 
 class RecurringTransactionUpdate(BaseModel):
@@ -40,6 +48,11 @@ class RecurringTransactionUpdate(BaseModel):
     category_id: Optional[uuid.UUID] = None
     is_active: Optional[bool] = None
     auto_generate: Optional[bool] = None
+    # The kind of a schedule never changes; a loan payment's loan and
+    # interest split can.
+    transfer_account_id: Optional[uuid.UUID] = None
+    interest_amount: Optional[Decimal] = None
+    interest_category_id: Optional[uuid.UUID] = None
 
 
 class RecurringTransactionRead(BaseModel):
@@ -61,5 +74,9 @@ class RecurringTransactionRead(BaseModel):
     next_occurrence: _Date
     amount_primary: Optional[float] = None
     fx_rate_used: Optional[float] = None
+    kind: RecurringKind = "standard"
+    transfer_account_id: Optional[uuid.UUID] = None
+    interest_amount: Optional[Decimal] = None
+    interest_category_id: Optional[uuid.UUID] = None
 
     model_config = ConfigDict(from_attributes=True)

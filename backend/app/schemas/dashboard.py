@@ -72,3 +72,13 @@ class ProjectedTransaction(BaseModel):
     category_name: Optional[str]
     category_icon: Optional[str]
     category_color: Optional[str] = None
+    # A recurring loan payment: `amount` is the whole payment leaving the
+    # paying account; only `interest_amount` is an expense.
+    kind: str = "standard"
+    transfer_account_id: Optional[str] = None
+    interest_amount: Optional[float] = None
+    interest_amount_primary: Optional[float] = None
+    interest_category_id: Optional[str] = None
+    interest_category_name: Optional[str] = None
+    interest_category_icon: Optional[str] = None
+    interest_category_color: Optional[str] = None

@@ -1,7 +1,10 @@
 import calendar
+import logging
 import uuid
+from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Optional
+from decimal import Decimal
+from typing import Any, Optional
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +18,13 @@ from app.schemas.recurring_transaction import RecurringTransactionCreate, Recurr
 from app.services import recurring_match_service
 from app.services.credit_card_service import apply_effective_date
 from app.services.fx_rate_service import stamp_primary_amount
+
+logger = logging.getLogger(__name__)
+
+STANDARD = "standard"
+LOAN_PAYMENT = "loan_payment"
+
+_LOAN_FIELDS = ("transfer_account_id", "interest_amount", "interest_category_id")
 
 
 async def _verify_account_in_workspace(
@@ -34,6 +44,118 @@ async def _verify_account_in_workspace(
     )
     if result.scalar_one_or_none() is None:
         raise ValueError("Account not found")
+
+
+# ---------------------------------------------------------------------------
+# loan payments (kind = "loan_payment")
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RecurringLoanLeg:
+    """One row an occurrence of a recurring loan payment stands for.
+
+    `cash` (debit on the paying account) and `loan` (credit on the loan) are
+    the two legs of a transfer: the whole payment moving between two of the
+    user's own accounts, so never income or expense. `interest` (debit on
+    the loan) is the only leg that is an expense.
+    """
+
+    role: str  # cash, loan, interest
+    account_id: uuid.UUID
+    type: str
+    amount: Decimal
+    category_id: Optional[uuid.UUID]
+    is_transfer: bool
+
+
+def recurring_loan_legs(recurring: RecurringTransaction) -> list[RecurringLoanLeg]:
+    """The rows one occurrence of a loan payment schedule stands for (design 3.1)."""
+    if (
+        recurring.kind != LOAN_PAYMENT
+        or recurring.account_id is None
+        or recurring.transfer_account_id is None
+    ):
+        return []
+    total = Decimal(str(recurring.amount))
+    legs = [
+        RecurringLoanLeg("cash", recurring.account_id, "debit", total, None, True),
+        RecurringLoanLeg("loan", recurring.transfer_account_id, "credit", total, None, True),
+    ]
+    interest = Decimal(str(recurring.interest_amount or 0))
+    if interest > 0:
+        legs.append(
+            RecurringLoanLeg(
+                "interest", recurring.transfer_account_id, "debit", interest,
+                recurring.interest_category_id, False,
+            )
+        )
+    return legs
+
+
+def _reject_loan_fields(values: dict[str, Any]) -> None:
+    if any(values.get(field) is not None for field in _LOAN_FIELDS):
+        raise ValueError(
+            "Only a loan payment has a loan, an interest amount or an interest category"
+        )
+
+
+async def _loan_payment_values(
+    session: AsyncSession, workspace_id: uuid.UUID, values: dict[str, Any]
+) -> dict[str, Any]:
+    """Validate a loan payment schedule and return its normalised fields.
+
+    The same rules as recording one payment (design 3.2), except that a
+    bank-connected loan is allowed: its schedule is projection only, because
+    sync writes the real repayment and interest rows (decision D3).
+    """
+    from app.services import account_service, loan_payment_service
+
+    if values.get("type") != "debit":
+        raise ValueError("A loan payment is a debit on the paying account")
+    if values.get("category_id") is not None:
+        raise ValueError(
+            "A loan payment has no category; its interest has its own category"
+        )
+    loan_id = values.get("transfer_account_id")
+    if loan_id is None:
+        raise ValueError("transfer_account_id (the loan) is required")
+    loan = await account_service.get_account(session, loan_id, workspace_id)
+    if loan is None:
+        raise ValueError("Loan account not found")
+    if loan.type != "loan":
+        raise ValueError("The destination account is not a loan")
+    if loan.is_closed:
+        raise ValueError("Loan account is closed")
+    paying = await account_service.get_account(session, values["account_id"], workspace_id)
+    if paying is None:
+        raise ValueError("Account not found")
+    loan_payment_service._check_paying_account(paying, loan)
+
+    total, interest = loan_payment_service._validate_amounts(
+        values["amount"], values.get("interest_amount") or Decimal("0")
+    )
+    interest_category_id = values.get("interest_category_id")
+    if interest > 0:
+        await loan_payment_service._check_interest_category(
+            session, workspace_id, interest_category_id
+        )
+
+    auto_generate = bool(values.get("auto_generate", True))
+    if paying.connection_id is not None or loan.connection_id is not None:
+        # The bank writes the real rows; generating ours as well would count
+        # the payment twice. The schedule only forecasts (design 4.3).
+        auto_generate = False
+    return {
+        "amount": total,
+        "currency": loan.currency,
+        "type": "debit",
+        "category_id": None,
+        "transfer_account_id": loan.id,
+        "interest_amount": interest,
+        "interest_category_id": interest_category_id,
+        "auto_generate": auto_generate,
+    }
 
 
 async def get_recurring_transactions(
@@ -64,6 +186,11 @@ async def create_recurring_transaction(
     data: RecurringTransactionCreate,
 ) -> RecurringTransaction:
     await _verify_account_in_workspace(session, workspace_id, data.account_id)
+    values = data.model_dump()
+    if data.kind == LOAN_PAYMENT:
+        values.update(await _loan_payment_values(session, workspace_id, values))
+    else:
+        _reject_loan_fields(values)
     next_occ = data.start_date
     if data.skip_first:
         next_occ = _advance_date(
@@ -74,18 +201,22 @@ async def create_recurring_transaction(
         user_id=user_id,
         workspace_id=workspace_id,
         account_id=data.account_id,
-        category_id=data.category_id,
+        category_id=values["category_id"],
         description=data.description,
-        amount=data.amount,
-        currency=data.currency,
-        type=data.type,
+        amount=values["amount"],
+        currency=values["currency"],
+        type=values["type"],
         frequency=data.frequency,
         weekend_adjustment=data.weekend_adjustment,
         day_of_month=data.day_of_month,
         start_date=data.start_date,
         end_date=data.end_date,
-        auto_generate=data.auto_generate,
+        auto_generate=values["auto_generate"],
         next_occurrence=next_occ,
+        kind=data.kind,
+        transfer_account_id=values["transfer_account_id"],
+        interest_amount=values["interest_amount"],
+        interest_category_id=values["interest_category_id"],
     )
     session.add(recurring)
     await session.flush()
@@ -119,6 +250,18 @@ async def update_recurring_transaction(
             raise ValueError("account_id is required")
         if new_account_id != recurring.account_id:
             await _verify_account_in_workspace(session, workspace_id, new_account_id)
+
+    if recurring.kind == LOAN_PAYMENT:
+        merged = {
+            field: update_data.get(field, getattr(recurring, field))
+            for field in (
+                "account_id", "category_id", "amount", "type", "auto_generate",
+                *_LOAN_FIELDS,
+            )
+        }
+        update_data.update(await _loan_payment_values(session, workspace_id, merged))
+    else:
+        _reject_loan_fields(update_data)
 
     schedule_changed = any(
         key in update_data and update_data[key] != getattr(recurring, key)
@@ -324,6 +467,9 @@ async def generate_pending(
         if recurring.account_id is None:
             continue
         cutoff = up_to or cutoffs.get(recurring.workspace_id) or app_today()
+        if recurring.kind == LOAN_PAYMENT:
+            count += await _generate_loan_payments(session, user_id, recurring, cutoff)
+            continue
         # Generate while the effective date is due. The nominal pointer remains
         # authoritative and is the only date used for schedule advancement and
         # end-date evaluation.
@@ -398,3 +544,101 @@ async def generate_pending(
 
     await session.commit()
     return count
+
+
+async def _generate_loan_payments(
+    session: AsyncSession, user_id: uuid.UUID, recurring: RecurringTransaction, cutoff: date
+) -> int:
+    """Record the due occurrences of a loan payment schedule; return rows written.
+
+    Each occurrence is a real loan payment (design 3.1, 4.3): a transfer pair
+    of the whole amount from the paying account to the loan plus the
+    interest row, stamped with this schedule. Only manual accounts get this
+    far: when either account is bank-connected the bank writes those rows,
+    so the schedule is switched to projection only instead.
+    """
+    from app.schemas.loan_payment import LoanPaymentCreate
+    from app.services.loan_payment_service import (
+        LoanPaymentConflict,
+        LoanPaymentNotFound,
+        record_payment,
+    )
+
+    paying = await session.get(Account, recurring.account_id) if recurring.account_id else None
+    loan = (
+        await session.get(Account, recurring.transfer_account_id)
+        if recurring.transfer_account_id
+        else None
+    )
+    if paying is None or loan is None:
+        return 0
+    if paying.connection_id is not None or loan.connection_id is not None:
+        recurring.auto_generate = False
+        return 0
+
+    written = 0
+    while True:
+        effective_occurrence = adjust_weekend_date(
+            recurring.next_occurrence, recurring.weekend_adjustment
+        )
+        if effective_occurrence > cutoff:
+            break
+        if recurring.end_date and recurring.next_occurrence > recurring.end_date:
+            recurring.is_active = False
+            break
+
+        total = Decimal(str(recurring.amount))
+        interest = Decimal(str(recurring.interest_amount or 0))
+        existing_real = await recurring_match_service.find_real_tx_for_occurrence(
+            session, recurring, effective_occurrence
+        )
+        if existing_real is not None:
+            # A debit already on the paying account (imported or typed in)
+            # covers this occurrence: pair it with the loan rather than
+            # writing a second one.
+            existing_real.recurring_transaction_id = recurring.id
+            payload = LoanPaymentCreate(
+                loan_account_id=loan.id,
+                existing_transaction_id=existing_real.id,
+                total_amount=total,
+                interest_amount=interest,
+                interest_category_id=recurring.interest_category_id,
+                description=recurring.description,
+            )
+            new_rows = 1 + (1 if interest > 0 else 0)
+        else:
+            payload = LoanPaymentCreate(
+                loan_account_id=loan.id,
+                cash_account_id=paying.id,
+                date=effective_occurrence,
+                total_amount=total,
+                interest_amount=interest,
+                interest_category_id=recurring.interest_category_id,
+                description=recurring.description,
+            )
+            new_rows = 2 + (1 if interest > 0 else 0)
+        try:
+            # Checks everything before writing anything, then commits once.
+            await record_payment(
+                session, recurring.workspace_id, user_id, payload,
+                recurring_transaction_id=recurring.id,
+            )
+            written += new_rows
+        except (ValueError, LoanPaymentConflict, LoanPaymentNotFound) as exc:
+            if existing_real is None:
+                # Nothing was written. Leave the occurrence due and stop: the
+                # schedule needs fixing (a closed loan, a removed category).
+                logger.warning(
+                    "Recurring loan payment %s not generated: %s", recurring.id, exc
+                )
+                break
+            # The existing debit can't be paired (pending, already part of
+            # a transfer): it stays linked, as for any other bill.
+
+        recurring.next_occurrence = _advance_date(
+            recurring.next_occurrence, recurring.frequency,
+            intended_day=recurring.day_of_month or recurring.start_date.day,
+        )
+        if recurring.end_date and recurring.next_occurrence > recurring.end_date:
+            recurring.is_active = False
+    return written

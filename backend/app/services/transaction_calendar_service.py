@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Literal, Optional, cast
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -26,8 +26,10 @@ from app.services.dashboard_service import (
 )
 from app.services.fx_rate_service import convert as fx_convert
 from app.services.recurring_transaction_service import (
+    LOAN_PAYMENT,
     adjust_weekend_date,
     get_occurrences_in_range,
+    recurring_loan_legs,
 )
 
 
@@ -462,7 +464,12 @@ async def _project_recurring_items(
         )
     )
     if account_ids is not None:
-        stmt = stmt.where(RecurringTransaction.account_id.in_(account_ids))
+        stmt = stmt.where(
+            or_(
+                RecurringTransaction.account_id.in_(account_ids),
+                RecurringTransaction.transfer_account_id.in_(account_ids),
+            )
+        )
     result = await session.execute(stmt)
     recurring_rows = list(result.scalars().all())
 
@@ -471,6 +478,11 @@ async def _project_recurring_items(
     carried_delta = 0.0
     for rec in recurring_rows:
         if rec.account_id is None:
+            continue
+        if rec.kind == LOAN_PAYMENT:
+            carried_delta += await _project_loan_payment_items(
+                session, rec, primary_currency, start, end, account_ids, items, deltas
+            )
             continue
         occurrences = get_occurrences_in_range(
             start=rec.next_occurrence,
@@ -519,3 +531,75 @@ async def _project_recurring_items(
             if not is_ignored:
                 deltas[occ_date] = deltas.get(occ_date, 0.0) + signed_delta
     return items, deltas, carried_delta
+
+
+async def _project_loan_payment_items(
+    session: AsyncSession,
+    rec: RecurringTransaction,
+    primary_currency: str,
+    start: date,
+    end: date,
+    account_ids: Optional[list[uuid.UUID]],
+    items: list[tuple[TransactionCalendarItem, float]],
+    deltas: dict[date, float],
+) -> float:
+    """Project a recurring loan payment as the rows it will write.
+
+    The whole payment is a transfer (out of the paying account, into the
+    loan) and only the interest on the loan is an expense, exactly like the
+    posted rows of a loan payment, so the calendar never shows principal as
+    spending. Legs on accounts outside the filter are left out. Returns the
+    balance carried in from occurrences before ``start``.
+    """
+    occurrences = get_occurrences_in_range(
+        start=rec.next_occurrence,
+        frequency=rec.frequency,
+        end_date=rec.end_date,
+        range_start=start,
+        range_end=end,
+        intended_day=rec.day_of_month or rec.start_date.day,
+        weekend_adjustment=rec.weekend_adjustment,
+    )
+    carried = 0.0
+    before = _count_occurrences_before(rec, start)
+    for leg in recurring_loan_legs(rec):
+        if account_ids is not None and leg.account_id not in account_ids:
+            continue
+        account = await session.get(Account, leg.account_id)
+        if account is None or account.is_closed:
+            continue
+        category = (
+            await session.get(Category, leg.category_id) if leg.category_id is not None else None
+        )
+        amount_primary = await _positive_primary_amount(
+            session, leg.amount, rec.currency, primary_currency
+        )
+        signed_delta = amount_primary if leg.type == "credit" else -amount_primary
+        is_transfer = leg.is_transfer or bool(category and category.treat_as_transfer)
+        is_ignored = bool(category and category.is_ignored)
+        if not is_ignored:
+            carried += before * signed_delta
+        for occ_date in occurrences:
+            item = TransactionCalendarItem(
+                kind="projected",
+                recurring_id=rec.id,
+                date=occ_date,
+                description=rec.description,
+                amount=float(leg.amount),
+                amount_primary=amount_primary,
+                currency=rec.currency,
+                type=cast(Literal["debit", "credit"], leg.type),
+                account_id=leg.account_id,
+                account_name=account.display_name or account.name,
+                category_id=leg.category_id,
+                category_name=category.name if category else None,
+                category_icon=category.icon if category else None,
+                category_color=category.color if category else None,
+                source="recurring",
+                is_transfer=is_transfer,
+                is_ignored=is_ignored,
+            )
+            items.append((item, signed_delta))
+            if not is_ignored:
+                deltas[occ_date] = deltas.get(occ_date, 0.0) + signed_delta
+    return carried
