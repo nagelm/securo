@@ -43,6 +43,10 @@ DEFAULT_CATEGORIES_I18N = {
     "subscriptions": {"en": "Subscriptions",   "pt-BR": "Assinaturas",       "pt-PT": "Subscrições",           "de": "Abonnements",        "fr": "Abonnements",                "nl": "Abonnementen",            "sk": "Predplatné", "icon": "smartphone",       "color": "#6366F1"},
     "education":     {"en": "Education",       "pt-BR": "Educação",          "pt-PT": "Educação",              "de": "Bildung",            "fr": "Éducation",                  "nl": "Educatie",                "sk": "Vzdelávanie", "icon": "book-open",        "color": "#22C55E"},
     "transfers":     {"en": "Transfers",       "pt-BR": "Transferências",    "pt-PT": "Transferências",        "de": "Umbuchungen",        "fr": "Virements",                  "nl": "Overboekingen",           "sk": "Prevody", "icon": "arrow-left-right", "color": "#64748B", "treat_as_transfer": True},
+    # Principal paid off a loan: the paired transfer from the paying account
+    # to a loan account. A flow, like Transfers; the loan's interest is a
+    # separate expense row.
+    "loan_repayments": {"en": "Loan repayments", "pt-BR": "Pagamentos de empréstimos", "pt-PT": "Amortizações de empréstimos", "de": "Kredittilgungen", "fr": "Remboursements de prêts", "nl": "Aflossingen", "sk": "Splátky úverov", "icon": "trending-down", "color": "#64748B", "treat_as_transfer": True},
     "investments":   {"en": "Investments",     "pt-BR": "Investimentos",     "pt-PT": "Investimentos",         "de": "Investitionen",      "fr": "Investissements",            "nl": "Investeringen",           "sk": "Investície", "icon": "trending-up",      "color": "#0EA5E9", "treat_as_transfer": True},
     "salary":        {"en": "Salary & Income", "pt-BR": "Salário & Renda",   "pt-PT": "Salário & Rendimentos", "de": "Gehalt & Einnahmen", "fr": "Salaire & Revenus",          "nl": "Salaris & Inkomen",       "sk": "Mzda a príjmy", "icon": "banknote",         "color": "#16A34A"},
     "shopping":      {"en": "Shopping",        "pt-BR": "Compras",           "pt-PT": "Compras",               "de": "Shopping",           "fr": "Achats",                     "nl": "Winkelen",                "sk": "Nákupy", "icon": "shopping-bag",     "color": "#F97316"},
@@ -51,6 +55,42 @@ DEFAULT_CATEGORIES_I18N = {
     "taxes":         {"en": "Taxes & Fees",    "pt-BR": "Impostos & Taxas",  "pt-PT": "Impostos & Taxas",      "de": "Steuern & Gebühren", "fr": "Impôts & Taxes",             "nl": "Belastingen & Heffingen", "sk": "Dane a poplatky", "icon": "landmark",         "color": "#78716C"},
     "other":         {"en": "Other",           "pt-BR": "Outros",            "pt-PT": "Outros",                "de": "Sonstiges",          "fr": "Autres",                     "nl": "Overig",                  "sk": "Ostatné", "icon": "circle-help",      "color": "#6B7280"},
 }
+
+
+# Fields of a DEFAULT_CATEGORIES_I18N entry that are not a translated name.
+_NON_NAME_FIELDS = frozenset({"icon", "color", "treat_as_transfer"})
+
+
+def default_category_names(key: str) -> list[str]:
+    """Every translated name of the default category ``key`` (empty if unknown).
+
+    Defaults are seeded under the workspace language's name, so a key matches
+    the workspace category carrying any of these names.
+    """
+    return [
+        value
+        for field, value in (DEFAULT_CATEGORIES_I18N.get(key) or {}).items()
+        if field not in _NON_NAME_FIELDS and isinstance(value, str)
+    ]
+
+
+async def find_default_category(
+    session: AsyncSession, workspace_id: uuid.UUID, key: str
+) -> Optional[uuid.UUID]:
+    """The workspace category for the default key ``key``, or None.
+
+    A renamed or deleted default doesn't match.
+    """
+    names = default_category_names(key)
+    if not names:
+        return None
+    result = await session.execute(
+        select(Category.id)
+        .where(Category.workspace_id == workspace_id, Category.name.in_(names))
+        .order_by(Category.id)
+        .limit(1)
+    )
+    return result.scalars().first()
 
 
 async def create_default_categories(
