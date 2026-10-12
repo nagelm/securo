@@ -139,6 +139,9 @@ class Transaction(Base):
     parent_owner_name = cast(Optional[str], None)
     attachment_count: int = 0
     payee_name = cast(Optional[str], None)
+    # Set with payee_name by app.services.payee_display.apply_payee_display.
+    payee_logo_url = cast(Optional[str], None)
+    payee_icon = cast(Optional[str], None)
 
 
 # Safety net: `effective_date` is NOT NULL. For non-CC transactions it always

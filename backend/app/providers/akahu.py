@@ -293,6 +293,25 @@ def notes_for(raw: dict) -> Optional[str]:
     return " · ".join(parts)[:1000] or None
 
 
+def merchant_logo_for(raw: dict) -> Optional[str]:
+    """The matched merchant's logo URL, or None when there isn't a real one.
+
+    ``meta.logo`` is "typically the logo of the transaction merchant", and a
+    generic placeholder (``…/merchants/default.png``) when Akahu has none.
+    Only a row Akahu matched to a merchant (``merchant._id``) counts, and the
+    placeholder never does: a payee without a real logo is left for the user
+    to pick an icon for.
+    """
+    if not (raw.get("merchant") or {}).get("_id"):
+        return None
+    logo = (raw.get("meta") or {}).get("logo")
+    if not isinstance(logo, str) or not logo.startswith("https://"):
+        return None
+    if logo.rsplit("/", 1)[-1].split("?", 1)[0].lower() in ("default", "default.png"):
+        return None
+    return logo[:500]
+
+
 def account_number_sets(raw_accounts: list[dict]) -> tuple[frozenset[str], frozenset[str]]:
     """(own account numbers, investment payment account numbers) as digit strings."""
     own = {account_digits(a.get("formatted_account")) for a in raw_accounts}
@@ -650,11 +669,13 @@ class AkahuProvider(BankProvider):
         description = clean_description(raw.get("description")) or merchant or raw.get("type") or "Transaction"
         payee = None
         payee_website = None
+        payee_logo_url = None
         if payee_source != "none" and isinstance(merchant, str) and merchant.strip():
             payee = merchant.strip()[:500]
             website = merchant_obj.get("website")
             if isinstance(website, str) and website.startswith(("http://", "https://")):
                 payee_website = website[:255]
+            payee_logo_url = merchant_logo_for(raw)
 
         # A purchase made abroad: Akahu's conversion holds the amount and
         # currency actually charged ("a payment of GBP 2.15"); the row's own
@@ -684,6 +705,7 @@ class AkahuProvider(BankProvider):
             category_hint=category_hint_for(raw, own_accounts, investment_accounts),
             notes=notes_for(raw),
             payee_website=payee_website,
+            payee_logo_url=payee_logo_url,
         )
 
     # ----- investments ------------------------------------------------------

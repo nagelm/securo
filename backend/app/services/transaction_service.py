@@ -24,6 +24,7 @@ from app.schemas.transaction import (
 from app.schemas.transaction_split import TransactionSplitInput, TransactionSplitsInput
 from app.services import reconciliation_service, split_service
 from app.services.credit_card_service import apply_effective_date
+from app.services.payee_display import apply_payee_display
 from app.services.rule_service import apply_rules_to_transaction
 from app.services.fx_rate_service import stamp_primary_amount, convert as fx_convert
 from app.services._query_filters import (
@@ -519,7 +520,7 @@ async def get_transactions(
         counts = {row[0]: row[1] for row in count_rows.all()}
         for tx in transactions:
             tx.attachment_count = counts.get(tx.id, 0)
-            tx.payee_name = tx.payee_entity.name if tx.payee_entity else None
+            apply_payee_display(tx)
         # Tag shared rows with the viewer's share + the source group.
         # Owned rows stay as-is. We pre-compute the viewer's linked
         # member ids → group ids once, then look up each transaction's
@@ -682,7 +683,7 @@ async def get_transaction(
             )
         )
         transaction.attachment_count = count_result.scalar_one()
-        transaction.payee_name = transaction.payee_entity.name if transaction.payee_entity else None
+        apply_payee_display(transaction)
     return transaction
 
 
@@ -1080,7 +1081,7 @@ async def get_transfer_candidates(
         counts = {row[0]: row[1] for row in count_rows.all()}
         for tx in candidates:
             tx.attachment_count = counts.get(tx.id, 0)
-            tx.payee_name = tx.payee_entity.name if tx.payee_entity else None
+            apply_payee_display(tx)
 
     return candidates
 
@@ -1116,7 +1117,7 @@ async def get_transfer_pair(
     )
     pair = result.scalars().first()
     if pair:
-        pair.payee_name = pair.payee_entity.name if pair.payee_entity else None
+        apply_payee_display(pair)
     return pair
 
 

@@ -1,6 +1,6 @@
 import { getAccountName } from '@/lib/account-utils'
 import { AccountIcon } from '@/components/account-icon'
-import { CategoryIcon } from '@/components/category-icon'
+import { PayeeIcon } from '@/components/payee-icon'
 import type { Transaction, Account } from '@/types'
 import { AlertTriangle, ArrowLeftRight, CalendarClock, ChartNoAxesColumn, Clock, EyeClosed, Paperclip } from 'lucide-react'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
@@ -93,9 +93,15 @@ export function MobileTransactionRow({
         </div>
       )}
 
-      {/* Category Icon */}
+      {/* Payee icon or logo, else the category icon */}
       <div className="shrink-0">
-        <CategoryIcon icon={tx.category?.icon} color={tx.category?.color} size="md" />
+        <PayeeIcon
+          icon={tx.payee_icon}
+          logoUrl={tx.payee_logo_url}
+          fallbackIcon={tx.category?.icon}
+          fallbackColor={tx.category?.color}
+          size="md"
+        />
       </div>
 
       {/* Content */}

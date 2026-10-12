@@ -45,12 +45,14 @@ vi.mock('@/hooks/use-privacy-mode', () => ({
 const payees = [
   {
     id: 'alpha', user_id: 'user-1', name: 'Alpha', type: 'person', source: 'manual', is_favorite: false,
-    notes: null, email: null, phone: null, address: null, website: null, tax_ids: [],
+    notes: null, email: null, phone: null, address: null, website: null,
+    logo_url: null, icon: null, display_logo_url: null, tax_ids: [],
     created_at: '2026-01-01T00:00:00Z', transaction_count: 1,
   },
   {
     id: 'zeta', user_id: 'user-1', name: 'Zeta', type: 'company', source: 'manual', is_favorite: false,
-    notes: null, email: null, phone: null, address: null, website: null, tax_ids: [],
+    notes: null, email: null, phone: null, address: null, website: null,
+    logo_url: null, icon: null, display_logo_url: null, tax_ids: [],
     created_at: '2026-01-01T00:00:00Z', transaction_count: 3,
   },
 ]

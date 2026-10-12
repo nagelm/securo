@@ -173,6 +173,10 @@ class TransactionRead(TransactionBase):
     original_description: Optional[str] = None
     payee_id: Optional[uuid.UUID] = None
     payee_name: Optional[str] = None
+    #: How the payee is drawn on the row: the icon the user picked for it,
+    #: else this logo, else the category icon.
+    payee_logo_url: Optional[str] = None
+    payee_icon: Optional[str] = None
     notes: Optional[str] = None
     transfer_pair_id: Optional[uuid.UUID] = None
     amount_primary: Optional[float] = None

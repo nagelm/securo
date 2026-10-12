@@ -52,7 +52,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Search, Star, Merge, Trash2, ListFilter, X, Check, Pencil, Plus, ArrowDown, ArrowUp } from 'lucide-react'
+import { Search, Star, Merge, Trash2, ListFilter, X, Check, Pencil, Plus, ArrowDown, ArrowUp, ImageOff } from 'lucide-react'
+import { IconPicker } from '@/components/icon-picker'
+import { PayeeIcon } from '@/components/payee-icon'
 import { useWorkspace } from '@/contexts/workspace-context'
 import type { Payee } from '@/types'
 import { payeeErrorMessage } from '@/lib/payee-error-message'
@@ -93,6 +95,9 @@ export default function PayeesPage() {
   const [mergeTargetId, setMergeTargetId] = useState<string>('')
   const [filterType, setFilterType] = useState(() => searchParams.get('type') ?? '')
   const [filterFavorites, setFilterFavorites] = useState(() => searchParams.get('is_favorite') === 'true')
+  // Payees nothing can be drawn for (no picked icon, logo or website): the
+  // ones automatic logos could not cover, left for the icon picker.
+  const [filterNeedsIcon, setFilterNeedsIcon] = useState(() => searchParams.get('needs_icon') === 'true')
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [payeesToDelete, setPayeesToDelete] = useState<string[]>([])
   const [sort, setSort] = useState<PayeeSort>(() => loadPayeeSort())
@@ -114,7 +119,7 @@ export default function PayeesPage() {
   const [previousSearch, setPreviousSearch] = useState(() => searchParams.toString())
   // Declared here rather than next to its guard below: the URL-sync block
   // primes it, and a `const` cannot be touched above its own declaration.
-  const [selectionFilter, setSelectionFilter] = useState({ searchQuery, filterType, filterFavorites })
+  const [selectionFilter, setSelectionFilter] = useState({ searchQuery, filterType, filterFavorites, filterNeedsIcon })
 
   // Navigation replaces the draft and applied filters together.
   const currentSearch = searchParams.toString()
@@ -125,13 +130,15 @@ export default function PayeesPage() {
     setSearchQuery(nextQ)
     const nextType = searchParams.get('type') ?? ''
     const nextFavorites = searchParams.get('is_favorite') === 'true'
+    const nextNeedsIcon = searchParams.get('needs_icon') === 'true'
     setFilterType(nextType)
     setFilterFavorites(nextFavorites)
+    setFilterNeedsIcon(nextNeedsIcon)
     setPage(Math.max(1, Number(searchParams.get('page')) || 1))
     // Filters and page arrived together, so this is not a filter *change*.
     // Priming the guard below stops it from throwing away the page the same
     // URL just asked for.
-    setSelectionFilter({ searchQuery: nextQ, filterType: nextType, filterFavorites: nextFavorites })
+    setSelectionFilter({ searchQuery: nextQ, filterType: nextType, filterFavorites: nextFavorites, filterNeedsIcon: nextNeedsIcon })
   }
 
   // Sync states back to URL searchParams
@@ -141,6 +148,7 @@ export default function PayeesPage() {
         ['q', searchQuery],
         ['type', filterType],
         ['is_favorite', filterFavorites ? 'true' : ''],
+        ['needs_icon', filterNeedsIcon ? 'true' : ''],
         ['page', page > 1 ? String(page) : ''],
       ].filter(([, v]) => v && v.length),
     )
@@ -150,7 +158,7 @@ export default function PayeesPage() {
       '',
       params.size ? `?${params}` : window.location.pathname,
     )
-  }, [searchQuery, filterType, filterFavorites, page])
+  }, [searchQuery, filterType, filterFavorites, filterNeedsIcon, page])
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -162,8 +170,8 @@ export default function PayeesPage() {
     }
   }, [search])
 
-  if (selectionFilter.searchQuery !== searchQuery || selectionFilter.filterType !== filterType || selectionFilter.filterFavorites !== filterFavorites) {
-    setSelectionFilter({ searchQuery, filterType, filterFavorites })
+  if (selectionFilter.searchQuery !== searchQuery || selectionFilter.filterType !== filterType || selectionFilter.filterFavorites !== filterFavorites || selectionFilter.filterNeedsIcon !== filterNeedsIcon) {
+    setSelectionFilter({ searchQuery, filterType, filterFavorites, filterNeedsIcon })
     setSelectedIds(new Set())
     setLastSelectedId(null)
     setPage(1)
@@ -196,6 +204,8 @@ export default function PayeesPage() {
   const [formPhone, setFormPhone] = useState('')
   const [formAddress, setFormAddress] = useState('')
   const [formWebsite, setFormWebsite] = useState('')
+  // Empty means no picked icon, so the payee shows its logo when it has one.
+  const [formIcon, setFormIcon] = useState('')
   // Documents this payee has, as ordered rows. A list rather than a slot per
   // possible kind: most cadastros need one document, and a column of empty
   // boxes labelled with documents the user has never heard of reads as a
@@ -218,11 +228,12 @@ export default function PayeesPage() {
   const usedKinds = new Set(taxIdRows.map((r) => r.kind))
 
   const { data: payeesList, isLoading } = useQuery({
-    queryKey: ['payees', searchQuery, filterType, filterFavorites],
+    queryKey: ['payees', searchQuery, filterType, filterFavorites, filterNeedsIcon],
     queryFn: () => payeesApi.list({
       q: searchQuery || undefined,
       type: filterType || undefined,
       is_favorite: filterFavorites || undefined,
+      needs_icon: filterNeedsIcon || undefined,
     }),
   })
 
@@ -360,6 +371,7 @@ export default function PayeesPage() {
     setFormPhone('')
     setFormAddress('')
     setFormWebsite('')
+    setFormIcon('')
     setTaxIdRows(seedTaxIdRows())
     setDialogOpen(true)
   }
@@ -373,6 +385,7 @@ export default function PayeesPage() {
     setFormPhone(payee.phone ?? '')
     setFormAddress(payee.address ?? '')
     setFormWebsite(payee.website ?? '')
+    setFormIcon(payee.icon ?? '')
     // Every stored document becomes a row, including kinds this jurisdiction
     // does not ask for: a German VAT number on a Brazilian workspace is a
     // normal state, and hiding it would be worse than showing it.
@@ -391,6 +404,7 @@ export default function PayeesPage() {
       phone: formPhone.trim() || null,
       address: formAddress.trim() || null,
       website: formWebsite.trim() || null,
+      icon: formIcon || null,
       // An emptied field means "drop this document", so blanks are sent and
       // the server treats them as removals.
       tax_ids: taxIdRows
@@ -511,7 +525,7 @@ export default function PayeesPage() {
           </div>
 
           <div className="ml-auto flex shrink-0 items-center gap-1 pl-1">
-            {(search || filterType || filterFavorites) && (
+            {(search || filterType || filterFavorites || filterNeedsIcon) && (
               <button
                 type="button"
                 onClick={() => {
@@ -519,6 +533,7 @@ export default function PayeesPage() {
                   setSearchQuery('')
                   setFilterType('')
                   setFilterFavorites(false)
+                  setFilterNeedsIcon(false)
                 }}
                 className="hidden h-7 items-center rounded-md px-2 text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:inline-flex"
               >
@@ -591,13 +606,23 @@ export default function PayeesPage() {
                   <span className="flex-1 text-left">{t('payees.favoritesOnly')}</span>
                 </DropdownMenuCheckboxItem>
 
-                {(filterType || filterFavorites) && (
+                <DropdownMenuCheckboxItem
+                  checked={filterNeedsIcon}
+                  onCheckedChange={setFilterNeedsIcon}
+                  className="gap-2 rounded-lg px-2 py-1.5 text-xs cursor-pointer hover:bg-muted transition-colors"
+                >
+                  <ImageOff size={13} className={cn("mr-1 shrink-0", filterNeedsIcon ? "text-primary" : "text-muted-foreground")} />
+                  <span className="flex-1 text-left">{t('payees.needsIcon')}</span>
+                </DropdownMenuCheckboxItem>
+
+                {(filterType || filterFavorites || filterNeedsIcon) && (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       onSelect={() => {
                         setFilterType('')
                         setFilterFavorites(false)
+                        setFilterNeedsIcon(false)
                       }}
                       className="gap-2 rounded-lg px-2 py-1.5 text-xs cursor-pointer hover:bg-muted text-destructive hover:text-destructive focus:text-destructive focus:bg-destructive/5 font-medium"
                     >
@@ -612,7 +637,7 @@ export default function PayeesPage() {
         </div>
 
         {/* Bottom row: active filter chips */}
-        {(filterType || filterFavorites) && (
+        {(filterType || filterFavorites || filterNeedsIcon) && (
           <div className="flex flex-wrap items-center gap-1.5 border-t border-border/60 px-2 py-1.5">
             {filterType && (
               <button
@@ -643,6 +668,22 @@ export default function PayeesPage() {
                   <Star size={12} className="fill-amber-400" />
                 </span>
                 <span className="text-muted-foreground">{t('payees.favoritesOnly')}</span>
+                <span className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground/70 group-hover:text-destructive">
+                  <X size={11} />
+                </span>
+              </button>
+            )}
+
+            {filterNeedsIcon && (
+              <button
+                type="button"
+                onClick={() => setFilterNeedsIcon(false)}
+                className="group inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-border/80 bg-muted/50 pl-2 pr-1.5 text-[11.5px] text-foreground transition-colors hover:border-destructive/40 hover:bg-destructive/5"
+              >
+                <span className="flex items-center text-muted-foreground group-hover:text-destructive">
+                  <ImageOff size={12} />
+                </span>
+                <span className="text-muted-foreground">{t('payees.needsIcon')}</span>
                 <span className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground/70 group-hover:text-destructive">
                   <X size={11} />
                 </span>
@@ -770,10 +811,15 @@ export default function PayeesPage() {
                     )}
                   </TableCell>
                   <TableCell className="py-2.5 max-w-0 w-full">
-                    <p className="text-sm font-semibold text-foreground truncate" title={payee.name}>{payee.name}</p>
-                    {payee.notes && (
-                      <p className="text-xs text-muted-foreground mt-0.5 truncate" title={payee.notes}>{payee.notes}</p>
-                    )}
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <PayeeIcon icon={payee.icon} logoUrl={payee.display_logo_url} size="md" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-foreground truncate" title={payee.name}>{payee.name}</p>
+                        {payee.notes && (
+                          <p className="text-xs text-muted-foreground mt-0.5 truncate" title={payee.notes}>{payee.notes}</p>
+                        )}
+                      </div>
+                    </div>
                   </TableCell>
                   <TableCell className="hidden py-2.5 text-left md:table-cell">
                     {payee.type && (
@@ -957,6 +1003,29 @@ export default function PayeesPage() {
                 onChange={(e) => setFormWebsite(e.target.value)}
                 placeholder="acme.com"
               />
+            </div>
+            <div className="space-y-2">
+              <Label>{t('payees.icon')}</Label>
+              <div className="flex items-center gap-3">
+                <PayeeIcon
+                  icon={formIcon}
+                  logoUrl={editingPayee?.display_logo_url}
+                  size="lg"
+                />
+                <p className="flex-1 text-xs text-muted-foreground">
+                  {formIcon
+                    ? t('payees.iconPicked')
+                    : editingPayee?.display_logo_url
+                      ? t('payees.iconFromLogo')
+                      : t('payees.iconNone')}
+                </p>
+                {formIcon && (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setFormIcon('')}>
+                    {editingPayee?.display_logo_url ? t('payees.clearIcon') : t('payees.removeIcon')}
+                  </Button>
+                )}
+              </div>
+              <IconPicker value={formIcon} color="#6B7280" onChange={setFormIcon} />
             </div>
 
             {/* Fiscal documents. Which ones appear comes from the workspace's
