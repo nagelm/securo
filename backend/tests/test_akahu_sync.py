@@ -39,7 +39,7 @@ from app.services import account_service, collection_service
 from app.services.connection_service import get_connections, sync_connection
 from app.services.dashboard_service import get_summary
 from app.services.goal_service import _resolve_current_amount
-from app.services.report_service import get_net_worth_report
+from app.services.report_service import get_cash_flow_report, get_net_worth_report
 
 USER = "user_token_test123"
 APP = "app_token_test789"
@@ -442,6 +442,10 @@ async def test_switching_an_existing_connection_keeps_net_worth_and_history(
     assert on_investments == 0
 
     assert await money_view(session, test_workspace, test_user) == before
+    # Cash flow is spendable money: the new investment accounts stay out of it.
+    cash_flow = await get_cash_flow_report(session, test_workspace.id, test_user.id, months=1)
+    starting = {b.key: b.value for b in cash_flow.summary.breakdowns}["startingBalance"]
+    assert Decimal(str(starting)) == Decimal("1500") + Decimal("8000") - Decimal("300") - Decimal("120")
     # The collection that held the KiwiSaver wallet now holds its account too,
     # so its totals don't change either.
     stored = await session.get(Collection, collection.id, populate_existing=True)

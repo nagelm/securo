@@ -1320,6 +1320,11 @@ async def _get_baseline_projection(
     return projections, lookback_days
 
 
+# Account types whose balance is not spendable money: kept in net worth, left
+# out of the cash-flow report.
+CASH_FLOW_EXCLUDED_TYPES = frozenset({"investment"})
+
+
 async def get_cash_flow_report(
     session: AsyncSession,
     workspace_id: uuid.UUID,
@@ -1346,11 +1351,24 @@ async def get_cash_flow_report(
         balance at past-history start is also adjusted to add back any
         pending CC purchases whose effective_date is in the future window,
         avoiding double-counting against ``_balance_at``.
+
+    Cash flow is spendable money: accounts of a type in
+    ``CASH_FLOW_EXCLUDED_TYPES`` (investment) are left out of the opening and
+    closing balances, and their transactions, pending rows and recurring
+    rules out of the flows. They stay in net worth.
     """
     from app.services.dashboard_service import _balance_at, _get_recurring_projections
     from app.services.fx_rate_service import get_rate
 
-    acct_filter = [Transaction.account_id.in_(account_ids)] if account_ids is not None else []
+    # Invoices have no account; they are left out only under a Collection
+    # filter, so remember whether the caller narrowed the report.
+    narrowed = account_ids is not None
+    account_ids = [
+        a.id
+        for a in await _get_open_accounts(session, workspace_id, account_ids)
+        if a.type not in CASH_FLOW_EXCLUDED_TYPES
+    ]
+    acct_filter = [Transaction.account_id.in_(account_ids)]
     today = app_today()
     end = _add_months(today, months)
     chart_start = _add_months(today, -_PAST_HISTORY_MONTHS)
@@ -1571,10 +1589,11 @@ async def get_cash_flow_report(
     #     payment that settles it never both appear. Skipped when the
     #     chart is narrowed to particular accounts: a claim has no account
     #     until somebody pays it.
-    # `is None`, not falsy: a collection holding only wallets narrows
-    # the report to an empty set of bank accounts, and an empty list
-    # means filtered to nothing rather than not filtered at all.
-    if account_ids is None:
+    # `narrowed` is whether the caller passed account_ids at all: a
+    # collection holding only wallets narrows the report to an empty set of
+    # bank accounts, and an empty list means filtered to nothing rather than
+    # not filtered at all.
+    if not narrowed:
         for claim in await invoice_forecast_service.claims_in_range(
             session, workspace_id, today + timedelta(days=1), end + timedelta(days=1)
         ):

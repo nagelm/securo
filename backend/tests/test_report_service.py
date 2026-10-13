@@ -2736,3 +2736,38 @@ async def test_custom_dates_override_indian_yearly_ytd(
         assert service.call_args.kwargs['financial_year_start_month'] == 4
     finally:
         app.dependency_overrides.pop(current_workspace, None)
+
+
+@pytest.mark.asyncio
+async def test_cash_flow_leaves_investment_accounts_out_and_net_worth_keeps_them(
+    session: AsyncSession, test_user, test_workspace: User
+):
+    """Cash flow is spendable money: an investment account's balance, its
+    transactions and its recurring rules stay out, even under a collection
+    filter that names it. Net worth still counts it."""
+    checking = await _make_manual_account(session, test_user.id, "CF Spending")
+    invest = await _make_manual_account(session, test_user.id, "CF Fund", acct_type="investment")
+    await _add_txn(session, test_user.id, checking.id, 1000, "credit",
+                   date.today() - timedelta(days=10), source="opening_balance")
+    await _add_txn(session, test_user.id, invest.id, 5000, "credit",
+                   date.today() - timedelta(days=10), source="opening_balance")
+    await _add_txn(session, test_user.id, invest.id, 300, "credit", date.today() - timedelta(days=1))
+    await _make_recurring(session, test_user.id, invest.id, 200, "credit")
+    await _make_recurring(session, test_user.id, checking.id, 50, "debit")
+
+    for account_ids in (None, [checking.id, invest.id]):
+        report = await get_cash_flow_report(
+            session, test_workspace.id, test_user.id, months=1, interval="daily",
+            account_ids=account_ids,
+        )
+        values = {b.key: b.value for b in report.summary.breakdowns}
+        assert values["startingBalance"] == 1000
+        assert values["projectedIncome"] == 0
+        # Only the checking rule's occurrences (50 each) are projected.
+        assert values["projectedExpenses"] > 0 and values["projectedExpenses"] % 50 == 0
+        assert values["endingBalance"] == 1000 - values["projectedExpenses"]
+        past = [p.value for p in report.trend if p.date <= date.today().isoformat()]
+        assert set(past) == {1000}
+
+    net_worth = await get_net_worth_report(session, test_workspace.id, test_user.id, months=1)
+    assert net_worth.summary.primary_value == 6300
