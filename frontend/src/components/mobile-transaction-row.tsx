@@ -2,6 +2,7 @@ import { getAccountName } from '@/lib/account-utils'
 import { AccountIcon } from '@/components/account-icon'
 import { PayeeIcon } from '@/components/payee-icon'
 import { TransferAccountsPill, type TransferPillAccount } from '@/components/transfer-accounts-pill'
+import { TransferPairAmounts } from '@/components/transfer-pair-amounts'
 import type { Transaction, Account } from '@/types'
 import { AlertTriangle, ArrowLeftRight, CalendarClock, ChartNoAxesColumn, Clock, EyeClosed, Paperclip } from 'lucide-react'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
@@ -31,6 +32,13 @@ interface MobileTransactionRowProps {
   showPayee?: boolean
   /** Both accounts of a linked transfer; drawn in place of the description. */
   transferAccounts?: { from: TransferPillAccount; to: TransferPillAccount } | null
+  /**
+   * The credit leg when this row draws a whole transfer (`tx` is then the
+   * debit leg): the amount slot shows both legs and the checkbox selects both.
+   */
+  transferPairIn?: Transaction | null
+  /** Locale for the incoming leg's date in a paired row's tooltip. */
+  dateLocale?: string
 }
 
 export function MobileTransactionRow({
@@ -48,6 +56,8 @@ export function MobileTransactionRow({
   onClick,
   showPayee = false,
   transferAccounts = null,
+  transferPairIn = null,
+  dateLocale,
 }: MobileTransactionRowProps) {
   const { mask } = usePrivacyMode()
   const { t } = useTranslation()
@@ -92,6 +102,7 @@ export function MobileTransactionRow({
               e.stopPropagation()
               onSelect(tx.id, e.shiftKey)
             }}
+            aria-label={transferPairIn ? t('transactions.selectTransferPair') : undefined}
             className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
           />
         </div>
@@ -188,7 +199,18 @@ export function MobileTransactionRow({
         )}
       </div>
 
-      {/* Amount */}
+      {/* Amount: a whole transfer shows both legs, out over in. */}
+      {transferPairIn ? (
+        <TransferPairAmounts
+          out={tx}
+          in={transferPairIn}
+          fromName={transferAccounts ? getAccountName(transferAccounts.from) : undefined}
+          toName={transferAccounts ? getAccountName(transferAccounts.to) : undefined}
+          locale={locale}
+          dateLocale={dateLocale ?? locale}
+          className="shrink-0 text-sm"
+        />
+      ) : (
       <div className="shrink-0 text-right">
         <span className={`text-sm font-bold tabular-nums ${amountColor}`}>
           {mask(
@@ -210,6 +232,7 @@ export function MobileTransactionRow({
           </div>
         )}
       </div>
+      )}
     </div>
   )
 }
