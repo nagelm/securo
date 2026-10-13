@@ -3,7 +3,14 @@ import { describe, expect, it } from 'vitest'
 import i18next from 'i18next'
 
 import en from '@/locales/en.json'
-import { formToLoanDetails, loanDetailRows, loanDetailsToForm, type LoanDetailFormatters } from '@/lib/loan-details'
+import {
+  formToLoanDetails,
+  isRevolvingLoan,
+  loanDetailRows,
+  loanDetailsToForm,
+  revolvingLimit,
+  type LoanDetailFormatters,
+} from '@/lib/loan-details'
 
 // The real English strings; a node suite can't load the app's i18n (it
 // touches the document).
@@ -133,5 +140,41 @@ describe('loan details form', () => {
     expect(form.purpose).toBe('')
     expect(form.termYears).toBe('')
     expect(form.repaymentFrequency).toBe('')
+  })
+})
+
+describe('revolving loans', () => {
+  // Made-up figures: a 10,000 line with 4,000 drawn.
+  const line = {
+    type: 'loan',
+    loan_details: { type: 'revolving' },
+    credit_limit: 10000,
+    available_credit: 6000,
+    current_balance: -4000,
+  }
+
+  it('is revolving only for a loan whose type is REVOLVING', () => {
+    expect(isRevolvingLoan(line)).toBe(true)
+    expect(isRevolvingLoan({ ...line, loan_details: { type: 'TABLE' } })).toBe(false)
+    expect(isRevolvingLoan({ ...line, loan_details: null })).toBe(false)
+    expect(isRevolvingLoan({ ...line, type: 'credit_card' })).toBe(false)
+  })
+
+  it('reads limit, owed and available', () => {
+    expect(revolvingLimit(line)).toEqual({ limit: 10000, owed: 4000, available: 6000 })
+  })
+
+  it('owes nothing when the loan is in credit, and never shows negative available', () => {
+    expect(revolvingLimit({ ...line, current_balance: 250, available_credit: null })).toEqual({
+      limit: 10000,
+      owed: 0,
+      available: 10000,
+    })
+    expect(revolvingLimit({ ...line, current_balance: -12000, available_credit: null })?.available).toBe(0)
+  })
+
+  it('has no limit to show without one, or when the loan is not revolving', () => {
+    expect(revolvingLimit({ ...line, credit_limit: null })).toBeNull()
+    expect(revolvingLimit({ ...line, loan_details: { type: 'REDUCING' } })).toBeNull()
   })
 })

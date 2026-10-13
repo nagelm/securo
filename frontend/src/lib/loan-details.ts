@@ -270,3 +270,38 @@ export function formToLoanDetails(
   } as Record<string, unknown>) as LoanDetails | undefined
   return { details: details ?? null, errors }
 }
+
+/**
+ * Whether a loan is revolving (its loan type is REVOLVING). Only a revolving
+ * loan carries a credit limit, read like a card's: limit, owed and available
+ * to draw (backend `account_service.carries_credit_limit`). Display only.
+ */
+export function isRevolvingLoan(account: { type: string; loan_details: Record<string, unknown> | null }): boolean {
+  if (account.type !== 'loan') return false
+  const type = account.loan_details?.type
+  return typeof type === 'string' && type.toUpperCase() === 'REVOLVING'
+}
+
+export interface RevolvingLimit {
+  limit: number
+  /** What is owed: the negative balance as a positive figure; 0 when in credit. */
+  owed: number
+  /** limit - owed, never below 0 (the server's figure when it sent one). */
+  available: number
+}
+
+/** A revolving loan's limit, owed and available, or null when it has no limit. */
+export function revolvingLimit(account: {
+  type: string
+  loan_details: Record<string, unknown> | null
+  credit_limit: number | null
+  available_credit: number | null
+  current_balance: number
+}): RevolvingLimit | null {
+  if (!isRevolvingLoan(account) || account.credit_limit == null) return null
+  const limit = Number(account.credit_limit)
+  const balance = Number(account.current_balance)
+  const owed = balance < 0 ? -balance : 0
+  const available = account.available_credit != null ? Number(account.available_credit) : Math.max(limit - owed, 0)
+  return { limit, owed, available }
+}

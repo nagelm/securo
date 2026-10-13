@@ -2974,6 +2974,8 @@
       "sectionRepayment": "Repayments",
       "purpose": "Purpose",
       "loanType": "Repayment type",
+      "creditLimit": "Credit limit",
+      "creditLimitHint": "How much you can draw on this revolving loan. For your reference only: balances, reports and forecasts don't use it.",
       "interestRate": "Interest rate",
       "interestType": "Rate type",
       "rateExpiresAt": "Rate fixed until",
@@ -3019,7 +3021,8 @@
         "rate": "Enter a rate from 0 to 100.",
         "amount": "Enter a positive amount.",
         "years": "Enter whole years, up to 100.",
-        "months": "Enter whole months."
+        "months": "Enter whole months.",
+        "creditLimit": "Enter an amount of 0 or more."
       }
     },
     "recurring": {
@@ -3034,6 +3037,14 @@
       "totalRequired": "Enter the total paid.",
       "interestNegative": "Interest and fees can't be negative.",
       "interestCategoryRequired": "Choose a category for the interest."
+    },
+    "limit": {
+      "title": "Credit limit",
+      "limit": "Limit",
+      "owed": "Owed",
+      "available": "Available to draw",
+      "notSet": "No credit limit set.",
+      "notSetHint": "Add it under Edit details."
     }
   }
 }
