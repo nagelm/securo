@@ -321,6 +321,53 @@ class BankProvider(ABC):
         return False
 
     @property
+    def edits_transactions_in_place(self) -> bool:
+        """Whether the provider keeps a transaction's id when the bank edits it.
+
+        True for providers that update their copy of a transaction in place
+        (same external id) when the bank later changes its date, description
+        or amount. The sync layer then applies those bank-owned fields to the
+        stored row, never the fields the user owns (category, payee, notes,
+        links). False keeps the historical behavior: a stored row is never
+        rewritten by a later sync.
+        """
+        return False
+
+    @property
+    def reports_removed_transactions(self) -> bool:
+        """Whether a transaction missing from a complete fetch was removed.
+
+        True for providers that delete their copy when the bank removes a
+        transaction, so a row absent from a complete read of a window is gone
+        at the bank too. Such a provider records each complete read with
+        ``record_complete_transaction_window``; the sync layer removes (or,
+        when that would lose user data, flags) stored rows the read no longer
+        returns. False means absence proves nothing, and nothing is removed.
+        """
+        return False
+
+    def record_complete_transaction_window(
+        self, account_external_id: str, first_day: date, last_day: date
+    ) -> None:
+        """Note that ``get_transactions`` read every page of an account's
+        transactions dated ``first_day`` to ``last_day``, both inclusive.
+
+        Call it only once the whole window was read without error; a read
+        that stopped early, or an account whose data the provider can't
+        vouch for (inactive connection), must not record one.
+        """
+        windows = self.__dict__.setdefault("_complete_transaction_windows", {})
+        windows[account_external_id] = (first_day, last_day)
+
+    def take_complete_transaction_window(
+        self, account_external_id: str
+    ) -> Optional[tuple[date, date]]:
+        """The window the last ``get_transactions`` call for this account
+        read completely, or None; forgets it, so one read backs one check."""
+        windows = self.__dict__.get("_complete_transaction_windows") or {}
+        return windows.pop(account_external_id, None)
+
+    @property
     def redirect_uri(self) -> str:
         """Provider-specific OAuth redirect URI.
 

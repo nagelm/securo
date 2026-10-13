@@ -56,6 +56,11 @@ from app.services.transfer_detection_service import detect_transfer_pairs
 from app.services.fx_rate_service import stamp_primary_amount
 from app.services.loan_details import is_revolving, merge_provider_details
 from app.services.payee_service import get_or_create_payee
+from app.services.provider_transaction_changes import (
+    apply_provider_edit,
+    clear_removed_flag,
+    reconcile_removed_transactions,
+)
 from app.services.transaction_match_service import find_unique_transaction_match
 
 logger = logging.getLogger(__name__)
@@ -2236,6 +2241,11 @@ async def sync_connection(
         accounts_data = await provider.get_accounts(credentials)
         incoming_external_ids = {acc.external_id for acc in accounts_data}
         institution_cache: dict[str, Institution] = {}
+        # Providers that update a transaction in place when the bank edits it,
+        # and delete it when the bank removes it (Akahu). `is True`: a mocked
+        # provider's attribute must not switch these on.
+        edits_in_place = provider.edits_transactions_in_place is True
+        reports_removals = provider.reports_removed_transactions is True
         for acc_data in accounts_data:
             institution = await _resolve_institution(
                 session, connection.id, institution_cache, acc_data
@@ -2381,14 +2391,38 @@ async def sync_connection(
             # cases: (1) PENDING transactions that POSTED since last sync,
             # (2) any rows Pluggy ingested late but backdated. Dedup on
             # external_id below handles overlap cheaply.
+            #
+            # An account with no synced transactions yet (one the provider
+            # just started reporting on an existing connection, e.g. a newly
+            # shared card) reads its full history instead: the connection's
+            # last sync says nothing about it.
+            has_synced_rows = bool(
+                await session.scalar(
+                    select(
+                        exists().where(
+                            Transaction.account_id == account.id,
+                            Transaction.source == "sync",
+                        )
+                    )
+                )
+            )
             since = (
                 connection.last_sync_at.date() - timedelta(days=14)
-                if connection.last_sync_at
+                if connection.last_sync_at and has_synced_rows
                 else None
             )
             transactions_data = await provider.get_transactions(
                 credentials, acc_data.external_id, since, payee_source=payee_source
             )
+            # What the provider vouches it read completely, and every id it
+            # returned (pending ones included), for the removal pass below.
+            complete_window = (
+                provider.take_complete_transaction_window(acc_data.external_id)
+                if reports_removals
+                else None
+            )
+            returned_txn_external_ids = {txn.external_id for txn in transactions_data}
+            account_new_rows: list[Transaction] = []
 
             if not import_pending:
                 transactions_data = [t for t in transactions_data if t.status != "pending"]
@@ -2412,6 +2446,9 @@ async def sync_connection(
                 # re-inserting, so a stray duplicate is harmless and never grows.
                 existing_tx = existing.scalars().first()
                 if existing_tx:
+                    if reports_removals:
+                        # Back at the provider: no longer removed.
+                        clear_removed_flag(existing_tx)
                     # User-flagged rows are frozen: skip status/bill drift so
                     # a re-sync can't revive a transaction the user hid.
                     if existing_tx.is_ignored:
@@ -2439,6 +2476,29 @@ async def sync_connection(
                             apply_effective_date(
                                 existing_tx, account, bill_due_date=bill.due_date
                             )
+                    # The bank edited the row after posting and the provider
+                    # kept its id: bring the bank-owned fields up to date.
+                    if edits_in_place and existing_tx.source == "sync":
+                        await apply_provider_edit(
+                            session,
+                            user_id=user_id,
+                            account=account,
+                            tx=existing_tx,
+                            txn_data=txn_data,
+                            incoming_currency=(
+                                txn_data.currency or acc_data.currency or user_currency
+                            ),
+                            account_currency=acc_data.currency or user_currency,
+                            user_currency=user_currency,
+                            bill_due_date=next(
+                                (
+                                    b.due_date
+                                    for b in bills_by_external_id.values()
+                                    if b.id == existing_tx.bill_id
+                                ),
+                                None,
+                            ),
+                        )
                     continue
 
                 # Pass 2: Fuzzy match against manual transactions
@@ -2617,6 +2677,7 @@ async def sync_connection(
                         recurring_link, txn_data.date
                     )
                 new_tx_ids.append(transaction.id)
+                account_new_rows.append(transaction)
                 await apply_rules_to_transaction(session, user_id, transaction)
                 if transaction.category_id is None:
                     transaction.category_id = category_id
@@ -2633,6 +2694,18 @@ async def sync_connection(
                     transaction.fx_rate_used = txn_data.amount_in_account_currency / txn_data.amount
                 else:
                     await stamp_primary_amount(session, user_id, transaction)
+
+            # Rows the provider no longer returns from a window it read
+            # completely were removed at the bank (or re-issued under a new
+            # id). Before the opening balance, which must not absorb them.
+            if complete_window is not None:
+                await reconcile_removed_transactions(
+                    session,
+                    account=account,
+                    window=complete_window,
+                    returned_external_ids=returned_txn_external_ids,
+                    new_rows=account_new_rows,
+                )
 
             # Reconcile the opening balance after any new transactions land so
             # SUM(all txs) keeps matching account.balance from the provider.

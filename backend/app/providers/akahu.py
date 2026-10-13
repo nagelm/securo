@@ -697,6 +697,20 @@ class AkahuProvider(BankProvider):
         # already shows with its logo next to the connection.
         return False
 
+    @property
+    def edits_transactions_in_place(self) -> bool:
+        # Banks change a settled row's date, text or amount after posting;
+        # Akahu updates its copy under the same _id ("Keeping transactions
+        # synchronised", developers.akahu.nz).
+        return True
+
+    @property
+    def reports_removed_transactions(self) -> bool:
+        # A row the bank removes, Akahu removes too; one changed beyond
+        # recognition comes back under a new _id. get_transactions records
+        # each window it read completely.
+        return True
+
     # ----- credentials ------------------------------------------------------
 
     @staticmethod
@@ -908,6 +922,12 @@ class AkahuProvider(BankProvider):
                     transactions.append(parsed)
             cursor = (body.get("cursor") or {}).get("next")
             if not cursor:
+                # Every page read: rows missing from this window are gone at
+                # Akahu. Never vouched for when the account isn't ACTIVE.
+                if str(raw_acc.get("status") or "ACTIVE").upper() == "ACTIVE":
+                    self.record_complete_transaction_window(
+                        account_external_id, start_date, today
+                    )
                 return transactions
             params = {**params, "cursor": cursor}
         raise RuntimeError(f"Akahu returned more than {AKAHU_MAX_PAGES} pages")
