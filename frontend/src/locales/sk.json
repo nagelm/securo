@@ -2027,6 +2027,7 @@
     "synced": "Synchronizované",
     "syncedFrom": "Synchronizované z {{source}}",
     "syncedReadOnly": "Synchronizované aktíva spravuje pripojenie",
+    "inAccountBalance": "Counted in net worth through its account",
     "maturesOn": "Splatnosť {{date}}",
     "wallet": "Peňaženka",
     "newWallet": "Nová peňaženka",

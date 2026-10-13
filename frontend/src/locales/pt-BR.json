@@ -1915,6 +1915,7 @@
     "synced": "Sincronizado",
     "syncedFrom": "Sincronizado via {{source}}",
     "syncedReadOnly": "Ativos sincronizados são gerenciados pela conexão",
+    "inAccountBalance": "Counted in net worth through its account",
     "maturesOn": "Vence em {{date}}",
     "wallet": "Carteira",
     "newWallet": "Nova Carteira",

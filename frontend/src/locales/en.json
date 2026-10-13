@@ -1911,6 +1911,7 @@
     "synced": "Synced",
     "syncedFrom": "Synced from {{source}}",
     "syncedReadOnly": "Synced assets are managed by the connection",
+    "inAccountBalance": "Counted in net worth through its account",
     "maturesOn": "Matures {{date}}",
     "wallet": "Wallet",
     "newWallet": "New Wallet",

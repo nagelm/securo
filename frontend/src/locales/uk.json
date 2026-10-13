@@ -1928,6 +1928,7 @@
     "synced": "Синхронізовано",
     "syncedFrom": "Синхронізовано з {{source}}",
     "syncedReadOnly": "Синхронізовані активи керуються підключенням",
+    "inAccountBalance": "Counted in net worth through its account",
     "maturesOn": "Погашається {{date}}",
     "wallet": "Гаманець",
     "newWallet": "Новий гаманець",

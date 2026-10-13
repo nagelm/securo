@@ -1913,6 +1913,7 @@
     "synced": "Gesynchroniseerd",
     "syncedFrom": "Gesynchroniseerd vanaf {{source}}",
     "syncedReadOnly": "Gesynchroniseerde activa worden beheerd door de verbinding",
+    "inAccountBalance": "Counted in net worth through its account",
     "maturesOn": "Rijpt {{date}}",
     "wallet": "Portemonnee",
     "newWallet": "Nieuwe portemonnee",

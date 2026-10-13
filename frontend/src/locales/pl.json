@@ -2000,6 +2000,7 @@
     "synced": "Zsynchronizowane",
     "syncedFrom": "Zsynchronizowane z {{source}}",
     "syncedReadOnly": "Zsynchronizowanymi aktywami zarządza połączenie",
+    "inAccountBalance": "Counted in net worth through its account",
     "maturesOn": "Termin wykupu {{date}}",
     "wallet": "Portfel",
     "newWallet": "Nowy portfel",

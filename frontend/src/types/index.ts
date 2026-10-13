@@ -849,6 +849,9 @@ export interface Asset {
   value_count: number
   source: string
   connection_id: string | null
+  // The synced account whose balance already carries this holding; net
+  // worth counts the account, not the holding.
+  account_external_id?: string | null
   isin: string | null
   maturity_date: string | null
   group_id: string | null

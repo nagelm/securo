@@ -1911,6 +1911,7 @@
     "synced": "同期済み",
     "syncedFrom": "{{source}}から同期",
     "syncedReadOnly": "同期された資産は接続によって管理されます",
+    "inAccountBalance": "Counted in net worth through its account",
     "maturesOn": "満期: {{date}}",
     "wallet": "ウォレット",
     "newWallet": "新規ウォレット",

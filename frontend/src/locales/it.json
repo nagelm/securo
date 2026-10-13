@@ -1915,6 +1915,7 @@
     "synced": "Sincronizzato",
     "syncedFrom": "Sincronizzato da {{source}}",
     "syncedReadOnly": "I beni sincronizzati sono gestiti dalla connessione",
+    "inAccountBalance": "Counted in net worth through its account",
     "maturesOn": "Scade il {{date}}",
     "wallet": "Portafoglio",
     "newWallet": "Nuovo portafoglio",

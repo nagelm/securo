@@ -1928,6 +1928,7 @@
     "synced": "Синхронизировано",
     "syncedFrom": "Синхронизировано из {{source}}",
     "syncedReadOnly": "Синхронизированные активы управляются подключением",
+    "inAccountBalance": "Counted in net worth through its account",
     "maturesOn": "Погашается {{date}}",
     "wallet": "Кошелёк",
     "newWallet": "Новый кошелёк",

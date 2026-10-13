@@ -775,7 +775,7 @@ export default function AssetsPage() {
                   <Badge variant="outline" className="text-[9px] px-1 py-0 text-rose-600 border-rose-200">{t('assets.sold')}</Badge>
                 )}
                 {isSynced && !isMarketPriced && (
-                  <Badge variant="outline" className="text-[9px] px-1 py-0 text-sky-600 border-sky-200">{t('assets.synced')}</Badge>
+                  <Badge variant="outline" className="text-[9px] px-1 py-0 text-sky-600 border-sky-200" title={asset.account_external_id ? t('assets.inAccountBalance') : undefined}>{t('assets.synced')}</Badge>
                 )}
               </div>
               <span className="text-[11px] text-muted-foreground truncate block">{asset.ticker && !asset.ticker.startsWith('TD:') ? asset.name : (asset.ticker?.startsWith('TD:') ? 'Tesouro Direto' : t(`assets.type${asset.type.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase()).replace(/^./, c => c.toUpperCase())}`))}</span>

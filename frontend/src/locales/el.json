@@ -1911,6 +1911,7 @@
     "synced": "Συγχρονίστηκε",
     "syncedFrom": "Συγχρονίστηκε από {{source}}",
     "syncedReadOnly": "Τα συγχρονισμένα περιουσιακά στοιχεία διαχειρίζονται από τη σύνδεση",
+    "inAccountBalance": "Counted in net worth through its account",
     "maturesOn": "Λήγει στις {{date}}",
     "wallet": "Πορτοφόλι",
     "newWallet": "Νέο πορτοφόλι",
