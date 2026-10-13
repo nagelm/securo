@@ -22,6 +22,10 @@ it: the keys Akahu documents for ``meta.loan_details``
 Display only: nothing that totals money (balances, P&L, budgets, projections)
 reads it.
 
+A loan whose ``type`` is ``REVOLVING`` (``is_revolving``) may also carry a
+credit limit in ``Account.credit_limit``, the column a credit card uses; it is
+display only too (``account_service``).
+
 Sync rule (``merge_provider_details``): the keys a provider actually sends
 replace the stored ones, one leaf at a time inside ``interest``, ``term`` and
 ``repayment``; every key the provider does not send keeps its stored value,
@@ -153,6 +157,11 @@ def normalize_user_loan_details(value: Any) -> Optional[dict[str, Any]]:
         else:
             kept[key] = spec(key, raw)
     return kept or None
+
+
+def is_revolving(details: Any) -> bool:
+    """Whether loan details describe a revolving loan (a drawable limit)."""
+    return isinstance(details, dict) and str(details.get("type") or "").upper() == "REVOLVING"
 
 
 def merge_provider_details(

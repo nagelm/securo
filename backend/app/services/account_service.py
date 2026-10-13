@@ -23,7 +23,7 @@ from app.services._query_filters import (
     is_not_future,
 )
 from app.services.credit_card_service import apply_effective_date, compute_available_credit, get_cycle_dates
-from app.services.loan_details import normalize_user_loan_details
+from app.services.loan_details import _MAX_AMOUNT, is_revolving, normalize_user_loan_details
 from app.models.category import Category
 
 
@@ -96,6 +96,31 @@ async def _validate_loan_fields(
         raise ValueError(f"Invalid loan subtype: {loan_subtype}")
     if secured_asset_id is not None:
         await _validate_secured_asset(session, secured_asset_id, workspace_id)
+
+
+def carries_credit_limit(account_type: str, loan_details: Optional[dict]) -> bool:
+    """Whether an account of this type keeps a credit limit.
+
+    A credit card does, and so does a revolving loan (``loan_details.type``
+    is ``REVOLVING``): its limit is how much may be drawn. The limit is
+    display only: nothing that totals money reads it.
+    """
+    return account_type == "credit_card" or (account_type == "loan" and is_revolving(loan_details))
+
+
+def _validate_loan_credit_limit(
+    account_type: str, loan_details: Optional[dict], credit_limit: Optional[Decimal]
+) -> None:
+    """A loan takes a credit limit only while it is revolving; null clears it."""
+    if account_type != "loan" or credit_limit is None:
+        return
+    if not is_revolving(loan_details):
+        raise ValueError(
+            "Credit card fields can only be set on credit card accounts; "
+            "a loan takes a credit limit only when its loan type is revolving"
+        )
+    if not Decimal(0) <= credit_limit <= _MAX_AMOUNT:
+        raise ValueError(f"credit_limit must be between 0 and {_MAX_AMOUNT}")
 
 
 def _clear_loan_fields_unless_loan(account: Account) -> None:
@@ -263,6 +288,17 @@ def serialize_account(
         cycle = get_cycle_dates(acc.statement_close_day, acc.payment_due_day)
         payload["next_close_date"] = cycle["next_close_date"]
         payload["next_due_date"] = cycle["next_due_date"]
+    elif acc.type == "loan":
+        if carries_credit_limit(acc.type, acc.loan_details):
+            # A revolving loan reads like a card: owed = -balance (a credit
+            # balance owes nothing), available = limit - owed, never below 0.
+            available = compute_available_credit(acc.credit_limit, Decimal(str(resolved_balance)))
+            if available is not None:
+                payload["available_credit"] = float(max(available, Decimal(0)))
+        else:
+            # A limit left over from when the loan was revolving (sync may
+            # change the type) is kept but not shown.
+            payload["credit_limit"] = None
 
     return payload
 
@@ -322,6 +358,7 @@ async def create_account(
         session, workspace_id, data.type, data.loan_subtype, data.secured_asset_id, data.loan_details
     )
     loan_details = normalize_user_loan_details(data.loan_details)
+    _validate_loan_credit_limit(data.type, loan_details, data.credit_limit)
     account = Account(
         user_id=user_id,
         workspace_id=workspace_id,
@@ -329,7 +366,7 @@ async def create_account(
         type=data.type,
         balance=data.balance,
         currency=data.currency,
-        credit_limit=data.credit_limit if is_cc else None,
+        credit_limit=data.credit_limit if carries_credit_limit(data.type, loan_details) else None,
         statement_close_day=data.statement_close_day if is_cc else None,
         payment_due_day=data.payment_due_day if is_cc else None,
         minimum_payment=data.minimum_payment if is_cc else None,
@@ -386,6 +423,9 @@ async def update_account(
     )
     if "loan_details" in update_data:
         update_data["loan_details"] = normalize_user_loan_details(update_data["loan_details"])
+    new_type = update_data.get("type", account.type)
+    new_loan_details = update_data.get("loan_details", account.loan_details)
+    _validate_loan_credit_limit(new_type, new_loan_details, update_data.get("credit_limit"))
 
     # Track whether we need to recompute effective_date for all transactions.
     # Changes to the CC cycle days shift which bill each historical purchase
@@ -421,9 +461,11 @@ async def update_account(
         if disallowed:
             raise ValueError("Cannot edit bank-connected accounts")
         old_type = account.type
-        new_type = update_data.get("type", account.type)
         cc_fields = editable_fields - {"display_name", "type"} - loan_fields
         cc_update = {k: v for k, v in update_data.items() if k in cc_fields}
+        if new_type == "loan":
+            # A loan's credit limit was checked above (revolving only).
+            cc_update.pop("credit_limit", None)
         if cc_update and new_type != "credit_card":
             raise ValueError("Credit card fields can only be set on credit card accounts")
         for key, value in update_data.items():
@@ -445,9 +487,11 @@ async def update_account(
             if conn is not None and conn.provider == "simplefin":
                 account.balance = -account.balance
         # If the override moves the account away from credit_card, drop any
-        # stale card metadata so it isn't left half credit-card.
+        # stale card metadata so it isn't left half credit-card. A revolving
+        # loan keeps its credit limit.
         if new_type != "credit_card":
-            account.credit_limit = None
+            if not carries_credit_limit(new_type, new_loan_details):
+                account.credit_limit = None
             account.statement_close_day = None
             account.payment_due_day = None
             account.minimum_payment = None
@@ -464,7 +508,8 @@ async def update_account(
         setattr(account, key, value)
 
     if account.type != "credit_card":
-        account.credit_limit = None
+        if not carries_credit_limit(account.type, account.loan_details):
+            account.credit_limit = None
         account.statement_close_day = None
         account.payment_due_day = None
         account.minimum_payment = None
