@@ -289,16 +289,14 @@ export default function CategoriesPage() {
           >
             <Pencil size={13} />
           </button>
-          {cat.is_system && (
-            <button
-              className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
-              onClick={() => handleToggleHidden(cat)}
-              disabled={updateCatMutation.isPending || hideCatMutation.isPending}
-              title={cat.is_hidden ? t('categories.showDefault') : t('categories.hideDefault')}
-            >
-              {cat.is_hidden ? <Eye size={13} /> : <EyeOff size={13} />}
-            </button>
-          )}
+          <button
+            className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
+            onClick={() => handleToggleHidden(cat)}
+            disabled={updateCatMutation.isPending || hideCatMutation.isPending}
+            title={cat.is_hidden ? t('categories.showDefault') : t('categories.hideDefault')}
+          >
+            {cat.is_hidden ? <Eye size={13} /> : <EyeOff size={13} />}
+          </button>
           <button
             className="p-1.5 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-rose-50 transition-colors"
             onClick={() => handleDeleteCategory(cat)}

@@ -297,9 +297,6 @@ async def update_category(
         return None
 
     changes = data.model_dump(exclude_unset=True)
-    if changes.get("is_hidden") is True and not category.is_system:
-        raise CategoryVisibilityError("Only system categories can be hidden")
-
     for key, value in changes.items():
         setattr(category, key, value)
 
