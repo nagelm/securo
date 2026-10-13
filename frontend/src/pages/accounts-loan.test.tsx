@@ -279,3 +279,43 @@ describe('Account dialog: loan accounts', () => {
     expect(payload).not.toHaveProperty('name')
   })
 })
+
+describe('Account list: revolving loans', () => {
+  // Made-up figures: a 10,000 line with 4,000 drawn.
+  const line = account({
+    id: 'line',
+    name: 'Test credit line',
+    type: 'loan',
+    balance: -4000,
+    current_balance: -4000,
+    loan_details: { type: 'REVOLVING' },
+    credit_limit: 10000,
+    available_credit: 6000,
+  })
+
+  it('shows available credit under a revolving loan, as under a card', async () => {
+    api.accounts.list.mockResolvedValue([line])
+    renderWithProviders(<AccountsPage />)
+
+    expect(await screen.findByText(`${t('accounts.availableCredit')}: $6,000.00`)).toBeInTheDocument()
+  })
+
+  it('shows none under a loan that is not revolving', async () => {
+    api.accounts.list.mockResolvedValue([account({ ...line, loan_details: { type: 'TABLE' } })])
+    renderWithProviders(<AccountsPage />)
+
+    await screen.findByText('Test credit line')
+    expect(screen.queryByText(new RegExp(t('accounts.availableCredit')))).not.toBeInTheDocument()
+  })
+
+  it('never sends the limit from the account dialog, so editing a revolving loan keeps it', async () => {
+    api.accounts.list.mockResolvedValue([line])
+    const { user } = renderWithProviders(<AccountsPage />)
+
+    const dialog = await openEditDialog(user, 'Test credit line')
+    await user.click(within(dialog).getByRole('button', { name: t('common.save') }))
+
+    await waitFor(() => expect(api.accounts.update).toHaveBeenCalledTimes(1))
+    expect(api.accounts.update.mock.calls[0][1]).not.toHaveProperty('credit_limit')
+  })
+})

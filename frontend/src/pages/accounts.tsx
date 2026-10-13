@@ -27,6 +27,7 @@ import type { Account, BankConnection, LoanSubtype } from '@/types'
 import { RefreshCw, TriangleAlert, Unlink, Settings } from 'lucide-react'
 import { AccountIcon, ConnectionLogo } from '@/components/account-icon'
 import { getAccountTypeConfig, LOAN_SUBTYPES } from '@/lib/account-type-config'
+import { isRevolvingLoan } from '@/lib/loan-details'
 import { AccountPageActions } from '@/components/account-page-actions'
 import { AccountRowActions } from '@/components/account-row-actions'
 import { PageHeader } from '@/components/page-header'
@@ -296,7 +297,7 @@ export default function AccountsPage() {
                         <p className={`text-xs sm:text-sm font-semibold tabular-nums ${(acc.type === 'credit_card' ? bal > 0 : bal < 0) ? 'text-rose-500' : 'text-foreground'}`}>
                           {mask(formatCurrency(bal, acc.currency, locale))}
                         </p>
-                        {isCC && acc.available_credit != null ? (
+                        {(isCC || isRevolvingLoan(acc)) && acc.available_credit != null ? (
                           <p className="text-[10px] text-muted-foreground tabular-nums">
                             {t('accounts.availableCredit')}: {mask(formatCurrency(Number(acc.available_credit), acc.currency, locale))}
                           </p>
@@ -446,7 +447,7 @@ export default function AccountsPage() {
                                 <p className={`text-xs sm:text-sm font-semibold tabular-nums ${(acc.type === 'credit_card' ? bal > 0 : bal < 0) ? 'text-rose-500' : 'text-foreground'}`}>
                                   {mask(formatCurrency(bal, acc.currency, locale))}
                                 </p>
-                                {isCC && acc.available_credit != null ? (
+                                {(isCC || isRevolvingLoan(acc)) && acc.available_credit != null ? (
                                   <p className="text-[10px] text-muted-foreground tabular-nums">
                                     {t('accounts.availableCredit')}: {mask(formatCurrency(Number(acc.available_credit), acc.currency, locale))}
                                   </p>

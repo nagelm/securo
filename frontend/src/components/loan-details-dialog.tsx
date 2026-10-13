@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { formatAmountInput, parseAmountInput } from '@/lib/format'
 import {
   INTEREST_TYPES,
   LOAN_PURPOSES,
@@ -25,7 +26,12 @@ interface LoanDetailsDialogProps {
   onClose: () => void
   loan: Account
   locale: string
-  onSave: (details: LoanDetails | null) => void
+  /**
+   * `creditLimit` is passed only when the details make the loan revolving
+   * (null clears it); a loan that stops being revolving loses its limit on
+   * the server.
+   */
+  onSave: (details: LoanDetails | null, creditLimit?: number | null) => void
   loading: boolean
   error?: string | null
 }
@@ -38,22 +44,34 @@ const SELECT_CLASS =
  * bank uses, so typed-in and bank values show the same way. Display only:
  * no balance, report or forecast reads them. On a bank-connected loan, sync
  * replaces the values the bank sends and keeps the rest.
+ *
+ * A revolving loan also takes a credit limit here, beside the loan type that
+ * makes it revolving (the bank does not send one).
  */
 export function LoanDetailsDialog({ open, onClose, loan, locale, onSave, loading, error }: LoanDetailsDialogProps) {
   const { t } = useTranslation()
   const [form, setForm] = useState<LoanDetailsForm>(() => loanDetailsToForm(loan.loan_details, locale))
+  const limitText = (value: number | null) => (value != null ? formatAmountInput(Number(value), locale, 2) : '')
+  const [creditLimit, setCreditLimit] = useState(() => limitText(loan.credit_limit))
 
   // Reset each time the dialog opens, from the loan's current details.
-  const formKey = JSON.stringify([open, loan.id, loan.loan_details])
+  const formKey = JSON.stringify([open, loan.id, loan.loan_details, loan.credit_limit])
   const [previousFormKey, setPreviousFormKey] = useState<string | null>(null)
   if (formKey !== previousFormKey) {
     setPreviousFormKey(formKey)
-    if (open) setForm(loanDetailsToForm(loan.loan_details, locale))
+    if (open) {
+      setForm(loanDetailsToForm(loan.loan_details, locale))
+      setCreditLimit(limitText(loan.credit_limit))
+    }
   }
 
   const set = <K extends keyof LoanDetailsForm>(key: K, value: LoanDetailsForm[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }))
-  const { details, errors } = formToLoanDetails(form, locale)
+  const { details, errors: detailErrors } = formToLoanDetails(form, locale)
+  const revolving = form.type === 'REVOLVING'
+  const parsedLimit = creditLimit.trim() ? parseAmountInput(creditLimit, locale) : null
+  const limitInvalid = revolving && creditLimit.trim() !== '' && (parsedLimit == null || parsedLimit < 0 || parsedLimit > 1e12)
+  const errors: string[] = limitInvalid ? [...detailErrors, 'creditLimit'] : detailErrors
   const invalid = new Set(errors)
 
   const enumSelect = (
@@ -139,7 +157,9 @@ export function LoanDetailsDialog({ open, onClose, loan, locale, onSave, loading
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            if (errors.length === 0 && !loading) onSave(details)
+            if (errors.length > 0 || loading) return
+            if (revolving) onSave(details, parsedLimit)
+            else onSave(details)
           }}
           className="space-y-4"
         >
@@ -152,6 +172,36 @@ export function LoanDetailsDialog({ open, onClose, loan, locale, onSave, loading
             {field('loan-details-purpose', 'purpose', enumSelect('loan-details-purpose', 'purpose', LOAN_PURPOSES, 'purposes'))}
             {field('loan-details-type', 'loanType', enumSelect('loan-details-type', 'type', LOAN_TYPES, 'loanTypes'))}
           </div>
+
+          {revolving && (
+            <div className="space-y-1.5">
+              <Label htmlFor="loan-details-credit-limit">{t('loans.details.creditLimit')}</Label>
+              <div className="relative">
+                <Input
+                  id="loan-details-credit-limit"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={creditLimit}
+                  onChange={(e) => setCreditLimit(e.target.value)}
+                  aria-invalid={limitInvalid || undefined}
+                  aria-describedby="loan-details-credit-limit-hint"
+                  className="pr-12"
+                />
+                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">
+                  {loan.currency}
+                </span>
+              </div>
+              {limitInvalid ? (
+                <p id="loan-details-credit-limit-hint" className="text-xs text-destructive">
+                  {t('loans.details.errors.creditLimit')}
+                </p>
+              ) : (
+                <p id="loan-details-credit-limit-hint" className="text-xs text-muted-foreground">
+                  {t('loans.details.creditLimitHint')}
+                </p>
+              )}
+            </div>
+          )}
 
           <fieldset className="space-y-3">
             <legend className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">

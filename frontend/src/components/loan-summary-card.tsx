@@ -21,7 +21,7 @@ import {
 import { extractApiError } from '@/lib/api-errors'
 import { formatCurrency } from '@/lib/format'
 import { invalidateFinancialQueries } from '@/lib/invalidate-queries'
-import { loanDetailRows, type LoanDetails } from '@/lib/loan-details'
+import { isRevolvingLoan, loanDetailRows, revolvingLimit, type LoanDetails } from '@/lib/loan-details'
 import { useDateLocale } from '@/hooks/use-display-locale'
 import { resolveDateFnsLocale } from '@/lib/date-fns-locale'
 import type { Account, LoanPayment, LoanPaymentCreate, LoanPaymentUpdate } from '@/types'
@@ -40,7 +40,8 @@ const identity = (value: string) => value
 
 /**
  * The loan block on a loan account's page: what the loan is, what secures it
- * and the equity there, the loan's details (typed in or from the bank, with an
+ * and the equity there, a revolving loan's credit limit (limit, owed,
+ * available to draw, like a card; display only), the loan's details (typed in or from the bank, with an
  * "Edit details" form), the last 12 months of paid / interest
  * / principal (read from the ledger, so synced loans get it too), and for
  * manual loans the recorded payments and the "Record payment" form.
@@ -117,8 +118,11 @@ export function LoanSummaryCard({ account, accounts, locale, canWrite, mask = id
     },
   })
   const detailsMutation = useMutation({
-    mutationFn: (details: LoanDetails | null) =>
-      accountsApi.update(account.id, { loan_details: details as Record<string, unknown> | null }),
+    mutationFn: ({ details, creditLimit }: { details: LoanDetails | null; creditLimit?: number | null }) =>
+      accountsApi.update(account.id, {
+        loan_details: details as Record<string, unknown> | null,
+        ...(creditLimit !== undefined && { credit_limit: creditLimit }),
+      }),
     onSuccess: () => {
       // Display only: no balance or report moves, so only the account refreshes.
       queryClient.invalidateQueries({ queryKey: ['accounts'] })
@@ -156,6 +160,8 @@ export function LoanSummaryCard({ account, accounts, locale, canWrite, mask = id
     date: dateLabel,
     locale,
   })
+  const revolving = isRevolvingLoan(account)
+  const limit = revolvingLimit(account)
   const closeDialog = () => {
     setDialogOpen(false)
     setEditing(null)
@@ -213,6 +219,35 @@ export function LoanSummaryCard({ account, accounts, locale, canWrite, mask = id
           <Info className="h-3.5 w-3.5 shrink-0" />
           {t('loans.summary.syncedNote')}
         </p>
+      )}
+
+      {revolving && (
+        <div className="px-5 py-3 border-b border-border" data-testid="loan-credit-limit">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+            {t('loans.limit.title')}
+          </h3>
+          {limit ? (
+            <dl className="grid grid-cols-3 gap-2 text-xs" aria-label={t('loans.limit.title')}>
+              <div>
+                <dt className="text-muted-foreground">{t('loans.limit.limit')}</dt>
+                <dd className="text-sm font-semibold tabular-nums text-foreground">{money(limit.limit)}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">{t('loans.limit.owed')}</dt>
+                <dd className="text-sm font-semibold tabular-nums text-rose-500">{money(limit.owed)}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">{t('loans.limit.available')}</dt>
+                <dd className="text-sm font-semibold tabular-nums text-emerald-600">{money(limit.available)}</dd>
+              </div>
+            </dl>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {t('loans.limit.notSet')}
+              {canWrite && <> {t('loans.limit.notSetHint')}</>}
+            </p>
+          )}
+        </div>
       )}
 
       {(details.length > 0 || canWrite) && (
@@ -354,7 +389,7 @@ export function LoanSummaryCard({ account, accounts, locale, canWrite, mask = id
           onClose={closeDetails}
           loan={account}
           locale={locale}
-          onSave={(next) => detailsMutation.mutate(next)}
+          onSave={(next, creditLimit) => detailsMutation.mutate({ details: next, creditLimit })}
           loading={detailsMutation.isPending}
           error={detailsMutation.error ? extractApiError(detailsMutation.error) : null}
         />

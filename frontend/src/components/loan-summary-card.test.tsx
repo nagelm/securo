@@ -356,4 +356,91 @@ describe('LoanSummaryCard', () => {
     expect(screen.queryByRole('button', { name: t('loans.details.edit') })).not.toBeInTheDocument()
     expect(screen.getByLabelText(t('loans.summary.providerDetails'))).toHaveTextContent('5%')
   })
+
+  describe('revolving credit limit', () => {
+    // Made-up figures: a 10,000 line with 4,000 drawn.
+    const line = account({
+      ...loan,
+      secured_asset_id: null,
+      loan_subtype: 'line_of_credit',
+      balance: -4000,
+      current_balance: -4000,
+      loan_details: { type: 'REVOLVING' },
+      credit_limit: 10000,
+      available_credit: 6000,
+    })
+
+    it('shows limit, owed and available to draw, like a card', () => {
+      renderCard(line)
+
+      const block = screen.getByTestId('loan-credit-limit')
+      expect(block).toHaveTextContent(`${t('loans.limit.limit')}$10,000.00`)
+      expect(block).toHaveTextContent(`${t('loans.limit.owed')}$4,000.00`)
+      expect(block).toHaveTextContent(`${t('loans.limit.available')}$6,000.00`)
+    })
+
+    it('says when a revolving loan has no limit yet', () => {
+      renderCard(account({ ...line, credit_limit: null, available_credit: null }))
+
+      expect(screen.getByTestId('loan-credit-limit')).toHaveTextContent(t('loans.limit.notSet'))
+    })
+
+    it('shows no limit block on a loan that is not revolving', () => {
+      renderCard(account({ ...line, loan_details: { type: 'TABLE' } }))
+
+      expect(screen.queryByTestId('loan-credit-limit')).not.toBeInTheDocument()
+    })
+
+    it('edits the limit beside the loan type and saves both', async () => {
+      api.accounts.update.mockResolvedValue(line)
+      const { user } = renderCard(line)
+
+      await user.click(screen.getByRole('button', { name: t('loans.details.edit') }))
+      const dialog = await screen.findByRole('dialog')
+      const limit = within(dialog).getByRole('textbox', { name: t('loans.details.creditLimit') })
+      expect(limit).toHaveValue('10000')
+      await user.clear(limit)
+      await user.type(limit, '12500')
+      await user.click(within(dialog).getByRole('button', { name: t('common.save') }))
+
+      await waitFor(() =>
+        expect(api.accounts.update).toHaveBeenCalledWith('loan-1', {
+          loan_details: { type: 'REVOLVING' },
+          credit_limit: 12500,
+        }),
+      )
+    })
+
+    it('offers the limit only while the loan type is revolving', async () => {
+      api.accounts.update.mockResolvedValue(loan)
+      const { user } = renderCard(line)
+
+      await user.click(screen.getByRole('button', { name: t('loans.details.edit') }))
+      const dialog = await screen.findByRole('dialog')
+      await user.selectOptions(
+        within(dialog).getByLabelText(t('loans.details.loanType')),
+        t('loans.details.loanTypes.TABLE'),
+      )
+      expect(within(dialog).queryByRole('textbox', { name: t('loans.details.creditLimit') })).not.toBeInTheDocument()
+      await user.click(within(dialog).getByRole('button', { name: t('common.save') }))
+
+      // No credit_limit in the request: the server drops it with the type.
+      await waitFor(() =>
+        expect(api.accounts.update).toHaveBeenCalledWith('loan-1', { loan_details: { type: 'TABLE' } }),
+      )
+    })
+
+    it('blocks saving a negative limit', async () => {
+      const { user } = renderCard(line)
+
+      await user.click(screen.getByRole('button', { name: t('loans.details.edit') }))
+      const dialog = await screen.findByRole('dialog')
+      const limit = within(dialog).getByRole('textbox', { name: t('loans.details.creditLimit') })
+      await user.clear(limit)
+      await user.type(limit, '-5')
+
+      expect(within(dialog).getByText(t('loans.details.errors.creditLimit'))).toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: t('common.save') })).toBeDisabled()
+    })
+  })
 })
