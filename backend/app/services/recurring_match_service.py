@@ -13,14 +13,18 @@ It now lives in `reconciliation_engine`, under policy documents in
 **an invoice and a scheduled occurrence are the same kind of promise**: money
 that is expected, waiting for the movement that confirms it.
 
-**The decisions are unchanged, deliberately.** Same account, same direction,
-exact amount, three days before and five after (two and two for a weekly bill,
-five either side against a placeholder), description token-overlap at 0.6, and
-the better-matching candidate wins rather than both being refused. This lands
-under bills that have been reconciling this way since #116, and a matcher that
-started finding pairs it used to miss would be a behaviour change nobody asked
-for. What is gained today is only that those numbers are now reachable: a
-threshold buried in a module is a threshold no one can ever be shown or offered.
+**Two rules, in order.** The first is the one #116 shipped: same account, same
+direction, exact amount, three days before and five after (two and two for a
+weekly bill, five either side against a placeholder), description token-overlap
+at 0.6, and the better-matching candidate wins rather than both being refused.
+The second ignores the wording, because a bank's text for a charge often shares
+nothing with the name the schedule was given: same account, exact amount, two
+days either side, and it links only when exactly one candidate fits. It speaks
+only when the first rule found nothing.
+
+The engine is asked once per candidate here (see `_pick`), so the order of the
+rules and "only one candidate" are applied across the answers rather than by
+the engine itself, which only ever sees one candidate at a time.
 
 The queries stay here, because they are what differs: three lookups, in two
 directions, over two tables. Only the verdict is shared.
@@ -33,7 +37,7 @@ identity.
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, TypeVar
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,7 +45,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.recurring_transaction import RecurringTransaction
 from app.models.transaction import Transaction
 from app.services import reconciliation_policy, reconciliation_rule_service
-from app.services.reconciliation_engine import Expectation, Movement, evaluate
+from app.services.reconciliation_engine import (
+    Decision,
+    Expectation,
+    Movement,
+    evaluate,
+)
 
 # Real-transaction sources a recurring charge can arrive under. Excludes
 # "recurring" itself: that is the generated placeholder, handled separately.
@@ -53,6 +62,9 @@ _REAL_SOURCES = ("sync", "ofx", "csv", "manual")
 #: the exact window would silently re-implement the rule in a second place,
 #: and the two would drift.
 _QUERY_WINDOW_DAYS = 5
+
+#: A candidate of either kind: a charge, or a bill.
+_T = TypeVar("_T")
 
 
 def _as_movement(transaction: Transaction) -> Movement:
@@ -89,6 +101,65 @@ def _as_occurrence(
     )
 
 
+def _pick(answers: list[tuple[_T, Decision]], policy: dict) -> Optional[_T]:
+    """The one candidate the policy links, from per-candidate answers.
+
+    The engine was asked about each candidate on its own, so two things it
+    would normally decide across all of them have to be decided here:
+
+    - **Rule order.** Each answer names the first rule that candidate
+      satisfied. The rule that wins is the earliest one *any* candidate
+      satisfied, and only the candidates it matched are in the running:
+      exactly what the engine does with all of them in hand. Without this,
+      a wording-blind rule's flat score of 1.0 would beat a description
+      match scoring 0.7 on a different candidate.
+    - **`unique_candidate`.** The engine can only ever see one candidate
+      here, so it never finds two. When the winning rule asks for a single
+      candidate and more than one matched it, the answer is the policy's
+      `on_ambiguity`, which is a suggestion, and a suggestion links nothing.
+
+    Within the winning rule the best score wins, the first one met on a tie,
+    as before: two subscriptions of the same value on one account are told
+    apart by their description, not refused.
+    """
+    order = {
+        strategy.get("id"): index
+        for index, strategy in enumerate(policy.get("strategies", []))
+    }
+    decided = [
+        (candidate, decision)
+        for candidate, decision in answers
+        if decision.port != "unmatched" and decision.strategy in order
+    ]
+    if not decided:
+        return None
+
+    first = min(order[decision.strategy] for _, decision in decided)
+    strategy = policy["strategies"][first]
+    contenders = [
+        (candidate, decision)
+        for candidate, decision in decided
+        if order[decision.strategy] == first
+    ]
+
+    outcome = strategy.get("outcome", "suggest")
+    if len(contenders) > 1 and strategy.get("when", {}).get("unique_candidate"):
+        outcome = policy.get("on_ambiguity", "suggest")
+    if outcome != "link":
+        return None
+
+    best: Optional[_T] = None
+    # Below the range a score can take, not at its floor: a rule whose
+    # similarity threshold is 0 can link a candidate scoring exactly
+    # 0.0, and a strict comparison against 0.0 would drop it.
+    best_score = -1.0
+    for candidate, decision in contenders:
+        if decision.score > best_score:
+            best_score = decision.score
+            best = candidate
+    return best
+
+
 def _best_movement(
     candidates,
     expectation: Expectation,
@@ -97,25 +168,17 @@ def _best_movement(
     """The charge that best answers one expected occurrence.
 
     The engine takes one movement and many promises; here it is the other way
-    round, so it is asked once per candidate and the answers are ranked. Best
-    score wins, exactly as before: two subscriptions of the same value on one
-    account are told apart by their description, not refused.
+    round, so it is asked once per candidate and `_pick` chooses among the
+    answers.
     """
-    best: Optional[Transaction] = None
-    # Below the range a score can take, not at its floor: a rule whose
-    # similarity threshold is 0 can link a candidate scoring exactly
-    # 0.0, and a strict comparison against 0.0 would drop it.
-    best_score = -1.0
+    answers: list[tuple[Transaction, Decision]] = []
     for candidate in candidates:
         if candidate.is_ignored:
             continue
-        decision = evaluate(_as_movement(candidate), [expectation], policy)
-        if decision.port != "linked":
-            continue
-        if decision.score > best_score:
-            best_score = decision.score
-            best = candidate
-    return best
+        answers.append(
+            (candidate, evaluate(_as_movement(candidate), [expectation], policy))
+        )
+    return _pick(answers, policy)
 
 
 async def find_real_tx_for_occurrence(
@@ -237,16 +300,14 @@ async def find_bill_for_incoming(
         account_id=account_id,
     )
 
-    best: Optional[RecurringTransaction] = None
-    # Below the range a score can take, not at its floor: a rule whose
-    # similarity threshold is 0 can link a candidate scoring exactly
-    # 0.0, and a strict comparison against 0.0 would drop it.
-    best_score = -1.0
     # The workspace's rules are fetched once for the batch and then
     # narrowed per bill, rather than queried per candidate: every bill here
     # belongs to one account, so they share a workspace, and the only thing
-    # that varies between them is how often they repeat.
+    # that varies between them is how often they repeat. Narrowing changes
+    # windows only, never the rules or their order, so `_pick` reads the
+    # order off the composed policy.
     composed: Optional[dict] = None
+    answers: list[tuple[RecurringTransaction, Decision]] = []
     for recurring in result.scalars():
         if composed is None:
             composed = await reconciliation_rule_service.resolve(
@@ -264,10 +325,10 @@ async def find_bill_for_incoming(
                 composed, recurring.frequency
             ),
         )
-        if decision.port == "linked" and decision.score > best_score:
-            best_score = decision.score
-            best = recurring
-    return best
+        answers.append((recurring, decision))
+    if composed is None:
+        return None
+    return _pick(answers, composed)
 
 
 def advance_past(recurring: RecurringTransaction, fulfilled_date: date) -> None:

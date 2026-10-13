@@ -164,9 +164,11 @@ async def test_find_bill_rejects_currency_mismatch(session, test_user, test_work
 @pytest.mark.asyncio
 async def test_find_bill_rejects_low_similarity(session, test_user, test_workspace, account):
     await _make_bill(session, test_workspace, test_user, account)
+    # Three days late: inside the description rule's window, outside the
+    # two days the wording-blind rule allows.
     match = await rms.find_bill_for_incoming(
         session, test_user.id, account.id, Decimal("39.90"), "BRL", "debit",
-        date(2025, 1, 10), "Amazon Prime",
+        date(2025, 1, 13), "Amazon Prime",
     )
     assert match is None
 
@@ -415,9 +417,11 @@ async def test_generate_pending_description_mismatch_creates_placeholder(
     must NOT be swallowed as the bill's occurrence; a placeholder is written and
     the real charge is left untouched."""
     bill = await _make_bill(session, test_workspace, test_user, account)
+    # Three days after the occurrence: outside the two days in which the
+    # only charge of that amount is linked whatever its wording.
     unrelated = await _add_tx(
         session, test_user, test_workspace, account,
-        date=date(2025, 1, 10), source="sync", external_id="bank-x",
+        date=date(2025, 1, 13), source="sync", external_id="bank-x",
         description="Amazon Marketplace",
     )
     count = await generate_pending(session, test_user.id, up_to=date(2025, 1, 20))

@@ -2796,6 +2796,7 @@
       "exactAmountAnyClient": "Точна сума, будь-яка особа",
       "similarDescription": "Близька сума й схожий опис",
       "sameAccountExact": "Той самий рахунок, точна сума",
+      "onlyCandidateBill": "Same account, exact amount, the only bill that fits",
       "unknown": "Правило",
       "partPayment": "Відома особа, частина суми",
       "severalInvoices": "Відома особа, кілька рахунків одразу",

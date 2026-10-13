@@ -2779,6 +2779,7 @@
       "exactAmountAnyClient": "金額が一致、相手は問わない",
       "similarDescription": "金額が近く摘要も類似",
       "sameAccountExact": "同じ口座、金額が一致",
+      "onlyCandidateBill": "Same account, exact amount, the only bill that fits",
       "unknown": "ルール",
       "partPayment": "既知の相手、金額の一部",
       "severalInvoices": "既知の相手、複数の請求書をまとめて",

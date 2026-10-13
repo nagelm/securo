@@ -2783,6 +2783,7 @@
       "exactAmountAnyClient": "Importe exacto, cualquier persona",
       "similarDescription": "Importe cercano y descripción parecida",
       "sameAccountExact": "Misma cuenta, importe exacto",
+      "onlyCandidateBill": "Same account, exact amount, the only bill that fits",
       "unknown": "Regla",
       "partPayment": "Persona conocida, parte del importe",
       "severalInvoices": "Persona conocida, varias facturas a la vez",

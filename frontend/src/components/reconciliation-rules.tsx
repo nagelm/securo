@@ -55,6 +55,7 @@ const SHIPPED_NAME: Record<string, string> = {
   same_client_several_invoices: 'reconciliation.rule.severalInvoices',
   similar_description: 'reconciliation.rule.similarDescription',
   same_account_exact: 'reconciliation.rule.sameAccountExact',
+  bill_only_candidate: 'reconciliation.rule.onlyCandidateBill',
   destination_named_in_description: 'reconciliation.rule.destinationNamed',
   exact_amount_nearby: 'reconciliation.rule.exactAmountNearby',
   close_amount_wider_window: 'reconciliation.rule.closeAmountWiderWindow',

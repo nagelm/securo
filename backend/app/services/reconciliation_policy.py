@@ -184,14 +184,13 @@ MATCH_INVOICE: dict[str, Any] = {
 
 #: Money moving against a recurring bill or income.
 #:
-#: **These numbers are not new.** They are what
-#: `recurring_match_service` has run in production since issue #116,
-#: lifted out of the code unchanged: same account, same direction, exact
-#: amount, 3 days before / 5 after (2/2 weekly), description similarity
-#: at 0.6, and only the exact tier auto-links. Reproducing today's
-#: behaviour exactly is the point: a personal workspace should notice
-#: nothing on the day this lands, and gain the ability to change it on
-#: the day the automations screen ships.
+#: Two rules, tried in order. The first is what `recurring_match_service`
+#: has run since issue #116, lifted out of the code unchanged: same
+#: account, same direction, exact amount, 3 days before / 5 after (2/2
+#: weekly), description similarity at 0.6, and only the exact tier
+#: auto-links. The second links on the account, the amount and two days
+#: either side alone, when exactly one bill fits: the bank's wording for a
+#: charge often shares nothing with the name the schedule was given.
 MATCH_RECURRING: dict[str, Any] = {
     "version": POLICY_VERSION,
     "node": "reconciliation.match_recurring",
@@ -223,6 +222,36 @@ MATCH_RECURRING: dict[str, Any] = {
                 # people who never asked for reconciliation at all.
             },
         },
+        {
+            # **The bank's wording is not the schedule's wording**, and
+            # the rule above cannot see past that: a schedule called
+            # "Example Cloud (2 TB plan)" against a charge printed as
+            # `XYZ*data Store 0800` shares no tokens, so the
+            # charge lands as a row of its own next to the bill it pays.
+            #
+            # This one ignores the text and asks for everything else to
+            # be tighter instead: the bill's own account, the exact
+            # amount, two days either side, and **the only bill that
+            # fits**. Two bills of the same value on one account with
+            # nothing in their text to separate them is a question, not
+            # a coin toss, so it never links one of those.
+            #
+            # Second, so it only ever speaks when the description rule
+            # found nothing. Two days is already the weekly window, so a
+            # weekly bill reads the same here as any other.
+            "id": "bill_only_candidate",
+            "enabled": True,
+            "outcome": "link",
+            "trigger": "money_arrives",
+            "when": {
+                "counterparty": "any",
+                "same_account": True,
+                "amount": {"match": "exact"},
+                "date": {"before_days": 2, "after_days": 2},
+                "currency": {"conversion": "reject"},
+                "unique_candidate": True,
+            },
+        },
     ],
     "on_ambiguity": "suggest",
 }
@@ -231,8 +260,8 @@ MATCH_RECURRING: dict[str, Any] = {
 #: standing.
 #:
 #: Separate from `match_recurring` because its window genuinely differs:
-#: five days either side, the same on both, regardless of how often the
-#: bill repeats. That is not an oversight in the code this replaces: the
+#: five days either side for the description rule, the same on both,
+#: regardless of how often the bill repeats. That is not an oversight in the code this replaces: the
 #: placeholder was written *for* a specific occurrence, so there is no
 #: neighbouring occurrence to be confused with, and the window can afford
 #: to be symmetric where the bill-level one cannot.
@@ -256,6 +285,27 @@ MATCH_PLACEHOLDER: dict[str, Any] = {
                 "date": {"before_days": 5, "after_days": 5},
                 "currency": {"conversion": "reject"},
                 "description_similarity": {"min": "0.6"},
+            },
+        },
+        {
+            # The same answer to the same problem as `bill_only_candidate`:
+            # a charge whose wording shares nothing with the schedule's
+            # name, arriving next to the placeholder written for it. Same
+            # account, exact amount, two days either side, and the only
+            # placeholder that fits; with two of them, nothing is linked.
+            # Narrower than the rule above on purpose, because the text is
+            # no longer there to vouch for the pair.
+            "id": "placeholder_only_candidate",
+            "enabled": True,
+            "outcome": "link",
+            "trigger": "money_arrives",
+            "when": {
+                "counterparty": "any",
+                "same_account": True,
+                "amount": {"match": "exact"},
+                "date": {"before_days": 2, "after_days": 2},
+                "currency": {"conversion": "reject"},
+                "unique_candidate": True,
             },
         },
     ],

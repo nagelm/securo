@@ -2783,6 +2783,7 @@
       "exactAmountAnyClient": "Valor exato, qualquer pessoa",
       "similarDescription": "Valor próximo e descrição parecida",
       "sameAccountExact": "Mesma conta, valor exato",
+      "onlyCandidateBill": "Same account, exact amount, the only bill that fits",
       "unknown": "Regra",
       "partPayment": "Pessoa conhecida, parte do valor",
       "severalInvoices": "Pessoa conhecida, várias faturas de uma vez",
