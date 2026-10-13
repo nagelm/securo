@@ -16,7 +16,7 @@ unchanged for Securo's own UI.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any, cast
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +29,7 @@ from app.models.recurring_transaction import RecurringTransaction
 from app.models.transaction import Transaction
 from app.schemas.budget import BudgetCreate
 from app.schemas.category import CategoryCreate
-from app.schemas.goal import ContributionPeriod, GoalCreate
+from app.schemas.goal import GoalCreate
 from app.schemas.recurring_transaction import (
     RecurringTransactionCreate,
     RecurringTransactionUpdate,
@@ -956,7 +956,8 @@ async def propose_cancel_recurring_transaction(
         "Build a preview for creating a savings/financial goal (e.g. "
         "'set a R$10k goal for travel'). Give a target_amount, a periodic "
         "contribution target (contribution_amount + contribution_period, "
-        "e.g. 'save 50 a week for the holiday'), or both."
+        "e.g. 'save 50 a week for the holiday'), or both. Pass account_id "
+        "to track the goal with that account's balance and transfers in."
     ),
     parameters={
         "type": "object",
@@ -965,12 +966,19 @@ async def propose_cancel_recurring_transaction(
             "target_amount": {"type": "number", "exclusiveMinimum": 0},
             "contribution_amount": {"type": "number", "exclusiveMinimum": 0},
             "contribution_period": {"type": "string", "enum": ["weekly", "biweekly", "monthly"]},
-            "currency": {"type": "string", "description": "Defaults to user's primary currency"},
-            "deadline": {"type": "string", "format": "date"},
-            "initial_amount": {
+            "currency": {
+                "type": "string",
+                "description": "Defaults to the linked account's currency, else BRL",
+            },
+            "target_date": {"type": "string", "format": "date"},
+            "account_id": {
+                "type": "string",
+                "description": "Account whose balance tracks the goal (e.g. a savings account)",
+            },
+            "current_amount": {
                 "type": "number",
                 "minimum": 0,
-                "description": "How much you've already saved",
+                "description": "How much you've already saved; only for a goal without an account",
             },
             "icon": {"type": "string"},
             "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
@@ -991,54 +999,55 @@ async def propose_create_goal(
     contribution_amount: float | None = None,
     contribution_period: str | None = None,
     currency: str | None = None,
-    deadline: str | None = None,
-    initial_amount: float | None = None,
+    target_date: str | None = None,
+    account_id: str | None = None,
+    current_amount: float | None = None,
     icon: str | None = None,
     color: str | None = None,
     apply: bool = False,
 ) -> dict[str, Any]:
-    resolved_currency = (currency or "BRL").upper()
-    resolved_deadline = parse_date(deadline) if deadline else None
-    resolved_initial = float(initial_amount) if initial_amount is not None else 0.0
     if (contribution_amount is None) != (contribution_period is None):
         return {"kind": "create_goal", "error": "contribution_amount and contribution_period go together"}
     if target_amount is None and contribution_amount is None:
         return {"kind": "create_goal", "error": "give a target_amount, a periodic contribution target, or both"}
+    account = None
+    if account_id:
+        ws_id = await resolve_workspace_id(session, ctx)
+        account = (
+            await session.execute(
+                select(Account).where(Account.id == parse_uuid(account_id), Account.workspace_id == ws_id)
+            )
+        ).scalar_one_or_none()
+        if account is None:
+            return {"kind": "create_goal", "error": "account not found"}
+    resolved_date = parse_date(target_date) if target_date else None
+    # The proposal is exactly the POST /api/goals body, so the chat card can
+    # send it as it stands.
+    proposed: dict[str, Any] = {
+        "name": name.strip(),
+        "target_amount": float(target_amount) if target_amount is not None else None,
+        "contribution_amount": float(contribution_amount) if contribution_amount is not None else None,
+        "contribution_period": contribution_period,
+        "currency": (currency or (account.currency if account else None) or "BRL").upper(),
+        "target_date": resolved_date.isoformat() if resolved_date else None,
+        "tracking_type": "account" if account else "manual",
+        "account_id": str(account.id) if account else None,
+        # An account goal's current amount is the account balance.
+        "current_amount": 0.0 if account else float(current_amount or 0),
+        "icon": icon or ("piggy-bank" if account else "target"),
+        "color": color or "#3B82F6",
+    }
     preview = {
         "kind": "create_goal",
-        "proposed": {
-            "name": name.strip(),
-            "target_amount": float(target_amount) if target_amount is not None else None,
-            "contribution_amount": float(contribution_amount) if contribution_amount is not None else None,
-            "contribution_period": contribution_period,
-            "currency": resolved_currency,
-            "deadline": resolved_deadline.isoformat() if resolved_deadline else None,
-            "initial_amount": resolved_initial,
-            "icon": icon or "target",
-            "color": color or "#3B82F6",
-        },
+        "proposed": proposed,
+        "account_name": account.name if account else None,
         "apply_endpoint": "POST /api/goals",
     }
 
     if _can_apply(ctx, apply):
         ws_id = await resolve_workspace_id(session, ctx)
         created = await goal_service.create_goal(
-            session,
-            ws_id,
-            ctx.user_id,
-            GoalCreate(
-                name=name.strip(),
-                target_amount=Decimal(str(target_amount)) if target_amount is not None else None,
-                contribution_amount=(
-                    Decimal(str(contribution_amount)) if contribution_amount is not None else None
-                ),
-                contribution_period=cast("ContributionPeriod | None", contribution_period),
-                current_amount=Decimal(str(resolved_initial)),
-                currency=resolved_currency,
-                target_date=resolved_deadline,
-                icon=icon or "target",
-                color=color or "#3B82F6",
-            ),
+            session, ws_id, ctx.user_id, GoalCreate.model_validate(proposed)
         )
         return {**preview, "applied": True, "id": str(created.id)}
 

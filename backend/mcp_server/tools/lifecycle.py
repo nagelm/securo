@@ -98,7 +98,9 @@ async def list_assets(
     name="list_goals",
     description=(
         "List the user's savings / financial goals with target, current "
-        "amount, deadline, and progress. A goal may have a periodic "
+        "amount, target date, linked account and progress (progress_pct of "
+        "the total, or of the current period's target for a goal without a "
+        "total: see progress_basis). A goal may have a periodic "
         "contribution target (contribution_amount per contribution_period) "
         "and no total target (target_amount null: an ongoing savings goal). "
         "Use for 'how are my goals going?' / 'am I on track?'."
@@ -118,25 +120,43 @@ async def list_goals(
     ws_id = await resolve_workspace_id(session, ctx)
     rows = await goal_service.get_goals(session, ws_id, ctx.user_id, status=status)
     items: list[dict[str, Any]] = []
-    for r in rows:
-        d = r.model_dump(mode="json") if hasattr(r, "model_dump") else dict(r.__dict__)
+    for g in rows:
+        progress = g.contribution_progress
+        if g.target_amount is not None:
+            # Share of the total target reached.
+            progress_pct, progress_basis = g.percentage, "total"
+        elif progress is not None:
+            # An ongoing goal has no total: share of this period's target.
+            contributed, target = progress.current.contributed, progress.current.target
+            if target <= 0:
+                pct = 100.0 if contributed > 0 else 0.0
+            else:
+                pct = float(contributed / target * 100)
+            progress_pct, progress_basis = round(max(0.0, min(100.0, pct)), 1), "period"
+        else:
+            progress_pct, progress_basis = None, None
         items.append({
-            "id": str(d.get("id")) if d.get("id") else None,
-            "name": d.get("name"),
-            "target_amount": num(d.get("target_amount")),
-            "current_amount": num(d.get("current_amount")),
-            "currency": d.get("currency"),
-            "deadline": d.get("deadline"),
-            "status": d.get("status"),
-            "progress_pct": num(d.get("progress_pct")),
-            "category_id": str(d.get("category_id")) if d.get("category_id") else None,
+            "id": str(g.id),
+            "name": g.name,
+            "status": g.status,
+            "currency": g.currency,
+            "target_amount": num(g.target_amount),
+            "current_amount": num(g.current_amount),
+            "target_date": g.target_date.isoformat() if g.target_date else None,
+            "progress_pct": progress_pct,
+            "progress_basis": progress_basis,
+            "on_track": g.on_track,
+            "monthly_needed": g.monthly_contribution,
+            "tracking_type": g.tracking_type,
+            "account_id": str(g.account_id) if g.account_id else None,
+            "account_name": g.account_name,
             # Periodic target (null for a goal without one) and, for a goal
             # on an account, what was contributed in the current period.
-            "contribution_amount": num(d.get("contribution_amount")),
-            "contribution_period": d.get("contribution_period"),
-            "period_contributed": num((d.get("contribution_progress") or {}).get("current", {}).get("contributed")),
-            "period_status": (d.get("contribution_progress") or {}).get("current", {}).get("status"),
-            "contribution_streak": (d.get("contribution_progress") or {}).get("streak"),
+            "contribution_amount": num(g.contribution_amount),
+            "contribution_period": g.contribution_period,
+            "period_contributed": num(progress.current.contributed) if progress else None,
+            "period_status": progress.current.status if progress else None,
+            "contribution_streak": progress.streak if progress else None,
         })
     return {"items": items, "total": len(items)}
 
