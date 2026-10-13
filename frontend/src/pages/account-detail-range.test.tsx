@@ -154,7 +154,8 @@ describe('account page long lists', () => {
     fireEvent.click(more)
     expect(await screen.findByText('Row 0')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: t('accounts.showOlder', { count: 120 }) })).not.toBeInTheDocument()
-  })
+    // Rendering 500 then 620 rows in jsdom takes about 5 s on CI runners.
+  }, 20_000)
 })
 
 describe('account page rows', () => {
