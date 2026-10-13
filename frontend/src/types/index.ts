@@ -276,6 +276,8 @@ export interface Transaction {
   payee_icon?: string | null
   notes: string | null
   transfer_pair_id: string | null
+  /** The account the other leg of a linked transfer sits in. */
+  transfer_counterpart_account_id?: string | null
   amount_primary: number | null
   fx_rate_used: number | null
   fx_fallback: boolean
@@ -693,6 +695,8 @@ export interface TransactionCalendarItem {
   status: string | null
   source: string | null
   transfer_pair_id: string | null
+  /** The account the other leg of a linked transfer sits in. */
+  transfer_counterpart_account_id?: string | null
   is_transfer: boolean
   is_ignored: boolean
   exclude_from_pnl: boolean
