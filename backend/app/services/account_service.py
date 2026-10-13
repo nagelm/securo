@@ -14,6 +14,7 @@ from app.models.bank_connection import BankConnection
 from app.models.credit_card_bill import CreditCardBill
 from app.models.transaction import Transaction
 from app.schemas.account import AccountCreate, AccountUpdate
+from app.services.account_order import ACCOUNT_LIST_ORDER, next_account_position
 from app.services._query_filters import (
     counts_as_pnl,
     counts_in_current_balance,
@@ -206,7 +207,7 @@ async def get_accounts(session: AsyncSession, workspace_id: uuid.UUID, include_c
     )
     if not include_closed:
         query = query.where(Account.is_closed == False)
-    query = query.order_by(Account.name)
+    query = query.order_by(*ACCOUNT_LIST_ORDER)
     result = await session.execute(query)
     return [
             serialize_account(acc, current_balance, previous_balance, connection)
@@ -257,6 +258,7 @@ def serialize_account(
         "external_id": acc.external_id,
         "name": acc.name,
         "display_name": acc.display_name,
+        "position": acc.position,
         "masked_number": acc.masked_number,
         "type": acc.type,
         "balance": acc.balance,
@@ -375,6 +377,7 @@ async def create_account(
         loan_subtype=data.loan_subtype,
         secured_asset_id=data.secured_asset_id,
         loan_details=loan_details,
+        position=await next_account_position(session, workspace_id),
     )
     session.add(account)
     await session.flush()  # get account.id without committing

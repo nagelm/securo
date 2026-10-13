@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AccountBase(BaseModel):
@@ -51,12 +51,21 @@ class AccountUpdate(BaseModel):
     loan_details: Optional[dict[str, Any]] = None
 
 
+class AccountOrderUpdate(BaseModel):
+    # Accounts of the workspace in their new order. A subset is fine: the
+    # named accounts swap among their own places (app.services.account_order).
+    account_ids: list[uuid.UUID] = Field(min_length=1)
+
+
 class AccountRead(AccountBase):
     id: uuid.UUID
     user_id: uuid.UUID
     connection_id: Optional[uuid.UUID] = None
     external_id: Optional[str] = None
     display_name: Optional[str] = None
+    # Place in the workspace's account lists, smallest first; set through
+    # PUT /api/accounts/order.
+    position: int = 0
     # Last 4 chars of the bank's identifier, when the provider exposes one.
     # Read-only: absent from AccountUpdate because sync owns it.
     masked_number: Optional[str] = None

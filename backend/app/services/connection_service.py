@@ -39,6 +39,7 @@ from app.services import oauth_state
 from app.services import admin_service
 from app.services import reconciliation_service, recurring_match_service
 from app.services.text_similarity import token_overlap
+from app.services.account_order import next_account_position
 from app.services.account_service import (
     LOAN_SUBTYPES,
     _simplefin_to_internal_balance,
@@ -1321,6 +1322,8 @@ async def handle_oauth_callback(
                 if acc_data.shared_balance_group else None
             ),
             institution_id=institution.id if institution else None,
+            # After every account the workspace already has.
+            position=await next_account_position(session, workspace_id),
         )
         session.add(account)
         await session.flush()
@@ -2278,6 +2281,9 @@ async def sync_connection(
                         if acc_data.shared_balance_group else None
                     ),
                     institution_id=institution.id if institution else None,
+                    # A newly reported account goes after every existing
+                    # one; sync never moves an account it already knows.
+                    position=await next_account_position(session, workspace_id),
                 )
                 session.add(account)
                 await session.flush()

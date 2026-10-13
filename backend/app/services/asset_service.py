@@ -29,6 +29,7 @@ from app.schemas.asset import (
     AssetValueRead,
     LinkedLoanRead,
 )
+from app.services.account_order import ACCOUNT_LIST_ORDER
 from app.services.asset_group_service import ensure_group_in_workspace
 from app.services.fx_rate_service import convert, stamp_primary_amount
 
@@ -410,7 +411,7 @@ async def _attach_equity(session: AsyncSession, reads: list[AssetRead]) -> None:
             Account.type == "loan",
             Account.is_closed == False,
         )
-        .order_by(Account.name, Account.id)
+        .order_by(*ACCOUNT_LIST_ORDER)
     )
     loans = list(result.scalars().all())
     if not loans:

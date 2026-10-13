@@ -14,13 +14,14 @@ from app.core.workspace_context import (
 )
 from app.schemas.account import (
     AccountCreate,
+    AccountOrderUpdate,
     AccountRead,
     AccountSummary,
     AccountUpdate,
     CreditCardBillRead,
 )
 from app.schemas.loan_payment import LoanSummary
-from app.services import account_service, loan_payment_service
+from app.services import account_order, account_service, loan_payment_service
 from app.services.fx_rate_service import convert
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
@@ -41,6 +42,26 @@ async def list_accounts(
             )
             acc["balance_primary"] = float(converted)
     return accounts
+
+
+@router.put("/order", status_code=status.HTTP_204_NO_CONTENT)
+async def reorder_accounts(
+    payload: AccountOrderUpdate,
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Put the named accounts in this order, in the places they already hold.
+
+    A subset is fine (the Accounts page sends one group at a time); the
+    workspace's other accounts keep their places. Display only.
+    """
+    try:
+        await account_order.reorder_accounts(session, ctx.workspace.id, payload.account_ids)
+    except account_order.AccountOrderError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except account_order.AccountNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    await session.commit()
 
 
 @router.get("/{account_id}/summary", response_model=AccountSummary)

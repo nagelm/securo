@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Numeric, SmallInteger, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -65,6 +65,11 @@ class Account(Base):
         index=True,
     )
     loan_details: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    # Where the account sits in every account list of its workspace, smallest
+    # first (app.services.account_order). User-owned: set by reordering,
+    # appended for new accounts, never touched by sync. Display only: no
+    # balance, net worth or P&L figure reads it.
+    position: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     is_closed: Mapped[bool] = mapped_column(Boolean, default=False)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 

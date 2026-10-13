@@ -18,6 +18,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.account import Account
+from app.services.account_order import ACCOUNT_LIST_ORDER
 from app.models.asset import Asset
 from app.models.category import Category
 from app.models.goal import Goal
@@ -148,7 +149,7 @@ async def search_all(
             Account.workspace_id == workspace_id,
             Account.name.ilike(pattern, escape="\\"),
         )
-        .order_by(Account.is_closed.asc(), Account.name.asc())
+        .order_by(Account.is_closed.asc(), *ACCOUNT_LIST_ORDER)
         .limit(per_type_limit)
     )
     for acc in acc_result.scalars().all():
