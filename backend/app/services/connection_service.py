@@ -1046,6 +1046,13 @@ EXTRA_CATEGORY_HINTS = {
     "travel": ("Travel", "leisure"),
     # Interest a lender charges on a loan account (Akahu).
     "loan_interest": ("Loan interest", "taxes"),
+    # Finer splits a workspace may have made of a default category (Akahu NZFCC
+    # codes); without a category of that name they fall back to the default.
+    "takeaways": ("Takeaways", "food"),
+    "public_transport": ("Public transport & parking", "transport"),
+    "childcare": ("Childcare", "education"),
+    "games": ("Games", "leisure"),
+    "haircuts": ("Personal Care", "health"),
 }
 
 # Hint keys that name a default category a workspace seeded before that

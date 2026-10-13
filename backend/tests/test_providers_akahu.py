@@ -439,7 +439,11 @@ def test_uncategorised_rows_fall_back_to_type(akahu_type, amount, expected):
 @pytest.mark.parametrize("name,expected", [
     ("Business software and cloud services", "subscriptions"),
     ("General retail stores", "shopping"),
-    ("Haircuts and treatments", "personal_care"),
+    ("Haircuts and treatments", "haircuts"),
+    ("Fast food stores", "takeaways"),
+    ("Parking services", "public_transport"),
+    ("Childcare services", "childcare"),
+    ("Digital gaming products and services", "games"),
     ("Financial asset brokers, exchanges, and managed funds", "investments"),
 ])
 def test_specific_nzfcc_categories_beat_their_group(name, expected):
