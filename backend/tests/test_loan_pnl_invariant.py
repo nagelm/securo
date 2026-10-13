@@ -716,6 +716,7 @@ async def test_seeded_loan_repayments_is_a_transfer_category_in_housing(session:
     assert seeded.repayments.is_ignored is False
     assert seeded.repayments.group_id is not None
     group = await session.get(CategoryGroup, seeded.repayments.group_id)
+    assert group is not None
     assert group.name == "Housing"
 
 
