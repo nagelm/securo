@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { formatAccountMask, getAccountLabel, getAccountName } from '@/lib/account-utils'
+import { applyAccountOrder, formatAccountMask, getAccountLabel, getAccountName } from '@/lib/account-utils'
 import { getConnectionName } from '@/lib/connection-utils'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -30,6 +30,8 @@ import { getAccountTypeConfig, LOAN_SUBTYPES } from '@/lib/account-type-config'
 import { isRevolvingLoan } from '@/lib/loan-details'
 import { AccountPageActions } from '@/components/account-page-actions'
 import { AccountRowActions } from '@/components/account-row-actions'
+import { SortableAccountList } from '@/components/sortable-account-list'
+import { extractApiError } from '@/lib/api-errors'
 import { PageHeader } from '@/components/page-header'
 import { BankConnectDialog } from '@/components/bank-connect-dialog'
 import { ConnectorSelectDialog, type Provider } from '@/components/connector-select-dialog'
@@ -235,6 +237,31 @@ export default function AccountsPage() {
     onError: () => toast.error(t('common.error')),
   })
 
+  // Reordering shows at once: every cached account list takes the new order
+  // (the same swap the server does), and goes back if the save fails. Only
+  // lists move; no balance depends on the order, so nothing else refetches.
+  const reorderMutation = useMutation({
+    mutationFn: (ids: string[]) => accounts.reorder(ids),
+    onMutate: async (ids) => {
+      await queryClient.cancelQueries({ queryKey: ['accounts'] })
+      const previous = queryClient.getQueriesData<Account[]>({ queryKey: ['accounts'] })
+      queryClient.setQueriesData<Account[]>({ queryKey: ['accounts'] }, (old) =>
+        Array.isArray(old) ? applyAccountOrder(old, ids) : old,
+      )
+      return { previous }
+    },
+    onError: (error, _ids, context) => {
+      for (const [key, data] of context?.previous ?? []) queryClient.setQueryData(key, data)
+      toast.error(extractApiError(error, t('common.error')))
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['accounts'] }),
+  })
+  const reorderProps = {
+    enabled: canWrite,
+    onReorder: (ids: string[]) => reorderMutation.mutate(ids),
+    label: getAccountName,
+  }
+
   const isLoading = accountsLoading || connectionsLoading
   const manualAccounts = accountsList?.filter((a) => a.connection_id === null && inActiveCollection(a)) ?? []
   const bankAccounts = accountsList?.filter((a) => a.connection_id !== null && inActiveCollection(a)) ?? []
@@ -267,7 +294,7 @@ export default function AccountsPage() {
             </div>
             {manualAccounts.length > 0 ? (
               <div className="divide-y divide-muted">
-                {manualAccounts.map((acc) => {
+                <SortableAccountList accounts={manualAccounts} {...reorderProps} renderRow={(acc, reorder) => {
                   const cfg = getAccountTypeConfig(acc.type)
                   const bal = Number(acc.current_balance)
                   const isCC = acc.type === 'credit_card'
@@ -280,7 +307,8 @@ export default function AccountsPage() {
                   const dueClass = dueIn != null && dueIn <= 3 ? 'text-amber-600' : 'text-muted-foreground'
                   const accountMask = formatAccountMask(acc)
                   return (
-                    <div key={acc.id} className="group flex items-center px-5 py-3 hover:bg-muted/50 transition-colors">
+                    <div className="group flex items-center px-5 py-3 hover:bg-muted/50 transition-colors">
+                      {reorder.handle}
                       <Link to={`/accounts/${acc.id}`} className="flex items-center gap-3 flex-1 min-w-0">
                         <AccountIcon account={acc} />
                         <div className="min-w-0 flex-1">
@@ -314,11 +342,12 @@ export default function AccountsPage() {
                           onClose={() => setClosingAccountId(acc.id)}
                           onDelete={() => setDeletingId(acc.id)}
                           deletePending={deleteMutation.isPending}
+                          reorder={reorder.reorderable ? reorder : undefined}
                         />
                       )}
                     </div>
                   )
-                })}
+                }} />
               </div>
             ) : (
               <div className="px-5 py-8 text-center">
@@ -417,7 +446,7 @@ export default function AccountsPage() {
                     {/* Accounts list */}
                     {connAccounts.length > 0 ? (
                       <div className="divide-y divide-muted">
-                        {connAccounts.map((acc) => {
+                        <SortableAccountList accounts={connAccounts} {...reorderProps} renderRow={(acc, reorder) => {
                           const cfg = getAccountTypeConfig(acc.type)
                           const bal = Number(acc.current_balance)
                           const isCC = acc.type === 'credit_card'
@@ -430,7 +459,8 @@ export default function AccountsPage() {
                           const dueClass = dueIn != null && dueIn <= 3 ? 'text-amber-600' : 'text-muted-foreground'
                           const accountMask = formatAccountMask(acc)
                           return (
-                            <div key={acc.id} className="group flex items-center px-5 py-3 hover:bg-muted/50 transition-colors">
+                            <div className="group flex items-center px-5 py-3 hover:bg-muted/50 transition-colors">
+                              {reorder.handle}
                               <Link to={`/accounts/${acc.id}`} className="flex items-center gap-3 flex-1 min-w-0">
                                 <AccountIcon account={acc} />
                                 <div className="min-w-0 flex-1">
@@ -463,11 +493,12 @@ export default function AccountsPage() {
                                   onEdit={() => { setEditingAccount(acc); setDialogOpen(true) }}
                                   onClose={() => setClosingAccountId(acc.id)}
                                   deletePending={deleteMutation.isPending}
+                                  reorder={reorder.reorderable ? reorder : undefined}
                                 />
                               )}
                             </div>
                           )
-                        })}
+                        }} />
                       </div>
                     ) : (
                       <div className="px-5 py-4">

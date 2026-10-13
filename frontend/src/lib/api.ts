@@ -486,6 +486,11 @@ export const accounts = {
   delete: async (id: string): Promise<void> => {
     await api.delete(`/accounts/${id}`)
   },
+  /** Put these accounts in this order, in the places they already hold; a
+   *  group's ids are enough, every other account keeps its place. */
+  reorder: async (accountIds: string[]): Promise<void> => {
+    await api.put('/accounts/order', { account_ids: accountIds })
+  },
   summary: async (id: string, from?: string, to?: string, billId?: string, unbilledOnly?: boolean): Promise<AccountSummary> => {
     const { data } = await api.get(`/accounts/${id}/summary`, { params: { from, to, bill_id: billId, unbilled_only: unbilledOnly || undefined } })
     return data
