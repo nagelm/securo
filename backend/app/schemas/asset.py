@@ -110,6 +110,9 @@ class AssetRead(BaseModel):
     source: str = "manual"
     external_id: Optional[str] = None
     connection_id: Optional[uuid.UUID] = None
+    # The synced account whose balance carries this holding (net worth
+    # counts the account, not the holding).
+    account_external_id: Optional[str] = None
     isin: Optional[str] = None
     maturity_date: Optional[_date] = None
     group_id: Optional[uuid.UUID] = None

@@ -63,6 +63,15 @@ class Asset(Base):
     isin: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     maturity_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     external_metadata: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    # The synced account (its external_id on this asset's connection) whose
+    # balance already includes this holding. Set by sync for providers whose
+    # investment accounts carry their holdings' value
+    # (BankProvider.holdings_in_account_balance). While that account is open,
+    # the holding is detail of it and net worth leaves it out
+    # (asset_service.counted_in_net_worth). An external id, not a foreign key:
+    # accounts already point at assets (secured_asset_id), and a link that
+    # outlives a deleted account simply stops matching.
+    account_external_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Optional parent group ("wallet"). NULL means ungrouped. Deleting a
     # group nullifies this field rather than removing the asset.

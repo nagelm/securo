@@ -21,7 +21,7 @@ from app.models.account import Account
 from app.models.category import Category
 from app.models.institution import Institution
 from app.models.goal import Goal
-from app.models.collection import collection_asset_groups
+from app.models.collection import collection_accounts, collection_asset_groups
 from app.models.credit_card_bill import CreditCardBill
 from app.models.payee import Payee, PayeeMapping
 from app.models.transaction import Transaction
@@ -284,6 +284,10 @@ async def _sync_holdings(
 
     source = connection.provider
     today = app_today()
+    # Providers whose investment accounts carry their holdings' value link
+    # each holding to its account, so net worth counts it once.
+    links_accounts = provider.holdings_in_account_balance
+    newly_linked: list[Asset] = []
 
     # Find-or-create the wallet(s) that own this connection's holdings. A
     # holding carrying its owning account (SimpleFIN — issue #345) gets one
@@ -632,6 +636,11 @@ async def _sync_holdings(
             and asset.group_id != group.id
         ):
             asset.group_id = group.id
+        account_key = holding.account_external_id if links_accounts else None
+        if asset.account_external_id != account_key:
+            if account_key is not None and asset.account_external_id is None:
+                newly_linked.append(asset)
+            asset.account_external_id = account_key
         # Seed a historical value at purchase_date so users get a real
         # evolution curve from day one — not just today's snapshot.
         # Idempotent: skips if any AssetValue already exists at that date.
@@ -649,6 +658,9 @@ async def _sync_holdings(
     for ext_id, asset in archive_candidates.items():
         if ext_id not in seen and not asset.is_archived:
             asset.is_archived = True
+
+    if newly_linked:
+        await _add_accounts_to_wallet_collections(session, connection, newly_linked)
 
     # Sync owns its wallets: drop any it emptied by re-attribution above
     # (e.g. the single connection-named wallet that predates per-institution
@@ -678,6 +690,55 @@ async def _sync_holdings(
             emptied = await session.get(AssetGroup, gid)
             if emptied is not None:
                 await session.delete(emptied)
+
+
+async def _add_accounts_to_wallet_collections(
+    session: AsyncSession, connection: BankConnection, assets: list[Asset]
+) -> None:
+    """Put each holding's account in the collections that hold its wallet.
+
+    Runs once per holding, when sync first links it to its account. Until
+    then the holding counted in net worth through its wallet, and a
+    collection holding that wallet would lose the value once the account
+    carries it instead. A collection the user later takes the account out
+    of is never touched again.
+    """
+    await session.flush()
+    pairs: set[tuple[uuid.UUID, uuid.UUID]] = set()
+    for asset in assets:
+        if asset.group_id is None or asset.account_external_id is None:
+            continue
+        account_id = await session.scalar(
+            select(Account.id).where(
+                Account.connection_id == connection.id,
+                Account.external_id == asset.account_external_id,
+            )
+        )
+        if account_id is None:
+            continue
+        collection_ids = (
+            await session.execute(
+                select(collection_asset_groups.c.collection_id).where(
+                    collection_asset_groups.c.asset_group_id == asset.group_id
+                )
+            )
+        ).scalars().all()
+        pairs.update((cid, account_id) for cid in collection_ids)
+    for collection_id, account_id in pairs:
+        already = await session.scalar(
+            select(
+                exists().where(
+                    collection_accounts.c.collection_id == collection_id,
+                    collection_accounts.c.account_id == account_id,
+                )
+            )
+        )
+        if not already:
+            await session.execute(
+                collection_accounts.insert().values(
+                    collection_id=collection_id, account_id=account_id
+                )
+            )
 
 
 async def _upsert_asset_from_holding(

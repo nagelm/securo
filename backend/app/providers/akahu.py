@@ -21,13 +21,18 @@ What is mapped, and why some things are not:
 * **Foreign purchases.** ``meta.conversion`` holds the amount and currency
   actually charged abroad; that becomes the transaction amount and currency,
   and the account-currency amount becomes ``amount_in_account_currency``.
-* **Investment, KiwiSaver and wallet accounts become holdings, not accounts.**
-  Their balance is a market value, and listing them as accounts as well would
-  count them twice in net worth. The provider's portfolio, breakdown and
-  profile are kept in the holding's metadata. A brokerage account whose
-  portfolio lists share positions becomes one holding per position (ticker,
-  shares, cost); its uninvested cash is counted once, by the wallet account
-  when the connection has one.
+* **Investment, KiwiSaver and wallet accounts become ``investment`` accounts**
+  with the value Akahu reports, under their own institution like any other
+  account. They bring no transactions: their balance moves with the market,
+  and contributions are already on the paying bank account, so nothing about
+  them reaches income or expenses. Their holdings are synced as detail assets
+  that the account's balance already carries
+  (``holdings_in_account_balance``), so net worth counts each dollar once.
+  The provider's portfolio, breakdown and profile are kept in the holding's
+  metadata. A brokerage account whose portfolio lists share positions becomes
+  one holding per position (ticker, shares, cost); its uninvested cash is
+  counted once, by the wallet account when the connection has one, so the
+  brokerage account's balance leaves that cash out.
 * **Categories** become a ``category_hint`` (a default-category key), resolved
   by the sync layer to the workspace's category of that name: transfers
   (Akahu type ``TRANSFER``, or the other party is one of the user's own
@@ -103,6 +108,9 @@ _ACCOUNT_TYPE_MAP = {
     "FOREIGN": "checking",
     "TAX": "checking",
     "REWARDS": "checking",
+    "INVESTMENT": "investment",
+    "KIWISAVER": "investment",
+    "WALLET": "investment",
 }
 
 # The documented keys of an account's `meta.loan_details`
@@ -452,6 +460,39 @@ def _share_positions(portfolio: Any, currency: str) -> list[dict]:
     return list(positions.values())
 
 
+def _wallet_holds(raw: dict, currency: str, cash: Decimal, raw_accounts: list[dict]) -> bool:
+    """Does a WALLET account of the same provider connection carry this cash?"""
+    connection_id = (raw.get("connection") or {}).get("_id")
+    return any(
+        str(acc.get("type") or "").upper() == "WALLET"
+        and (acc.get("connection") or {}).get("_id") == connection_id
+        and _iso_currency((acc.get("balance") or {}).get("currency"), currency) == currency
+        and (wallet := _to_decimal((acc.get("balance") or {}).get("current"))) is not None
+        and abs(wallet - cash) < Decimal("0.01")
+        for acc in raw_accounts
+    )
+
+
+def investment_balance(raw: dict, raw_accounts: list[dict]) -> Decimal:
+    """What an investment, KiwiSaver or wallet account adds to net worth.
+
+    The value Akahu reports, except that a brokerage account listing share
+    positions leaves out the uninvested cash a wallet account of the same
+    provider already carries (Hatch reports it on both). It always equals the
+    sum of the account's holdings (``get_holdings``).
+    """
+    balance_obj = raw.get("balance") or {}
+    balance = _to_decimal(balance_obj.get("current")) or Decimal("0")
+    currency = _iso_currency(balance_obj.get("currency"), "NZD") or "NZD"
+    positions = _share_positions((raw.get("meta") or {}).get("portfolio"), currency)
+    if not positions:
+        return balance
+    cash = balance - sum((pos["value"] for pos in positions), Decimal("0"))
+    if cash >= Decimal("0.01") and _wallet_holds(raw, currency, cash, raw_accounts):
+        return balance - cash
+    return balance
+
+
 def _position_holdings(
     raw: dict,
     name: str,
@@ -493,16 +534,7 @@ def _position_holdings(
             )
         )
     cash = balance - sum((pos["value"] for pos in positions), Decimal("0"))
-    connection_id = (raw.get("connection") or {}).get("_id")
-    wallet_holds_it = any(
-        str(acc.get("type") or "").upper() == "WALLET"
-        and (acc.get("connection") or {}).get("_id") == connection_id
-        and _iso_currency((acc.get("balance") or {}).get("currency"), currency) == currency
-        and (wallet := _to_decimal((acc.get("balance") or {}).get("current"))) is not None
-        and abs(wallet - cash) < Decimal("0.01")
-        for acc in raw_accounts
-    )
-    if cash >= Decimal("0.01") and not wallet_holds_it:
+    if cash >= Decimal("0.01") and not _wallet_holds(raw, currency, cash, raw_accounts):
         holdings.append(
             HoldingData(
                 external_id=f"{account_id}::cash",
@@ -529,6 +561,12 @@ class AkahuProvider(BankProvider):
     @property
     def flow_type(self) -> str:
         return "token"
+
+    @property
+    def holdings_in_account_balance(self) -> bool:
+        # Each holding belongs to an investment account whose balance is the
+        # holdings' total (investment_balance).
+        return True
 
     @property
     def names_accounts_by_institution(self) -> bool:
@@ -638,10 +676,12 @@ class AkahuProvider(BankProvider):
         accounts: list[AccountData] = []
         for raw in raw_accounts:
             akahu_type = str(raw.get("type") or "").upper()
-            if akahu_type in INVESTMENT_TYPES:
-                continue
             balance_obj = raw.get("balance") or {}
-            balance = _to_decimal(balance_obj.get("current")) or Decimal("0")
+            balance = (
+                investment_balance(raw, raw_accounts)
+                if akahu_type in INVESTMENT_TYPES
+                else _to_decimal(balance_obj.get("current")) or Decimal("0")
+            )
             account_type = _ACCOUNT_TYPE_MAP.get(akahu_type, "checking")
             loan_details = loan_details_for(raw) if account_type == "loan" else None
             connection = raw.get("connection") or {}
@@ -697,6 +737,9 @@ class AkahuProvider(BankProvider):
         accounts = {str(a["_id"]): a for a in raw_accounts}
         raw_acc = accounts.get(account_external_id)
         if raw_acc is None or not _has_transactions(raw_acc):
+            return []
+        if str(raw_acc.get("type") or "").upper() in INVESTMENT_TYPES:
+            # Balance only: see the module docstring.
             return []
         if str(raw_acc.get("status") or "ACTIVE").upper() != "ACTIVE":
             return []

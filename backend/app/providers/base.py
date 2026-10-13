@@ -305,6 +305,18 @@ class BankProvider(ABC):
         return True
 
     @property
+    def holdings_in_account_balance(self) -> bool:
+        """Whether a holding's value is already in its account's balance.
+
+        True for providers that report an investment account (with the
+        holdings' total as its balance) and its holdings, each holding naming
+        its account (``HoldingData.account_external_id``). The sync layer
+        then links the holding to that account, and net worth counts the
+        account, not the holding as well.
+        """
+        return False
+
+    @property
     def redirect_uri(self) -> str:
         """Provider-specific OAuth redirect URI.
 

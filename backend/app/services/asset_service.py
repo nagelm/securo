@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any, Optional, cast
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, func, desc, update
+from sqlalchemy import exists, select, func, desc, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -171,6 +171,7 @@ def _asset_to_read(
         source=asset.source,
         external_id=asset.external_id,
         connection_id=asset.connection_id,
+        account_external_id=asset.account_external_id,
         isin=asset.isin,
         maturity_date=asset.maturity_date,
         group_id=asset.group_id,
@@ -1055,6 +1056,65 @@ async def get_portfolio_trend(
     return {"assets": asset_meta, "trend": trend, "total": round(total, 2)}
 
 
+def counted_in_net_worth():
+    """Filter on ``Asset``: the assets net worth adds up.
+
+    A synced holding whose value an open account's balance already carries
+    (``Asset.account_external_id``, set by sync) is detail of that account;
+    adding it as well would count it twice. Once the account is closed or
+    gone, the holding counts again.
+    """
+    return ~exists().where(
+        Account.connection_id == Asset.connection_id,
+        Account.external_id == Asset.account_external_id,
+        Account.is_closed == False,  # noqa: E712
+    )
+
+
+async def linked_holdings_values(
+    session: AsyncSession, account: Account, dates: list[date]
+) -> Optional[dict[date, Decimal]]:
+    """What the holdings an account's balance carries were worth on each date.
+
+    In the account's currency. None when no holding is linked to the account
+    (``Asset.account_external_id``). Such an account has no transactions to
+    walk its balance back with, so its past balance is its holdings' value
+    history; the holdings use the same filters and fill-forward as
+    ``get_asset_values_at``, so a past net worth is what it was while the
+    holdings were counted themselves.
+    """
+    if account.connection_id is None or not account.external_id or not dates:
+        return None
+    assets = list(
+        (
+            await session.execute(
+                select(Asset).where(
+                    Asset.connection_id == account.connection_id,
+                    Asset.account_external_id == account.external_id,
+                    Asset.is_archived == False,  # noqa: E712
+                    Asset.sell_date.is_(None),
+                )
+            )
+        ).scalars().all()
+    )
+    if not assets:
+        return None
+    values_map = await _load_asset_native_values(session, assets, up_to_date=max(dates))
+    result: dict[date, Decimal] = {}
+    for day in dates:
+        total = Decimal("0")
+        for asset in assets:
+            native = _fill_forward_at(asset, values_map[str(asset.id)], day)
+            if not native:
+                continue
+            amount = Decimal(str(native))
+            if asset.currency != account.currency:
+                amount, _ = await convert(session, amount, asset.currency, account.currency, day)
+            total += amount
+        result[day] = total
+    return result
+
+
 async def get_asset_values_at(
     session: AsyncSession,
     scope_id: uuid.UUID,
@@ -1063,8 +1123,12 @@ async def get_asset_values_at(
     *,
     by_workspace: bool = False,
     group_ids: Optional[list[uuid.UUID]] = None,
+    for_net_worth: bool = False,
 ) -> tuple[dict[str, float], float]:
     """Return (per_currency_totals, primary_total) for all active assets.
+
+    ``for_net_worth`` leaves out holdings an account's balance already
+    carries (``counted_in_net_worth``); a wallet's own total keeps them.
 
     `scope_id` is a workspace_id when `by_workspace=True` (preferred for
     multi-tenant code paths), otherwise treated as a legacy user_id
@@ -1090,6 +1154,8 @@ async def get_asset_values_at(
     )
     if group_ids:
         stmt = stmt.where(Asset.group_id.in_(group_ids))
+    if for_net_worth:
+        stmt = stmt.where(counted_in_net_worth())
     result = await session.execute(stmt)
     assets = list(result.scalars().all())
 

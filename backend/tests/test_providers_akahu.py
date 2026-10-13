@@ -207,18 +207,24 @@ async def test_handle_callback_stores_tokens_encrypted():
 
 
 @pytest.mark.asyncio
-async def test_accounts_map_types_and_skip_investments():
+async def test_accounts_map_types_including_investments():
     accounts = [
         _account(),
         _account(_id="acc_cc", name="Card", type="CREDITCARD",
                  balance={"currency": "NZD", "current": -250.0, "limit": 5000}),
-        _account(_id="acc_ks", name="KiwiSaver", type="KIWISAVER", attributes=[]),
+        _account(_id="acc_ks", name="KiwiSaver", type="KIWISAVER", attributes=[],
+                 balance={"currency": "NZD", "current": 54321.0},
+                 connection={"_id": "conn_fund", "name": "Example Funds", "logo": "https://logo.example/f.png"}),
         _account(_id="acc_sav", name="Saver", type="SAVINGS"),
     ]
     with _patched(lambda r: httpx.Response(200, json={"success": True, "items": accounts})):
         result = await AkahuProvider().get_accounts(_creds())
     by_id = {a.external_id: a for a in result}
-    assert set(by_id) == {"acc_1", "acc_cc", "acc_sav"}
+    assert set(by_id) == {"acc_1", "acc_cc", "acc_ks", "acc_sav"}
+    assert by_id["acc_ks"].type == "investment"
+    assert by_id["acc_ks"].balance == Decimal("54321.0")
+    assert by_id["acc_ks"].institution_name == "Example Funds"
+    assert by_id["acc_ks"].institution_external_id == "conn_fund"
     assert by_id["acc_1"].type == "checking"
     assert by_id["acc_1"].balance == Decimal("1234.56")
     assert by_id["acc_1"].masked_number == "5600"
@@ -566,6 +572,49 @@ async def test_share_portfolio_cash_not_in_a_wallet_is_its_own_holding():
     by_id = {h.external_id: h for h in holdings}
     assert set(by_id) == {"acc_hatch::XMPL", "acc_hatch::cash", "acc_wallet"}
     assert by_id["acc_hatch::cash"].current_value == Decimal("1000.00")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wallet_cash", [1000.00, 50.0])
+async def test_each_investment_account_balance_is_its_holdings_total(wallet_cash):
+    """Hatch reports its cash on the brokerage account and the wallet: the
+    brokerage account leaves out what the wallet carries, so the accounts add
+    up to the holdings, and each account to its own holdings."""
+    accounts = _hatch_accounts(wallet_cash=wallet_cash)
+    with _patched(lambda r: httpx.Response(200, json={"success": True, "items": accounts})):
+        provider = AkahuProvider()
+        result = {a.external_id: a for a in await provider.get_accounts(_creds())}
+        holdings = await provider.get_holdings(_creds())
+    assert {a.type for a in result.values()} == {"investment"}
+    assert {a.institution_name for a in result.values()} == {"Hatch"}
+    for ext, account in result.items():
+        own = sum(h.current_value for h in holdings if h.account_external_id == ext)
+        assert account.balance == own, ext
+    if wallet_cash == 1000.00:
+        assert result["acc_hatch"].balance == Decimal("1500.00")
+    else:
+        # Cash the wallet doesn't carry stays on the brokerage account.
+        assert result["acc_hatch"].balance == Decimal("2500.00")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("akahu_type", ["INVESTMENT", "KIWISAVER", "WALLET"])
+async def test_investment_accounts_bring_no_transactions(akahu_type):
+    paths = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        acc = _account(_id="acc_inv", type=akahu_type, attributes=["TRANSACTIONS"])
+        return httpx.Response(200, json={"success": True, "items": [acc]})
+
+    with _patched(handler):
+        txns = await AkahuProvider().get_transactions(_creds(), "acc_inv")
+    assert txns == []
+    assert not any(p.endswith("/transactions") for p in paths)
+
+
+def test_akahu_holdings_are_in_their_account_balance():
+    assert AkahuProvider().holdings_in_account_balance is True
 
 
 @pytest.mark.asyncio

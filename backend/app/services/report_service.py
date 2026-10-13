@@ -23,6 +23,7 @@ from app.services._query_filters import (
 )
 from app.services.admin_service import get_credit_card_accounting_mode
 from app.services.account_service import get_account_name
+from app.services.asset_service import counted_in_net_worth
 from app.services.fx_rate_service import convert
 from app.schemas.report import (
     CategoryTrendItem,
@@ -190,6 +191,8 @@ async def _net_worth_at(
     )
     if filtered:
         asset_stmt = asset_stmt.where(Asset.group_id.in_(asset_group_ids or []))
+    # A holding an open account's balance already carries is counted there.
+    asset_stmt = asset_stmt.where(counted_in_net_worth())
     asset_result = await session.execute(asset_stmt)
     assets_total = 0.0
     for asset in asset_result.scalars().all():

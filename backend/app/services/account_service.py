@@ -1229,4 +1229,15 @@ async def get_account_balance_history(
         for point in series:
             point["balance"] = round(point["balance"] * sign, 2)
 
+    # An account whose balance is its holdings' value (no transactions to walk
+    # back with) shows the holdings' value history for past days.
+    from app.services.asset_service import linked_holdings_values
+
+    past = [_Date.fromisoformat(p["date"]) for p in series]
+    held = await linked_holdings_values(session, account, [d for d in past if d < today])
+    if held:
+        for point, day in zip(series, past):
+            if day in held:
+                point["balance"] = round(float(held[day]), 2)
+
     return series
