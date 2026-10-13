@@ -1021,7 +1021,10 @@
         "openBridge": "Open the Akahu Developers page",
         "userTokenLabel": "User Access Token",
         "appTokenLabel": "App ID Token",
-        "tokenHelp": "Akahu requires both on every request: the User Access Token in the Authorization header and the App ID Token in the X-Akahu-Id header. Securo stores them encrypted."
+        "tokenHelp": "Akahu requires both on every request: the User Access Token in the Authorization header and the App ID Token in the X-Akahu-Id header. Securo stores them encrypted.",
+        "reconnectTitle": "Reconnect Akahu",
+        "reconnectDescription": "Akahu has lost access to one of your banks, or no longer accepts these tokens. If a bank shows as disconnected in your Akahu connections, reconnect it there: Securo picks it up at the next sync and clears this warning. To replace your tokens, paste new ones below.",
+        "openConnections": "Open your Akahu connections"
       },
       "reconnectTitle": "Επανασύνδεση με νέο διακριτικό",
       "reconnectDescription": "Επικολλήστε ένα νέο διακριτικό ρύθμισης για να ανανεώσετε αυτήν τη σύνδεση. Οι υπάρχοντες λογαριασμοί, συναλλαγές, κατηγορίες και κανόνες διατηρούνται.",

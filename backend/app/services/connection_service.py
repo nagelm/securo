@@ -54,7 +54,7 @@ from app.services.rule_engine import merge_notes
 from app.services.rule_service import apply_rules_to_transaction, preview_rules_for_transaction
 from app.services.transfer_detection_service import detect_transfer_pairs
 from app.services.fx_rate_service import stamp_primary_amount
-from app.services.loan_details import merge_provider_details
+from app.services.loan_details import is_revolving, merge_provider_details
 from app.services.payee_service import get_or_create_payee
 from app.services.transaction_match_service import find_unique_transaction_match
 
@@ -938,12 +938,44 @@ def _fill_payee_website(payee: Payee, txn_data) -> None:
         payee.logo_url = str(logo_url)[:500]
 
 
+def _provider_loan_limit(acc_data: AccountData) -> Optional[Decimal]:
+    """The credit limit the institution sent for a loan, or None.
+
+    A loan with a limit is a revolving facility. A derived limit never counts
+    here: only one the provider actually received.
+    """
+    if acc_data.type != "loan" or acc_data.credit_limit_derived:
+        return None
+    return acc_data.credit_limit
+
+
+def _revolving_if_limited(details: Optional[dict], limit: Optional[Decimal]) -> Optional[dict]:
+    """Loan details marked REVOLVING when the provider sent a limit and no type
+    is known; a type the user or the provider set is kept, so a limit never
+    turns a TABLE or REDUCING loan into a revolving one."""
+    if limit is None or str((details or {}).get("type") or "UNKNOWN").upper() != "UNKNOWN":
+        return details
+    return {**(details or {}), "type": "REVOLVING"}
+
+
 def _new_loan_fields(acc_data: AccountData) -> dict:
     """Loan columns for an account sync creates; empty unless it is a loan."""
     if acc_data.type != "loan":
         return {}
     subtype = acc_data.loan_subtype if acc_data.loan_subtype in LOAN_SUBTYPES else None
-    return {"loan_subtype": subtype, "loan_details": acc_data.loan_details}
+    details = _revolving_if_limited(acc_data.loan_details, _provider_loan_limit(acc_data))
+    return {"loan_subtype": subtype, "loan_details": details}
+
+
+def _new_credit_limit(acc_data: AccountData) -> Optional[Decimal]:
+    """The limit an account sync creates starts with: a card's, or a revolving
+    loan's (``account_service.carries_credit_limit``); None for anything else."""
+    if acc_data.type == "credit_card":
+        return acc_data.credit_limit
+    limit = _provider_loan_limit(acc_data)
+    if limit is not None and is_revolving(_new_loan_fields(acc_data)["loan_details"]):
+        return limit
+    return None
 
 
 def _sync_loan_fields(provider: str, account: Account, acc_data: AccountData) -> None:
@@ -958,7 +990,9 @@ def _sync_loan_fields(provider: str, account: Account, acc_data: AccountData) ->
     On a loan, each loan-detail key the provider sends replaces the stored
     one, and keys it doesn't send (often ones the user typed in) are kept
     (``loan_details.merge_provider_details``; display only). Its subtype fills
-    an empty one. Nothing here touches a transaction.
+    an empty one. A limit the institution sent marks a loan of no known type
+    revolving and, while the loan is revolving, replaces the stored limit
+    (no limit sent keeps the stored one). Nothing here touches a transaction.
     """
     if acc_data.type != "loan":
         return
@@ -971,6 +1005,33 @@ def _sync_loan_fields(provider: str, account: Account, acc_data: AccountData) ->
         account.loan_details = merge_provider_details(account.loan_details, acc_data.loan_details)
     if account.loan_subtype is None and acc_data.loan_subtype in LOAN_SUBTYPES:
         account.loan_subtype = acc_data.loan_subtype
+    limit = _provider_loan_limit(acc_data)
+    if limit is not None:
+        account.loan_details = _revolving_if_limited(account.loan_details, limit)
+        if is_revolving(account.loan_details):
+            account.credit_limit = limit
+
+
+async def _drop_closed_account_warnings(
+    session: AsyncSession, connection_id: uuid.UUID, warnings: list
+) -> list:
+    """A provider's user-action warnings without those about accounts the user
+    closed here (a warning names its account by ``account_external_id``)."""
+    closed = set(
+        (
+            await session.execute(
+                select(Account.external_id).where(
+                    Account.connection_id == connection_id,
+                    Account.is_closed == True,  # noqa: E712
+                    Account.external_id.isnot(None),
+                )
+            )
+        ).scalars()
+    )
+    return [
+        w for w in warnings
+        if not (isinstance(w, dict) and w.get("account_external_id") in closed)
+    ]
 
 
 # Hint keys a provider may send that no default category carries. Each one
@@ -1327,7 +1388,7 @@ async def handle_oauth_callback(
             type=acc_data.type,
             balance=acc_data.balance,
             currency=acc_data.currency,
-            credit_limit=acc_data.credit_limit if is_cc else None,
+            credit_limit=_new_credit_limit(acc_data),
             statement_close_day=acc_data.statement_close_day if is_cc else None,
             payment_due_day=acc_data.payment_due_day if is_cc else None,
             minimum_payment=acc_data.minimum_payment if is_cc else None,
@@ -2251,8 +2312,12 @@ async def sync_connection(
                     # null even on connectors that have them elsewhere, and
                     # users may have filled them in manually via the edit
                     # dialog. Treat user input + previously-synced values as
-                    # the higher source of truth than a fresh None.
-                    if acc_data.credit_limit is not None:
+                    # the higher source of truth than a fresh None. A limit
+                    # the provider only estimated fills an empty one and
+                    # never replaces a stored (possibly user-entered) one.
+                    if acc_data.credit_limit is not None and not (
+                        acc_data.credit_limit_derived and account.credit_limit is not None
+                    ):
                         account.credit_limit = acc_data.credit_limit
                     if acc_data.statement_close_day is not None:
                         account.statement_close_day = acc_data.statement_close_day
@@ -2286,7 +2351,7 @@ async def sync_connection(
                     type=acc_data.type,
                     balance=acc_data.balance,
                     currency=acc_data.currency,
-                    credit_limit=acc_data.credit_limit if is_cc else None,
+                    credit_limit=_new_credit_limit(acc_data),
                     statement_close_day=acc_data.statement_close_day if is_cc else None,
                     payment_due_day=acc_data.payment_due_day if is_cc else None,
                     minimum_payment=acc_data.minimum_payment if is_cc else None,
@@ -2643,6 +2708,12 @@ async def sync_connection(
 
         connection.last_sync_at = datetime.now(timezone.utc)
         action_required_warnings = getattr(provider, "action_required_warnings", None)
+        if isinstance(action_required_warnings, list) and action_required_warnings:
+            # A warning about one account the user has closed here asks
+            # nothing of them (sync leaves closed accounts alone).
+            action_required_warnings = await _drop_closed_account_warnings(
+                session, connection.id, action_required_warnings
+            )
         if isinstance(action_required_warnings, list) and action_required_warnings:
             logger.warning(
                 "Provider %s synced with %d user-action warning(s) for connection %s",

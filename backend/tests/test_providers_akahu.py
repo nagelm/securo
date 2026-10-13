@@ -15,7 +15,10 @@ import pytest
 
 from app.agents.services.crypto import encrypt
 from app.providers.akahu import (
+    AKAHU_REFRESH_POLL_ATTEMPTS,
+    AKAHU_TZ,
     AkahuProvider,
+    card_bill_fields,
     category_hint_for,
     clean_description,
     parse_tokens,
@@ -768,3 +771,267 @@ async def test_get_transactions_on_a_loan_uses_the_loan_hints():
         "t_rep": ("credit", "loan_repayment"),
         "t_int": ("debit", "loan_interest"),
     }
+
+
+# ----- refresh: which accounts take part --------------------------------------------
+
+
+def _ago(**delta) -> str:
+    return (datetime.now(timezone.utc) - timedelta(**delta)).isoformat()
+
+
+def _refreshing(accounts: list[dict], advances: set[str]):
+    """Akahu answering from ``accounts``; POST /refresh moves the listed
+    accounts' transaction stamps to now. Returns (handler, posted paths)."""
+    posted: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            posted.append(request.url.path)
+            now = datetime.now(timezone.utc).isoformat()
+            for acc in accounts:
+                if acc["_id"] in advances:
+                    acc["refreshed"] = {**(acc.get("refreshed") or {}), "transactions": now}
+            return httpx.Response(200, json={"success": True})
+        return httpx.Response(200, json={"success": True, "items": accounts})
+
+    return handler, posted
+
+
+@pytest.mark.asyncio
+async def test_refresh_ignores_an_account_whose_transactions_were_never_fetched():
+    accounts = [
+        _account(refreshed={"transactions": _ago(hours=3)}),
+        # A card Akahu has never read transactions for: no stamp at all.
+        _account(_id="acc_cc", type="CREDITCARD", refreshed={"balance": _ago(hours=3)}),
+    ]
+    handler, posted = _refreshing(accounts, advances={"acc_1"})
+    with _patched(handler), patch("app.providers.akahu.asyncio.sleep", new=AsyncMock()) as sleep:
+        assert await AkahuProvider().trigger_refresh(_creds()) == "refreshed"
+    assert posted == ["/v1/refresh"]
+    assert sleep.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_refresh_skipped_when_no_account_has_a_transaction_stamp():
+    accounts = [_account(refreshed={"balance": _ago(hours=3)}), _account(_id="acc_2", refreshed=None)]
+    handler, posted = _refreshing(accounts, advances=set())
+    with _patched(handler):
+        assert await AkahuProvider().trigger_refresh(_creds()) == "skipped"
+    assert posted == []
+
+
+@pytest.mark.asyncio
+async def test_an_inactive_account_neither_asks_for_nor_holds_up_a_refresh():
+    inactive = _account(_id="acc_gone", status="INACTIVE", refreshed={"transactions": _ago(days=40)})
+    handler, posted = _refreshing(
+        [inactive, _account(refreshed={"transactions": _ago(minutes=5)})], advances=set()
+    )
+    with _patched(handler):
+        assert await AkahuProvider().trigger_refresh(_creds()) == "skipped"
+    assert posted == []
+
+    accounts = [inactive, _account(refreshed={"transactions": _ago(hours=2)})]
+    handler, posted = _refreshing(accounts, advances={"acc_1"})
+    with _patched(handler), patch("app.providers.akahu.asyncio.sleep", new=AsyncMock()):
+        assert await AkahuProvider().trigger_refresh(_creds()) == "refreshed"
+    assert posted == ["/v1/refresh"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_waits_only_for_the_stale_accounts():
+    # Akahu skips an account refreshed within its rest period, so a fresh
+    # account whose stamp stays put must not turn the refresh into a failure.
+    accounts = [
+        _account(refreshed={"transactions": _ago(hours=5)}),
+        _account(_id="acc_fresh", refreshed={"transactions": _ago(minutes=10)}),
+    ]
+    handler, _ = _refreshing(accounts, advances={"acc_1"})
+    with _patched(handler), patch("app.providers.akahu.asyncio.sleep", new=AsyncMock()):
+        assert await AkahuProvider().trigger_refresh(_creds()) == "refreshed"
+
+
+@pytest.mark.asyncio
+async def test_refresh_fails_when_a_stale_account_never_moves():
+    accounts = [
+        _account(refreshed={"transactions": _ago(hours=5)}),
+        _account(_id="acc_slow", refreshed={"transactions": _ago(hours=4)}),
+    ]
+    handler, _ = _refreshing(accounts, advances={"acc_1"})
+    with _patched(handler), patch("app.providers.akahu.asyncio.sleep", new=AsyncMock()) as sleep:
+        assert await AkahuProvider().trigger_refresh(_creds()) == "failed"
+    assert sleep.await_count == AKAHU_REFRESH_POLL_ATTEMPTS
+
+
+# ----- credit limits ------------------------------------------------------------------
+
+OFFICIAL = {"_id": "conn_open", "name": "Open Bank", "connection_type": "official"}
+CLASSIC = {"_id": "conn_classic", "name": "Card Company", "connection_type": "classic"}
+
+
+async def _one_account(raw: dict):
+    with _patched(lambda r: httpx.Response(200, json={"success": True, "items": [raw]})):
+        (account,) = await AkahuProvider().get_accounts(_creds())
+    return account
+
+
+@pytest.mark.asyncio
+async def test_an_official_card_without_a_limit_derives_it_from_available():
+    card = await _one_account(_account(
+        _id="acc_cc", type="CREDITCARD", connection=OFFICIAL,
+        balance={"currency": "NZD", "current": 300.25, "available": 4699.75},
+    ))
+    assert card.balance == Decimal("300.25")
+    assert card.credit_limit == Decimal("5000.00")
+    assert card.credit_limit_derived is True
+
+
+@pytest.mark.asyncio
+async def test_a_derived_limit_is_rounded_to_cents_and_counts_a_credit_balance():
+    card = await _one_account(_account(
+        _id="acc_cc", type="CREDITCARD", connection=OFFICIAL,
+        # Overpaid by 50: nothing owed, and 50 more than the limit available.
+        balance={"currency": "NZD", "current": -50.0, "available": 2050.005},
+    ))
+    assert card.credit_limit == Decimal("2000.01")
+    assert card.credit_limit_derived is True
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_card_limit_wins_and_is_not_derived():
+    card = await _one_account(_account(
+        _id="acc_cc", type="CREDITCARD", connection=OFFICIAL,
+        balance={"currency": "NZD", "current": 300.0, "available": 4000.0, "limit": 4500},
+    ))
+    assert card.credit_limit == Decimal("4500")
+    assert card.credit_limit_derived is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("connection", [CLASSIC, {"_id": "conn_x", "name": "No Type"}])
+async def test_a_card_that_is_not_official_derives_nothing(connection):
+    card = await _one_account(_account(
+        _id="acc_cc", type="CREDITCARD", connection=connection,
+        balance={"currency": "NZD", "current": -300.0, "available": 4700.0},
+    ))
+    assert card.balance == Decimal("300.0")
+    assert card.credit_limit is None
+    assert card.credit_limit_derived is False
+
+
+@pytest.mark.asyncio
+async def test_an_official_card_without_available_has_no_limit():
+    card = await _one_account(_account(
+        _id="acc_cc", type="CREDITCARD", connection=OFFICIAL,
+        balance={"currency": "NZD", "current": 300.0},
+    ))
+    assert card.credit_limit is None
+
+
+@pytest.mark.asyncio
+async def test_a_loan_with_a_limit_passes_it_on():
+    loan = await _one_account(_loan(
+        balance={"currency": "NZD", "current": -12000.0, "available": 8000.0, "limit": 20000},
+        meta={"loan_details": {"purpose": "PERSONAL"}},
+    ))
+    assert loan.type == "loan"
+    assert loan.credit_limit == Decimal("20000")
+    assert loan.credit_limit_derived is False
+
+
+@pytest.mark.asyncio
+async def test_a_loan_without_a_limit_derives_none():
+    loan = await _one_account(_loan(
+        balance={"currency": "NZD", "current": -12000.0, "available": 8000.0},
+    ))
+    assert loan.credit_limit is None
+
+
+@pytest.mark.asyncio
+async def test_a_bank_account_never_carries_a_limit():
+    account = await _one_account(_account(
+        balance={"currency": "NZD", "current": 100.0, "available": 600.0, "limit": 500},
+    ))
+    assert account.credit_limit is None
+
+
+# ----- inactive accounts --------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_an_inactive_account_becomes_a_user_action_warning():
+    accounts = [_account(), _account(_id="acc_gone", name="Old Account", status="INACTIVE")]
+    provider = AkahuProvider()
+    assert provider.action_required_warnings == []
+    with _patched(lambda r: httpx.Response(200, json={"success": True, "items": accounts})):
+        result = await provider.get_accounts(_creds())
+    # The account itself is still listed, with its last known balance.
+    assert {a.external_id for a in result} == {"acc_1", "acc_gone"}
+    (warning,) = provider.action_required_warnings
+    assert warning["code"] == "account_inactive"
+    assert warning["account_external_id"] == "acc_gone"
+    assert warning["help_url"] == "https://my.akahu.nz/connections"
+    assert "my.akahu.nz/connections" in warning["message"]
+    assert "Old Account" not in warning["message"]
+
+    # A later read with every account active clears them.
+    accounts[1]["status"] = "ACTIVE"
+    with _patched(lambda r: httpx.Response(200, json={"success": True, "items": accounts})):
+        await provider.get_accounts(_creds())
+    assert provider.action_required_warnings == []
+
+
+# ----- card bills (meta.bill, undocumented) ---------------------------------------------
+
+
+def _bill(**over) -> dict:
+    """A fictional classic card's meta.bill; every figure is made up."""
+    bill = {
+        "bill_date": "2026-10-24T11:00:00.000Z",  # 25 Oct in New Zealand
+        "closing_balance": -812.4,
+        "due_amount": -812.4,
+        "minimum_amount": -25.0,
+        "outstanding_amount": -812.4,
+    }
+    bill.update(over)
+    return bill
+
+
+def test_a_future_bill_date_is_the_due_day_in_new_zealand_time():
+    raw = _account(type="CREDITCARD", meta={"bill": _bill()})
+    assert card_bill_fields(raw, today=date(2026, 10, 13)) == (25, Decimal("25.0"))
+
+
+@pytest.mark.parametrize("today", [date(2026, 10, 25), date(2026, 10, 30)])
+def test_a_bill_date_today_or_past_sets_no_due_day(today):
+    raw = _account(type="CREDITCARD", meta={"bill": _bill()})
+    assert card_bill_fields(raw, today=today) == (None, Decimal("25.0"))
+
+
+@pytest.mark.parametrize("bill", [None, "nope", {}, {"bill_date": "garbage", "minimum_amount": "x"}])
+def test_a_missing_or_malformed_bill_maps_nothing(bill):
+    raw = _account(type="CREDITCARD", meta={"bill": bill} if bill is not None else {})
+    assert card_bill_fields(raw, today=date(2026, 10, 13)) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_a_classic_card_takes_its_bill_and_limit():
+    tomorrow = datetime.now(AKAHU_TZ).date() + timedelta(days=1)
+    due = datetime.combine(tomorrow, datetime.min.time(), AKAHU_TZ).replace(hour=9)
+    card = await _one_account(_account(
+        _id="acc_cc", type="CREDITCARD", connection=CLASSIC,
+        balance={"currency": "NZD", "current": -812.4, "limit": 3000},
+        meta={"bill": _bill(bill_date=due.astimezone(timezone.utc).isoformat())},
+    ))
+    assert card.balance == Decimal("812.4")
+    assert card.credit_limit == Decimal("3000")
+    assert card.payment_due_day == tomorrow.day
+    assert card.minimum_payment == Decimal("25.0")
+    assert card.statement_close_day is None
+
+
+@pytest.mark.asyncio
+async def test_only_cards_read_a_bill():
+    account = await _one_account(_account(meta={"bill": _bill(bill_date="2099-01-05T00:00:00Z")}))
+    assert account.payment_due_day is None
+    assert account.minimum_payment is None

@@ -29,6 +29,12 @@ const PROVIDER_BRIDGE_URLS: Record<string, string> = {
   akahu: 'https://my.akahu.nz/developers',
 }
 
+// Where a provider's user fixes a connection the provider itself lost (e.g.
+// a bank Akahu can no longer reach); offered only when reconnecting.
+const PROVIDER_RECONNECT_URLS: Record<string, string> = {
+  akahu: 'https://my.akahu.nz/connections',
+}
+
 // Providers whose credentials are several separate tokens rather than one
 // setup token. Each field is a single-line input; the values are joined with a
 // space for the provider, which picks them apart by their prefixes.
@@ -63,6 +69,7 @@ export function TokenConnectDialog({
   }, [open])
 
   const bridgeUrl = PROVIDER_BRIDGE_URLS[provider]
+  const reconnectUrl = PROVIDER_RECONNECT_URLS[provider]
   const i18nKey = `accounts.tokenConnect.${provider}`
   const isReconnect = Boolean(reconnectConnectionId)
   const tokenFields = PROVIDER_TOKEN_FIELDS[provider]
@@ -116,6 +123,15 @@ export function TokenConnectDialog({
               : t(`${i18nKey}.description`, t('accounts.tokenConnect.defaultDescription'))}
           </p>
         </DialogHeader>
+
+        {isReconnect && reconnectUrl && (
+          <Button asChild variant="outline" className="w-full justify-between">
+            <a href={reconnectUrl} target="_blank" rel="noreferrer">
+              <span>{t(`${i18nKey}.openConnections`)}</span>
+              <ExternalLink size={14} />
+            </a>
+          </Button>
+        )}
 
         {bridgeUrl && (
           <Button asChild variant="outline" className="w-full justify-between">

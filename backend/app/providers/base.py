@@ -61,6 +61,10 @@ class AccountData:
     balance: Decimal
     currency: str
     credit_limit: Optional[Decimal] = None
+    # True when `credit_limit` is the provider's estimate (e.g. available +
+    # owed) rather than a limit the institution sent. Sync uses a derived
+    # limit only to fill an empty one, never to replace a stored limit.
+    credit_limit_derived: bool = False
     statement_close_day: Optional[int] = None
     payment_due_day: Optional[int] = None
     minimum_payment: Optional[Decimal] = None

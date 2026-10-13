@@ -11,7 +11,7 @@ Akahu is faked with ``httpx.MockTransport``; every name and figure is made up.
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -31,7 +31,7 @@ from app.models.collection import Collection
 from app.models.goal import Goal
 from app.models.institution import Institution
 from app.models.transaction import Transaction
-from app.providers.akahu import AkahuProvider
+from app.providers.akahu import AKAHU_TZ, AkahuProvider
 from app.schemas.account import AccountUpdate
 from app.schemas.bank_connection import BankConnectionRead
 from app.schemas.collection import CollectionCreate
@@ -475,3 +475,201 @@ async def test_a_closed_investment_account_hands_its_value_back_to_its_holdings(
     await account_service.close_account(session, rows["acc_ks"].id, test_workspace.id)
     view = await money_view(session, test_workspace, test_user)
     assert view["dashboard"] == view["report"] == view["goal"] == NET_WORTH
+
+
+# ----- accounts Akahu has lost access to -----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_an_inactive_account_flags_the_connection_until_akahu_has_it_back(
+    session, test_user, test_workspace
+):
+    conn = await akahu_connection(session, test_user, test_workspace)
+    accounts = bank_accounts()
+    accounts[1]["status"] = "INACTIVE"
+    accounts[1]["balance"] = {"currency": "NZD", "current": 7000.0}
+    await run_sync(session, conn, test_workspace, test_user, accounts)
+
+    await session.refresh(conn)
+    assert conn.status == "error"
+    assert conn.last_sync_at is not None
+    rows = await accounts_by_external_id(session, conn)
+    # The rest of the sync still lands, the inactive account's cached balance too.
+    assert set(rows) == {"acc_chq", "acc_sav", "acc_visa", "acc_card"}
+    assert rows["acc_sav"].balance == Decimal("7000.00")
+
+    accounts[1]["status"] = "ACTIVE"
+    await run_sync(session, conn, test_workspace, test_user, accounts)
+    await session.refresh(conn)
+    assert conn.status == "active"
+
+
+@pytest.mark.asyncio
+async def test_an_inactive_account_the_user_closed_asks_nothing(session, test_user, test_workspace):
+    conn = await akahu_connection(session, test_user, test_workspace)
+    accounts = bank_accounts()
+    await run_sync(session, conn, test_workspace, test_user, accounts)
+    rows = await accounts_by_external_id(session, conn)
+    rows["acc_sav"].is_closed = True
+    await session.commit()
+
+    accounts[1]["status"] = "INACTIVE"
+    await run_sync(session, conn, test_workspace, test_user, accounts)
+    await session.refresh(conn)
+    assert conn.status == "active"
+
+
+# ----- credit limits --------------------------------------------------------------------
+
+
+def _official_card(current: float, available: float, **balance) -> list[dict]:
+    return [_raw("acc_open", "Open Card", "CREDITCARD", BANK_B, current,
+                 balance={"currency": "NZD", "current": current, "available": available, **balance})]
+
+
+@pytest.mark.asyncio
+async def test_a_derived_card_limit_fills_only_an_empty_limit(session, test_user, test_workspace):
+    conn = await akahu_connection(session, test_user, test_workspace)
+    await run_sync(session, conn, test_workspace, test_user, _official_card(400.0, 3600.0))
+    card = (await accounts_by_external_id(session, conn))["acc_open"]
+    assert card.credit_limit == Decimal("4000.00")
+
+    # The user corrects it; a later derived figure never replaces their value.
+    card.credit_limit = Decimal("4100")
+    await session.commit()
+    await run_sync(session, conn, test_workspace, test_user, _official_card(500.0, 3550.0))
+    card = (await accounts_by_external_id(session, conn))["acc_open"]
+    assert card.credit_limit == Decimal("4100.00")
+    assert card.balance == Decimal("500.00")
+
+    # An existing card with no limit yet gets the derived one.
+    card.credit_limit = None
+    await session.commit()
+    await run_sync(session, conn, test_workspace, test_user, _official_card(500.0, 3500.0))
+    card = (await accounts_by_external_id(session, conn))["acc_open"]
+    assert card.credit_limit == Decimal("4000.00")
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_card_limit_replaces_a_stored_one(session, test_user, test_workspace):
+    conn = await akahu_connection(session, test_user, test_workspace)
+    await run_sync(session, conn, test_workspace, test_user, _official_card(400.0, 3600.0))
+    card = (await accounts_by_external_id(session, conn))["acc_open"]
+    card.credit_limit = Decimal("4100")
+    await session.commit()
+
+    await run_sync(session, conn, test_workspace, test_user, _official_card(400.0, 5600.0, limit=6000))
+    card = (await accounts_by_external_id(session, conn))["acc_open"]
+    assert card.credit_limit == Decimal("6000.00")
+
+
+def _akahu_loan(limit: float | None, loan_type: str | None = None) -> list[dict]:
+    balance: dict = {"currency": "NZD", "current": -12000.0}
+    if limit is not None:
+        balance["limit"] = limit
+    details: dict = {"purpose": "PERSONAL"}
+    if loan_type is not None:
+        details["type"] = loan_type
+    return [_raw("acc_line", "Credit Line", "LOAN", BANK_A, -12000.0,
+                 balance=balance, meta={"loan_details": details})]
+
+
+async def _account_row(session, workspace, account_id) -> dict:
+    return next(a for a in await account_service.get_accounts(session, workspace.id) if a["id"] == account_id)
+
+
+@pytest.mark.asyncio
+async def test_a_new_akahu_loan_with_a_limit_is_a_revolving_facility(session, test_user, test_workspace):
+    conn = await akahu_connection(session, test_user, test_workspace)
+    await run_sync(session, conn, test_workspace, test_user, _akahu_loan(20000))
+    loan = (await accounts_by_external_id(session, conn))["acc_line"]
+    assert loan.type == "loan"
+    assert loan.loan_details == {"purpose": "PERSONAL", "type": "REVOLVING"}
+    assert loan.credit_limit == Decimal("20000.00")
+    row = await _account_row(session, test_workspace, loan.id)
+    assert row["credit_limit"] == 20000.0
+    assert row["available_credit"] == 8000.0
+
+
+@pytest.mark.asyncio
+async def test_an_existing_akahu_loan_takes_the_limit_akahu_sends(session, test_user, test_workspace):
+    conn = await akahu_connection(session, test_user, test_workspace)
+    await run_sync(session, conn, test_workspace, test_user, _akahu_loan(None))
+    loan = (await accounts_by_external_id(session, conn))["acc_line"]
+    assert loan.credit_limit is None
+    assert loan.loan_details == {"purpose": "PERSONAL"}
+
+    await run_sync(session, conn, test_workspace, test_user, _akahu_loan(20000))
+    loan = (await accounts_by_external_id(session, conn))["acc_line"]
+    assert loan.loan_details == {"purpose": "PERSONAL", "type": "REVOLVING"}
+    assert loan.credit_limit == Decimal("20000.00")
+
+    # A limit the user typed is replaced by the next one Akahu sends ...
+    loan.credit_limit = Decimal("15000")
+    await session.commit()
+    await run_sync(session, conn, test_workspace, test_user, _akahu_loan(25000))
+    loan = (await accounts_by_external_id(session, conn))["acc_line"]
+    assert loan.credit_limit == Decimal("25000.00")
+
+    # ... and kept when Akahu sends none.
+    loan.credit_limit = Decimal("15000")
+    await session.commit()
+    await run_sync(session, conn, test_workspace, test_user, _akahu_loan(None))
+    loan = (await accounts_by_external_id(session, conn))["acc_line"]
+    assert loan.credit_limit == Decimal("15000.00")
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_loan_type_with_a_limit_becomes_revolving(session, test_user, test_workspace):
+    conn = await akahu_connection(session, test_user, test_workspace)
+    await run_sync(session, conn, test_workspace, test_user, _akahu_loan(20000, "UNKNOWN"))
+    loan = (await accounts_by_external_id(session, conn))["acc_line"]
+    assert loan.loan_details == {"purpose": "PERSONAL", "type": "REVOLVING"}
+    assert loan.credit_limit == Decimal("20000.00")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("loan_type", ["TABLE", "REDUCING"])
+async def test_a_limit_never_makes_a_typed_loan_revolving(session, test_user, test_workspace, loan_type):
+    conn = await akahu_connection(session, test_user, test_workspace)
+    await run_sync(session, conn, test_workspace, test_user, _akahu_loan(20000, loan_type))
+    loan = (await accounts_by_external_id(session, conn))["acc_line"]
+    assert loan.loan_details == {"purpose": "PERSONAL", "type": loan_type}
+    assert loan.credit_limit is None
+
+    # Nor on a later sync, nor over a type the user chose.
+    await run_sync(session, conn, test_workspace, test_user, _akahu_loan(20000))
+    loan = (await accounts_by_external_id(session, conn))["acc_line"]
+    assert loan.loan_details == {"purpose": "PERSONAL", "type": loan_type}
+    assert loan.credit_limit is None
+
+
+def _classic_card(bill_date, minimum: float) -> list[dict]:
+    stamp = datetime.combine(bill_date, datetime.min.time(), AKAHU_TZ).replace(hour=9)
+    return [_raw("acc_card", "Platinum Card", "CREDITCARD", BANK_C, -640.0,
+                 balance={"currency": "NZD", "current": -640.0, "limit": 2500},
+                 meta={"bill": {"bill_date": stamp.astimezone(timezone.utc).isoformat(),
+                                "closing_balance": -640.0, "due_amount": -640.0,
+                                "minimum_amount": minimum, "outstanding_amount": -640.0}})]
+
+
+@pytest.mark.asyncio
+async def test_a_card_bill_sets_the_due_day_and_minimum_payment(session, test_user, test_workspace):
+    conn = await akahu_connection(session, test_user, test_workspace)
+    today = datetime.now(AKAHU_TZ).date()
+    due = today + timedelta(days=10)
+    await run_sync(session, conn, test_workspace, test_user, _classic_card(due, -20.0))
+    card = (await accounts_by_external_id(session, conn))["acc_card"]
+    assert card.balance == Decimal("640.00")
+    assert card.credit_limit == Decimal("2500.00")
+    assert card.payment_due_day == due.day
+    assert card.minimum_payment == Decimal("20.00")
+    row = await _account_row(session, test_workspace, card.id)
+    assert row["next_due_date"] is not None
+
+    # Once the due date has passed, the stored day stays and the minimum follows the bank.
+    await run_sync(session, conn, test_workspace, test_user,
+                   _classic_card(today - timedelta(days=3), -35.5))
+    card = (await accounts_by_external_id(session, conn))["acc_card"]
+    assert card.payment_due_day == due.day
+    assert card.minimum_payment == Decimal("35.50")

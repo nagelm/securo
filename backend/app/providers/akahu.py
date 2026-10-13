@@ -46,7 +46,15 @@ What is mapped, and why some things are not:
 * **Loans** become ``loan`` accounts with the balance Akahu sends (negative =
   owed). ``meta.loan_details`` (rate, term, maturity, repayment) is kept as
   the account's ``loan_details``, display only; a ``HOME`` purpose makes the
-  loan a mortgage.
+  loan a mortgage. A loan with a ``balance.limit`` is a revolving facility,
+  and the limit becomes its credit limit.
+* **Credit cards** take ``balance.limit``, or on an official connection that
+  sends none, available + owed as an estimate (``credit_limit_for``); and
+  from an undocumented ``meta.bill`` the minimum payment and, when it can
+  only be the due date, the due day (``card_bill_fields``).
+* **Inactive accounts** (Akahu lost access to the bank) keep their cached
+  balance, fetch no transactions, and flag the connection for the user to
+  reconnect the bank at my.akahu.nz (``inactive_account_warnings``).
 * **Particulars, code and reference** go to the transaction's notes, and the
   merchant's website to its payee.
 
@@ -59,7 +67,7 @@ import hashlib
 import logging
 import re
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -83,6 +91,8 @@ logger = logging.getLogger(__name__)
 
 AKAHU_HTTP_TIMEOUT = 60.0
 AKAHU_HELP_URL = "https://my.akahu.nz/developers"
+# Where the user reconnects a bank Akahu has lost access to.
+AKAHU_CONNECTIONS_URL = "https://my.akahu.nz/connections"
 # Akahu keeps 730 days of history for a Personal App.
 AKAHU_INITIAL_HISTORY_DAYS = 730
 # Banks correct dates and descriptions in the days after settlement, and some
@@ -415,6 +425,113 @@ def account_number_sets(raw_accounts: list[dict]) -> tuple[frozenset[str], froze
     return frozenset(own - {""}), frozenset(invest - {""})
 
 
+def _is_active(raw_acc: dict) -> bool:
+    """Akahu still has access: ``status`` ACTIVE (the documented default)."""
+    return str(raw_acc.get("status") or "ACTIVE").upper() == "ACTIVE"
+
+
+def inactive_account_warnings(raw_accounts: list[dict]) -> list[dict]:
+    """One user-action warning per account Akahu has lost access to.
+
+    An INACTIVE account keeps its cached data, which no longer refreshes,
+    until the user reconnects the bank at my.akahu.nz. The sync layer marks
+    the connection as needing the user (``action_required_warnings``) while
+    any is listed, and active again once none is.
+    """
+    return [
+        {
+            "code": "account_inactive",
+            "message": f"Akahu has lost access to this account; reconnect it at {AKAHU_CONNECTIONS_URL}",
+            "account_external_id": str(raw["_id"]),
+            "help_url": AKAHU_CONNECTIONS_URL,
+        }
+        for raw in raw_accounts
+        if not _is_active(raw)
+    ]
+
+
+def transaction_refresh_stamps(raw_accounts: list[dict]) -> dict[str, datetime]:
+    """When Akahu last read each ACTIVE account's transactions, by account id.
+
+    An account whose transactions Akahu has never fetched has no
+    ``refreshed.transactions`` (some cards are like that), and an INACTIVE
+    account no longer refreshes; neither is listed, so neither can hold up a
+    refresh.
+    """
+    stamps: dict[str, datetime] = {}
+    for raw in raw_accounts:
+        stamp = _parse_timestamp((raw.get("refreshed") or {}).get("transactions"))
+        if stamp is not None and _is_active(raw):
+            stamps[str(raw["_id"])] = stamp
+    return stamps
+
+
+def credit_limit_for(
+    raw: dict, account_type: str, balance: Decimal
+) -> tuple[Optional[Decimal], bool]:
+    """(credit limit, derived) for a card or loan; (None, False) otherwise.
+
+    ``balance.limit`` is "only present when provided directly by the
+    institution"; when it is, it is the limit, for a card and for a loan (a
+    loan with a limit is a revolving facility). ``balance`` is the account's
+    balance in Securo's convention (a card's debt positive).
+
+    A card without one can still show its limit: an official open-banking
+    card sends ``available``, and its limit is available + owed. Akahu and
+    the bank sent no explicit limit, so this is a derived figure, flagged so
+    sync only fills an empty limit with it. Pending purchases already reduce
+    ``available`` but not the balance, so while any are held it reads low by
+    their amount. Classic (screen-scraped) connections are left alone: their
+    cards report debt with the opposite sign, and how each bank fills
+    ``available`` there is not documented, so the sum is not reliably the
+    limit.
+    """
+    if account_type not in ("credit_card", "loan"):
+        return None, False
+    balance_obj = raw.get("balance") or {}
+    limit = _to_decimal(balance_obj.get("limit"))
+    if limit is not None:
+        return limit.copy_abs(), False
+    if account_type != "credit_card":
+        return None, False
+    if (raw.get("connection") or {}).get("connection_type") != "official":
+        return None, False
+    available = _to_decimal(balance_obj.get("available"))
+    if available is None:
+        return None, False
+    derived = (available + balance).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return (derived, True) if derived > 0 else (None, False)
+
+
+def card_bill_fields(raw: dict, today: Optional[date] = None) -> tuple[Optional[int], Optional[Decimal]]:
+    """(payment due day, minimum payment) from a card's ``meta.bill``.
+
+    Some classic card connections send ``meta.bill`` (``bill_date``,
+    ``closing_balance``, ``due_amount``, ``minimum_amount``,
+    ``outstanding_amount``); Akahu does not document it. Only what fits an
+    existing card field is read:
+
+    * ``minimum_amount`` is the statement's minimum payment, kept as a
+      positive amount owed.
+    * ``bill_date`` is not documented as either the statement date or the
+      due date. A statement is never dated in the future, so a ``bill_date``
+      after today (New Zealand time) can only be the due date, and its day
+      of the month becomes the payment due day. A past or same-day one is
+      left alone (None keeps the stored day on sync).
+
+    The balances have no Securo field and are not read.
+    """
+    bill = (raw.get("meta") or {}).get("bill")
+    if not isinstance(bill, dict):
+        return None, None
+    minimum = _to_decimal(bill.get("minimum_amount"))
+    due_day = None
+    bill_date = _local_date(bill.get("bill_date"))
+    if bill_date is not None and bill_date > (today or datetime.now(AKAHU_TZ).date()):
+        due_day = bill_date.day
+    return due_day, minimum.copy_abs() if minimum is not None else None
+
+
 def _has_transactions(raw_acc: dict) -> bool:
     attributes = raw_acc.get("attributes")
     if isinstance(attributes, list):
@@ -553,6 +670,11 @@ class AkahuProvider(BankProvider):
     """Akahu Personal App connector."""
 
     base_url = "https://api.akahu.io/v1"
+
+    def __init__(self) -> None:
+        # Accounts Akahu has lost access to, found by the last get_accounts
+        # (inactive_account_warnings); read by the sync layer.
+        self.action_required_warnings: list[dict] = []
 
     @property
     def name(self) -> str:
@@ -693,6 +815,10 @@ class AkahuProvider(BankProvider):
                 # as positive (a card owing 250.00 reports +250.00
                 # with 4,750.00 available), so only classic balances flip.
                 balance = -balance
+            credit_limit, limit_derived = credit_limit_for(raw, account_type, balance)
+            due_day, minimum_payment = (
+                card_bill_fields(raw) if account_type == "credit_card" else (None, None)
+            )
             accounts.append(
                 AccountData(
                     external_id=str(raw["_id"]),
@@ -700,9 +826,10 @@ class AkahuProvider(BankProvider):
                     type=account_type,
                     balance=balance,
                     currency=_iso_currency(balance_obj.get("currency"), "NZD") or "NZD",
-                    credit_limit=_to_decimal(balance_obj.get("limit"))
-                    if account_type == "credit_card"
-                    else None,
+                    credit_limit=credit_limit,
+                    credit_limit_derived=limit_derived,
+                    payment_due_day=due_day,
+                    minimum_payment=minimum_payment,
                     masked_number=mask_last4(raw.get("formatted_account")),
                     institution_external_id=str(connection["_id"]) if connection.get("_id") else None,
                     institution_name=connection.get("name"),
@@ -714,7 +841,9 @@ class AkahuProvider(BankProvider):
         return accounts
 
     async def get_accounts(self, credentials: dict) -> list[AccountData]:
-        return self._parse_accounts(await self._list_accounts(credentials))
+        raw_accounts = await self._list_accounts(credentials)
+        self.action_required_warnings = inactive_account_warnings(raw_accounts)
+        return self._parse_accounts(raw_accounts)
 
     async def get_institution_logo(self, credentials: dict) -> Optional[str]:
         for raw in await self._list_accounts(credentials):
@@ -741,7 +870,8 @@ class AkahuProvider(BankProvider):
         if str(raw_acc.get("type") or "").upper() in INVESTMENT_TYPES:
             # Balance only: see the module docstring.
             return []
-        if str(raw_acc.get("status") or "ACTIVE").upper() != "ACTIVE":
+        if not _is_active(raw_acc):
+            # Akahu lost access; get_accounts reports it for the user.
             return []
 
         today = datetime.now(AKAHU_TZ).date()
@@ -887,30 +1017,39 @@ class AkahuProvider(BankProvider):
     # ----- refresh ----------------------------------------------------------
 
     async def trigger_refresh(self, credentials: dict | None) -> RefreshOutcome:
-        """Ask Akahu to re-read the banks when its data is over an hour old."""
+        """Ask Akahu to re-read the banks when its data is over an hour old.
+
+        Only accounts with a ``refreshed.transactions`` stamp take part
+        (``transaction_refresh_stamps``): ones Akahu never fetched
+        transactions for, or has lost access to, would never move. The
+        refresh is requested when one of them is older than
+        AKAHU_REFRESH_REST, and it has worked once each of those stale
+        accounts has a newer stamp. Fresher accounts are not waited for:
+        Akahu skips accounts refreshed within its rest period (15 minutes by
+        default, https://developers.akahu.nz/docs/data-refreshes).
+        """
         if not credentials:
             return "skipped"
         try:
-            before = await self._list_accounts(credentials)
-            stamps = [
-                _parse_timestamp((acc.get("refreshed") or {}).get("transactions"))
-                for acc in before
-            ]
-            stamps = [s for s in stamps if s is not None]
-            if not stamps:
-                return "skipped"
-            oldest = min(stamps)
-            if datetime.now(timezone.utc) - oldest < AKAHU_REFRESH_REST:
+            before = transaction_refresh_stamps(await self._list_accounts(credentials))
+            now = datetime.now(timezone.utc)
+            stale = {
+                acc_id: stamp
+                for acc_id, stamp in before.items()
+                if now - stamp >= AKAHU_REFRESH_REST
+            }
+            if not stale:
                 return "skipped"
             await self._request(credentials, "POST", "/refresh")
             for _ in range(AKAHU_REFRESH_POLL_ATTEMPTS):
                 await asyncio.sleep(AKAHU_REFRESH_POLL_SECONDS)
-                after = await self._list_accounts(credentials)
-                fresh = [
-                    _parse_timestamp((acc.get("refreshed") or {}).get("transactions"))
-                    for acc in after
-                ]
-                if all(s is not None and s > oldest for s in fresh):
+                after = transaction_refresh_stamps(await self._list_accounts(credentials))
+                # An account that went away or lost access meanwhile is not
+                # waited for either.
+                if all(
+                    acc_id not in after or after[acc_id] > stamp
+                    for acc_id, stamp in stale.items()
+                ):
                     return "refreshed"
             return "failed"
         except ProviderUserActionRequired:
