@@ -25,6 +25,7 @@ import mcp_server.tools  # noqa: F401  (registers the MCP tools)
 from app.core.app_clock import app_today
 from app.models.account import Account
 from app.models.category import Category
+from app.models.category_group import CategoryGroup
 from app.models.loan_payment import LoanPayment
 from app.models.payee import Payee
 from app.models.transaction import Transaction
@@ -709,12 +710,13 @@ REPAYMENT_PROBES: dict[str, Probe] = {**PROBES, "mcp_aggregate_by_payee": _mcp_b
 
 
 @pytest.mark.asyncio
-async def test_seeded_loan_repayments_is_a_transfer_category_beside_transfers(seeded):
+async def test_seeded_loan_repayments_is_a_transfer_category_in_housing(session: AsyncSession, seeded):
     assert seeded.repayments.name == "Loan repayments"
     assert seeded.repayments.treat_as_transfer is True
     assert seeded.repayments.is_ignored is False
     assert seeded.repayments.group_id is not None
-    assert seeded.repayments.group_id == seeded.transfers.group_id
+    group = await session.get(CategoryGroup, seeded.repayments.group_id)
+    assert group.name == "Housing"
 
 
 @pytest.mark.asyncio
