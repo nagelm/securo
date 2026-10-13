@@ -41,7 +41,9 @@ CATEGORY_TO_GROUP = {
     "personal_care": "lifestyle",
     "taxes": "other",
     "transfers": "other",
-    "loan_repayments": "other",
+    # Repayments are a housing cost to the people paying them, even though
+    # the category is a transfer and stays out of P&L.
+    "loan_repayments": "housing",
     "investments": "other",
     "other": "other",
 }

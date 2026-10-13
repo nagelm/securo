@@ -16,13 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.app_clock import app_today
 from app.models.account import Account
 from app.models.category import Category
+from app.models.category_group import CategoryGroup
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.schemas.loan_payment import LoanPaymentCreate
 from app.schemas.transaction import TransferCreate
 from app.services import transaction_service
-from app.services.category_group_service import CATEGORY_TO_GROUP
+from app.services.category_group_service import CATEGORY_TO_GROUP, DEFAULT_GROUPS_I18N
 from app.services.category_service import (
     DEFAULT_CATEGORIES_I18N,
     create_default_categories,
@@ -43,12 +44,12 @@ from tests.test_transfer_matching_rules import _pending
 # ---------------------------------------------------------------------------
 
 
-def test_template_is_a_transfer_category_in_the_transfers_group():
+def test_template_is_a_transfer_category_in_the_housing_group():
     template = DEFAULT_CATEGORIES_I18N[LOAN_REPAYMENTS_KEY]
     assert template["en"] == "Loan repayments"
     assert template["treat_as_transfer"] is True
     assert template["color"] == DEFAULT_CATEGORIES_I18N["transfers"]["color"]
-    assert CATEGORY_TO_GROUP[LOAN_REPAYMENTS_KEY] == CATEGORY_TO_GROUP["transfers"]
+    assert CATEGORY_TO_GROUP[LOAN_REPAYMENTS_KEY] == "housing"
 
 
 def test_template_has_a_name_in_every_language_transfers_has():
@@ -71,6 +72,8 @@ async def test_new_workspaces_get_it(session: AsyncSession, test_user: User, tes
     cat = await session.get(Category, cat_id)
     assert cat is not None
     assert (cat.name, cat.treat_as_transfer, cat.is_system) == (name, True, True)
+    group = await session.get(CategoryGroup, cat.group_id)
+    assert group is not None and group.name == DEFAULT_GROUPS_I18N["housing"][lang]
 
 
 # ---------------------------------------------------------------------------
