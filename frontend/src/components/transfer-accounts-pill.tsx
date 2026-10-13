@@ -5,7 +5,7 @@ import { AccountIcon } from '@/components/account-icon'
 import { getAccountName } from '@/lib/account-utils'
 import { cn } from '@/lib/utils'
 
-type PillAccount = {
+export type TransferPillAccount = {
   type: string
   name: string
   display_name?: string | null
@@ -25,8 +25,8 @@ export function TransferAccountsPill({
   description,
   className,
 }: {
-  from: PillAccount
-  to: PillAccount
+  from: TransferPillAccount
+  to: TransferPillAccount
   /** The transaction's own description, kept reachable in the tooltip. */
   description?: string
   className?: string

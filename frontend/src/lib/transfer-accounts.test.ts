@@ -37,3 +37,34 @@ describe('resolveTransferAccounts', () => {
     expect(resolveTransferAccounts(leg({ account_id: 'acc-closed' }), accounts)).toBeNull()
   })
 })
+
+describe('resolveTransferAccounts with a closed account', () => {
+  const closed = {
+    id: 'acc-closed',
+    name: 'Old Savings',
+    display_name: null,
+    type: 'savings',
+    institution_logo_url: null,
+    is_closed: true,
+  }
+
+  it('falls back to the summary the API sent for the other leg', () => {
+    const debit = leg({ transfer_counterpart_account_id: closed.id, transfer_counterpart_account: closed })
+    expect(resolveTransferAccounts(debit, accounts)).toEqual({ from: current, to: closed })
+  })
+
+  it('falls back to the summary the API sent for the own account of the row', () => {
+    const credit = leg({
+      type: 'credit',
+      account_id: closed.id,
+      transfer_account: closed,
+      transfer_counterpart_account_id: current.id,
+    })
+    expect(resolveTransferAccounts(credit, accounts)).toEqual({ from: current, to: closed })
+  })
+
+  it('prefers the loaded account over the summary', () => {
+    const stale = { ...closed, id: loan.id, name: 'Stale name' }
+    expect(resolveTransferAccounts(leg({ transfer_counterpart_account: stale }), accounts)?.to).toBe(loan)
+  })
+})

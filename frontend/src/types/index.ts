@@ -155,6 +155,16 @@ export interface ConnectionSettings {
   sync_assets?: boolean
 }
 
+/** Enough of an account to draw it in a transfer pill (may be closed). */
+export interface TransferAccountRef {
+  id: string
+  name: string
+  display_name: string | null
+  type: string
+  institution_logo_url: string | null
+  is_closed: boolean
+}
+
 export interface Account {
   id: string
   user_id: string
@@ -278,6 +288,9 @@ export interface Transaction {
   transfer_pair_id: string | null
   /** The account the other leg of a linked transfer sits in. */
   transfer_counterpart_account_id?: string | null
+  /** Drawable summaries of both transfer accounts, closed ones included. */
+  transfer_account?: TransferAccountRef | null
+  transfer_counterpart_account?: TransferAccountRef | null
   amount_primary: number | null
   fx_rate_used: number | null
   fx_fallback: boolean
@@ -697,6 +710,9 @@ export interface TransactionCalendarItem {
   transfer_pair_id: string | null
   /** The account the other leg of a linked transfer sits in. */
   transfer_counterpart_account_id?: string | null
+  /** Drawable summaries of both transfer accounts, closed ones included. */
+  transfer_account?: TransferAccountRef | null
+  transfer_counterpart_account?: TransferAccountRef | null
   is_transfer: boolean
   is_ignored: boolean
   exclude_from_pnl: boolean

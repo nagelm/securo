@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { screen } from '@testing-library/react'
 
-import { TransferAccountsPill } from '@/components/transfer-accounts-pill'
+import { TransferAccountsPill, type TransferPillAccount } from '@/components/transfer-accounts-pill'
 import { MobileTransactionRow } from '@/components/mobile-transaction-row'
 import { renderWithProviders } from '@/test/utils'
+import { resolveTransferAccounts } from '@/lib/transfer-accounts'
 import type { Account, Transaction } from '@/types'
 
 const LOGO = 'https://logo.example/bank.png'
@@ -72,7 +73,7 @@ describe('MobileTransactionRow with a transfer', () => {
     splits: [],
   } as unknown as Transaction
 
-  const renderRow = (transferAccounts: { from: Account; to: Account } | null) =>
+  const renderRow = (transferAccounts: { from: TransferPillAccount; to: TransferPillAccount } | null) =>
     renderWithProviders(
       <MobileTransactionRow
         tx={tx}
@@ -103,5 +104,25 @@ describe('MobileTransactionRow with a transfer', () => {
 
     expect(screen.queryByText(/Transfer from/)).toBeNull()
     expect(screen.getByText('LOAN PAYMENT 991')).toHaveClass('font-semibold')
+  })
+
+  it('draws a pair whose other account is closed from the API summary', () => {
+    const closedTx = {
+      ...tx,
+      transfer_counterpart_account_id: 'acc-closed',
+      transfer_counterpart_account: {
+        id: 'acc-closed',
+        name: 'Old Savings',
+        display_name: null,
+        type: 'savings',
+        institution_logo_url: null,
+        is_closed: true,
+      },
+    } as Transaction
+    const loaded = new Map([[current.id, current]])
+
+    renderRow(resolveTransferAccounts(closedTx, loaded))
+
+    expect(screen.getByText('Transfer from Joint Everyday to Old Savings')).toBeInTheDocument()
   })
 })

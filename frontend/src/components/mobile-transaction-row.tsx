@@ -1,7 +1,7 @@
 import { getAccountName } from '@/lib/account-utils'
 import { AccountIcon } from '@/components/account-icon'
 import { PayeeIcon } from '@/components/payee-icon'
-import { TransferAccountsPill } from '@/components/transfer-accounts-pill'
+import { TransferAccountsPill, type TransferPillAccount } from '@/components/transfer-accounts-pill'
 import type { Transaction, Account } from '@/types'
 import { AlertTriangle, ArrowLeftRight, CalendarClock, ChartNoAxesColumn, Clock, EyeClosed, Paperclip } from 'lucide-react'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
@@ -30,7 +30,7 @@ interface MobileTransactionRowProps {
   /** Show the payee instead of the account name in an account-scoped view. */
   showPayee?: boolean
   /** Both accounts of a linked transfer; drawn in place of the description. */
-  transferAccounts?: { from: Account; to: Account } | null
+  transferAccounts?: { from: TransferPillAccount; to: TransferPillAccount } | null
 }
 
 export function MobileTransactionRow({

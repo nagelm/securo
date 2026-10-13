@@ -5,7 +5,7 @@ import { ArrowLeftRight, CalendarDays, ChartNoAxesColumn, CircleDot, Clock, EyeC
 import type { Account, TransactionCalendarDay, TransactionCalendarItem, TransactionCalendarResponse } from '@/types'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AccountIcon } from '@/components/account-icon'
-import { TransferAccountsPill } from '@/components/transfer-accounts-pill'
+import { TransferAccountsPill, type TransferPillAccount } from '@/components/transfer-accounts-pill'
 import { resolveTransferAccounts } from '@/lib/transfer-accounts'
 import { CategoryIcon } from '@/components/category-icon'
 import { ProjectedTransactionBadge } from '@/components/projected-transaction-badge'
@@ -1211,7 +1211,7 @@ function CalendarItemRow({
 }: {
   item: TransactionCalendarItem
   account: Account | undefined
-  transferAccounts: { from: Account; to: Account } | null
+  transferAccounts: { from: TransferPillAccount; to: TransferPillAccount } | null
   locale: string
   userCurrency: string
   mask: (value: string) => string
