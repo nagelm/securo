@@ -1220,10 +1220,10 @@ async def test_balance_at_multi_currency(session, test_user, test_workspace):
 
 
 @pytest.mark.asyncio
-async def test_balance_history_leaves_out_investment_accounts(
+async def test_balance_history_leaves_out_investment_and_loan_accounts(
     session: AsyncSession, test_user, test_workspace
 ):
-    """Without an account choice, investment balances don't move the chart."""
+    """Without an account choice, investment and loan balances don't move the chart."""
     cash = Account(
         id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
         name="Cash", type="checking", balance=Decimal("0"), currency="BRL",
@@ -1232,7 +1232,11 @@ async def test_balance_history_leaves_out_investment_accounts(
         id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
         name="Fund", type="investment", balance=Decimal("0"), currency="BRL",
     )
-    session.add_all([cash, fund])
+    loan = Account(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        name="Mortgage", type="loan", balance=Decimal("0"), currency="BRL",
+    )
+    session.add_all([cash, fund, loan])
     session.add_all([
         Transaction(
             id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
@@ -1240,7 +1244,7 @@ async def test_balance_history_leaves_out_investment_accounts(
             currency="BRL", date=date.today().replace(day=1), type="credit",
             source="opening_balance", status="posted",
         )
-        for acct, amount in ((cash, "100"), (fund, "5000"))
+        for acct, amount in ((cash, "100"), (fund, "5000"), (loan, "300000"))
     ])
     await session.commit()
 

@@ -1686,16 +1686,17 @@ async def get_balance_history(
     month_start, month_end = _month_range(month)
     prev_month_start = (month_start - timedelta(days=1)).replace(day=1)
 
-    # Fork: without an explicit account choice the chart shows cash, cards and
-    # loans. Investment accounts move with market returns and contributions
-    # that never appear as transactions, so they would only add jumps.
+    # Fork: without an explicit account choice the chart shows cash and cards.
+    # Investment accounts move with market returns and contributions that never
+    # appear as transactions, and loans are the other half of an asset (the
+    # house) that isn't an account, so either would skew the picture.
     if account_ids is None:
         account_ids = list(
             (
                 await session.execute(
                     select(Account.id).where(
                         Account.workspace_id == workspace_id,
-                        Account.type != "investment",
+                        Account.type.not_in(("investment", "loan")),
                     )
                 )
             ).scalars()
