@@ -3,10 +3,13 @@ import { describe, expect, it } from 'vitest'
 import {
   contributionTargetLabel,
   periodDaysLeft,
-  periodElapsedFraction,
   periodPercentage,
-  periodsMet,
+  planAmount,
+  planScale,
+  planState,
   quickSetupCandidates,
+  recentRecord,
+  SCALE_MIN_WIDTH,
 } from '@/lib/goal-contribution'
 import type { Account, ContributionPeriodResult, ContributionProgress, Goal } from '@/types'
 
@@ -23,32 +26,6 @@ describe('periodPercentage', () => {
   })
 })
 
-describe('periodElapsedFraction', () => {
-  // A Monday-to-Sunday week.
-  const start = '2026-03-16'
-  const end = '2026-03-22'
-
-  it('counts today as gone, both ends inclusive', () => {
-    expect(periodElapsedFraction(start, end, new Date(2026, 2, 16, 9, 0))).toBeCloseTo(1 / 7)
-    expect(periodElapsedFraction(start, end, new Date(2026, 2, 19, 12, 0))).toBeCloseTo(4 / 7)
-    expect(periodElapsedFraction(start, end, new Date(2026, 2, 22, 18, 0))).toBe(1)
-  })
-
-  it('reads the local calendar date at either end of the day', () => {
-    expect(periodElapsedFraction(start, end, new Date(2026, 2, 19, 0, 30))).toBeCloseTo(4 / 7)
-    expect(periodElapsedFraction(start, end, new Date(2026, 2, 19, 23, 30))).toBeCloseTo(4 / 7)
-  })
-
-  it('is clamped outside the period', () => {
-    expect(periodElapsedFraction(start, end, new Date(2026, 2, 10))).toBe(0)
-    expect(periodElapsedFraction(start, end, new Date(2026, 2, 30))).toBe(1)
-  })
-
-  it('works for a month', () => {
-    expect(periodElapsedFraction('2026-02-01', '2026-02-28', new Date(2026, 1, 14))).toBe(0.5)
-  })
-})
-
 describe('periodDaysLeft', () => {
   it('counts today and stops at zero', () => {
     expect(periodDaysLeft('2026-03-22', new Date(2026, 2, 19, 23, 30))).toBe(4)
@@ -57,15 +34,12 @@ describe('periodDaysLeft', () => {
   })
 })
 
-describe('periodsMet', () => {
-  const period = (status: ContributionPeriodResult['status'], current = false): ContributionPeriodResult => ({
-    start: '2026-01-01',
-    end: '2026-01-07',
-    contributed: 0,
-    target: 10,
-    status,
-    current,
-  })
+describe('recentRecord', () => {
+  const period = (
+    status: ContributionPeriodResult['status'],
+    start: string,
+    current = false,
+  ): ContributionPeriodResult => ({ start, end: start, contributed: 0, target: 10, status, current })
   const progress = (history: ContributionPeriodResult[]): ContributionProgress => ({
     period: 'weekly',
     target: 10,
@@ -74,15 +48,79 @@ describe('periodsMet', () => {
     streak: 0,
   })
 
-  it('counts met and over among finished periods, leaving out a current one still in progress', () => {
-    expect(periodsMet(progress([period('met'), period('short'), period('over'), period('pending', true)]))).toEqual({
-      met: 2,
-      total: 3,
-    })
+  it('counts met and over among finished periods and leaves the current one out, even once met', () => {
+    const record = recentRecord(
+      progress([period('met', 'a'), period('short', 'b'), period('over', 'c'), period('met', 'd', true)]),
+    )
+    expect(record.periods.map((p) => p.start)).toEqual(['a', 'b', 'c'])
+    expect([record.met, record.total]).toEqual([2, 3])
   })
 
-  it('counts the current period once it is met', () => {
-    expect(periodsMet(progress([period('short'), period('met', true)]))).toEqual({ met: 1, total: 2 })
+  it('keeps only the latest finished periods, oldest first', () => {
+    const history = Array.from({ length: 12 }, (_, i) => period(i % 2 ? 'met' : 'short', `p${i}`))
+    history.push(period('pending', 'now', true))
+    const record = recentRecord(progress(history))
+    expect(record.periods.map((p) => p.start)).toEqual(['p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', 'p11'])
+    expect([record.met, record.total]).toEqual([5, 10])
+    expect(recentRecord(progress(history), 3).total).toBe(3)
+  })
+
+  it('is empty with only the current period', () => {
+    expect(recentRecord(progress([period('pending', 'now', true)]))).toEqual({ periods: [], met: 0, total: 0 })
+  })
+})
+
+describe('planState', () => {
+  it('is on plan only when the difference rounds to zero cents', () => {
+    expect(planState(40)).toBe('ahead')
+    expect(planState(0.01)).toBe('ahead')
+    expect(planState(-950)).toBe('behind')
+    expect(planState(0)).toBe('on')
+    expect(planState(0.004)).toBe('on')
+    expect(planState(-0.004)).toBe('on')
+  })
+})
+
+describe('planScale', () => {
+  it('grows right from the plan when ahead, four periods filling the half', () => {
+    expect(planScale(40, 20)).toEqual({ state: 'ahead', left: 50, width: 25 })
+    expect(planScale(80, 20)).toEqual({ state: 'ahead', left: 50, width: 50 })
+  })
+
+  it('grows left from the plan when behind', () => {
+    expect(planScale(-20, 20)).toEqual({ state: 'behind', left: 37.5, width: 12.5 })
+  })
+
+  it('saturates beyond four periods', () => {
+    expect(planScale(-950, 200)).toEqual({ state: 'behind', left: 0, width: 50 })
+    expect(planScale(1_000_000, 20)).toEqual({ state: 'ahead', left: 50, width: 50 })
+  })
+
+  it('keeps a small difference visible', () => {
+    expect(planScale(0.5, 200)).toEqual({ state: 'ahead', left: 50, width: SCALE_MIN_WIDTH })
+    expect(planScale(-0.5, 200)).toEqual({ state: 'behind', left: 50 - SCALE_MIN_WIDTH, width: SCALE_MIN_WIDTH })
+  })
+
+  it('centres a thin bar on the plan when on plan', () => {
+    expect(planScale(0, 20)).toEqual({ state: 'on', left: 50 - SCALE_MIN_WIDTH / 2, width: SCALE_MIN_WIDTH })
+  })
+
+  it('saturates without a period target to scale by', () => {
+    expect(planScale(5, 0)).toEqual({ state: 'ahead', left: 50, width: 50 })
+  })
+})
+
+describe('planAmount', () => {
+  it('reads whole units from 10 up and cents below, always positive', () => {
+    expect(planAmount(40.4, 'USD', 'en-US')).toBe('$40')
+    expect(planAmount(-950.6, 'USD', 'en-US')).toBe('$951')
+    expect(planAmount(10, 'USD', 'en-US')).toBe('$10')
+    expect(planAmount(8.57, 'USD', 'en-US')).toBe('$8.57')
+    expect(planAmount(-9.994, 'USD', 'en-US')).toBe('$9.99')
+  })
+
+  it('follows the locale and currency', () => {
+    expect(planAmount(1234.5, 'EUR', 'de-DE')).toBe('1.235\u00a0€')
   })
 })
 

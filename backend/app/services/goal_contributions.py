@@ -15,11 +15,32 @@ Everything else on the account (interest, tax on interest, fees, a card
 purchase straight from the savings account) is not a contribution and is
 left out; it still moves the balance, which is the goal's `current_amount`.
 Ignored rows and rows in ignored categories are left out, as everywhere.
+A row the bank itself types as interest (Akahu `INTEREST`) never counts,
+even when a rule has filed it under a transfer category.
 
 Periods follow the calendar: weeks run Monday to Sunday (ISO; Securo has
 no week-start setting), fortnights are pairs of such weeks counted from a
 fixed Monday, and months are calendar months. "Today" is the workspace's
 own date (`app_today`).
+
+Ahead or behind the plan is measured over a window that opens when money
+last left the account (`plan_window`):
+
+    since   = date of the latest money out of the account: any debit,
+              withdrawal or transfer out alike. Charges the bank posts
+              itself (Akahu types INTEREST, TAX, FEE: interest, tax on it,
+              fees) do not open a window. An account money never left
+              opens it on its first deposit.
+    saved   = deposits dated from `since` through today, the `since` day
+              included (rows carry no time of day, so a deposit later on
+              the day of the withdrawal counts; the withdrawal itself is a
+              debit and never does). A deposit is a contribution credit as
+              above: a transfer in, never interest.
+    planned = the periodic target for every day from `since` through today,
+              each period's target spread over its own days (a week's
+              over 7, a month's over its 28 to 31), so on the third day of
+              a week a 20-a-week plan has asked for 20 x 3/7 so far.
+    ahead   = saved - planned (negative: behind).
 
 All of this is display-only: nothing here writes, and no balance, net
 worth, P&L or budget reads it.
@@ -35,16 +56,27 @@ from decimal import Decimal
 from statistics import median
 from typing import Literal, Optional, cast
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models.category import Category
 from app.models.recurring_transaction import RecurringTransaction
 from app.models.transaction import Transaction
 from app.services.fx_rate_service import convert
 
-#: How many periods the history shows, the current one included.
+#: How many periods the history and the streak look back over, the current
+#: one included.
 HISTORY_PERIODS = 12
+
+#: How many of those the API returns: the last ten finished periods and the
+#: current one.
+SHOWN_PERIODS = 11
+
+#: Akahu transaction types (`raw_data.type`) the bank posts itself. Interest
+#: is never a deposit; none of them is money taken out of the account.
+_INTEREST_TYPES = ("INTEREST",)
+_BANK_CHARGE_TYPES = ("INTEREST", "TAX", "FEE")
 
 #: Fortnights are counted from this Monday, so every goal and every caller
 #: agrees on where a fortnight starts.
@@ -93,12 +125,23 @@ class PeriodResult:
 
 
 @dataclass
+class PlanWindow:
+    """Saved vs planned since money last left the account."""
+
+    since: date
+    saved: Decimal
+    planned: Decimal
+    ahead_by: Decimal  # saved - planned; negative: behind
+
+
+@dataclass
 class ContributionProgress:
     period: Period
     target: Decimal
     current: PeriodResult
     history: list[PeriodResult]  # oldest first, the current period last
     streak: int
+    plan: Optional[PlanWindow] = None
 
 
 def _status(contributed: Decimal, target: Decimal, current: bool) -> PeriodStatus:
@@ -126,6 +169,12 @@ def _streak(history: list[PeriodResult]) -> int:
     return streak
 
 
+def _raw_type():
+    """The provider's own transaction type (Akahu `raw_data.type`), upper
+    case, or "" for a row without one."""
+    return func.upper(func.coalesce(Transaction.raw_data["type"].as_string(), ""))
+
+
 async def _contribution_rows(
     session: AsyncSession,
     account_ids: list[uuid.UUID],
@@ -145,6 +194,7 @@ async def _contribution_rows(
                 Transaction.transfer_pair_id,
                 Category.treat_as_transfer,
                 Category.is_ignored,
+                _raw_type().label("raw_type"),
             )
             .outerjoin(Category, Category.id == Transaction.category_id)
             .where(
@@ -180,7 +230,7 @@ async def _contribution_rows(
 
     out: list[tuple[date, str, Decimal, str]] = []
     for r in rows:
-        if r.is_ignored:
+        if r.is_ignored or r.raw_type in _INTEREST_TYPES:
             continue
         pair_id = r.transfer_pair_id
         if pair_id is not None and pair_id in internal_pairs:
@@ -196,6 +246,89 @@ async def _in_currency(session: AsyncSession, amount: Decimal, from_cur: str, to
         return amount
     converted, _ = await convert(session, amount, from_cur, to_cur)
     return converted
+
+
+def planned_between(period: str, target: Decimal, start: date, today: date) -> Decimal:
+    """What the plan asks for from `start` through `today`, both included:
+    each period's target spread evenly over that period's own days."""
+    total = Decimal("0")
+    day = start
+    while day <= today:
+        period_start, period_end = period_bounds(period, day)
+        days_in_period = (period_end - period_start).days + 1
+        days_counted = (min(period_end, today) - day).days + 1
+        total += target * days_counted / days_in_period
+        day = period_end + timedelta(days=1)
+    return total
+
+
+async def _window_start(session: AsyncSession, account_ids: list[uuid.UUID], today: date) -> Optional[date]:
+    """The date money last left the accounts, else the first deposit into them."""
+    other = aliased(Transaction)
+    same_pair = and_(
+        other.transfer_pair_id == Transaction.transfer_pair_id,
+        other.id != Transaction.id,
+    )
+    # The other leg on another linked account: money moved inside the goal.
+    internal = exists().where(same_pair, other.account_id.in_(account_ids))
+    paired_elsewhere = exists().where(same_pair, other.account_id.not_in(account_ids))
+    counted = (
+        Transaction.account_id.in_(account_ids),
+        Transaction.date <= today,
+        Transaction.is_ignored.is_not(True),
+        Category.is_ignored.is_not(True),
+        ~internal,
+    )
+
+    last_out = (
+        await session.execute(
+            select(func.max(Transaction.date))
+            .outerjoin(Category, Category.id == Transaction.category_id)
+            .where(
+                *counted,
+                Transaction.type == "debit",
+                _raw_type().not_in(_BANK_CHARGE_TYPES),
+            )
+        )
+    ).scalar_one_or_none()
+    if last_out is not None:
+        return last_out
+
+    return (
+        await session.execute(
+            select(func.min(Transaction.date))
+            .outerjoin(Category, Category.id == Transaction.category_id)
+            .where(
+                *counted,
+                Transaction.type == "credit",
+                or_(paired_elsewhere, Category.treat_as_transfer.is_(True)),
+                _raw_type().not_in(_INTEREST_TYPES),
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def plan_window(
+    session: AsyncSession,
+    *,
+    account_ids: list[uuid.UUID],
+    period: Period,
+    target: Decimal,
+    currency: str,
+    today: date,
+) -> Optional[PlanWindow]:
+    """Saved vs planned since money last left the accounts (see the module
+    docstring), or None while nothing has gone in or out."""
+    since = await _window_start(session, account_ids, today)
+    if since is None:
+        return None
+    saved = Decimal("0")
+    for _row_date, row_type, amount, row_currency in await _contribution_rows(session, account_ids, since, today):
+        if row_type == "credit":
+            saved += await _in_currency(session, abs(amount), row_currency, currency)
+    saved = saved.quantize(_CENT)
+    planned = planned_between(period, target, since, today).quantize(_CENT)
+    return PlanWindow(since=since, saved=saved, planned=planned, ahead_by=saved - planned)
 
 
 async def compute_contribution_progress(
@@ -238,6 +371,9 @@ async def compute_contribution_progress(
         current=history[-1],
         history=history,
         streak=_streak(history),
+        plan=await plan_window(
+            session, account_ids=account_ids, period=period, target=target, currency=currency, today=today,
+        ),
     )
 
 

@@ -27,9 +27,9 @@ import {
   Pencil, Trash2, Plus, Pause, Play, CheckCircle2, Archive, ArchiveRestore, Target,
   ChevronDown, PiggyBank,
 } from 'lucide-react'
-import { ContributionBars, ContributionLine } from '@/components/goal-contribution'
+import { ContributionRow } from '@/components/goal-contribution'
 import { GoalQuickSetupDialog } from '@/components/goal-quick-setup-dialog'
-import { CONTRIBUTION_PERIODS, quickSetupCandidates } from '@/lib/goal-contribution'
+import { CONTRIBUTION_PERIODS, contributionTargetLabel, planAmount, quickSetupCandidates } from '@/lib/goal-contribution'
 import { ICON_MAP } from '@/lib/category-icons'
 import { IconPicker } from '@/components/icon-picker'
 import { PageHeader } from '@/components/page-header'
@@ -339,7 +339,7 @@ export default function GoalsPage() {
             {goalsList.map((goal) => {
               const days = goal.target_date ? daysUntil(goal.target_date) : null
               const progress = goal.contribution_progress
-              // An ongoing goal has no total, so no total bar: its period bars stand alone.
+              // An ongoing goal has no total, so no total bar: its periodic row stands alone.
               const ongoing = goal.target_amount == null
               const barPercentage = goal.percentage
               const progressColor = barPercentage >= 100
@@ -351,6 +351,9 @@ export default function GoalsPage() {
                     : 'bg-muted-foreground/30'
 
               const goalMoney = money(goal.currency)
+              const periodic = goal.contribution_amount != null && goal.contribution_period
+                ? { amount: Number(goal.contribution_amount), period: goal.contribution_period }
+                : null
               const GoalIcon = getGoalIcon(goal.icon)
               return (
                 <div key={goal.id} className="px-4 sm:px-5 py-4 hover:bg-muted/50 transition-colors">
@@ -367,6 +370,12 @@ export default function GoalsPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-sm font-semibold text-foreground truncate">{goal.name}</span>
+                        {/* On a phone the period line already names the target, and the name needs the room. */}
+                        {periodic && progress && (
+                          <span className="hidden sm:inline text-xs text-muted-foreground tabular-nums truncate">
+                            {contributionTargetLabel(periodic.amount, periodic.period, goalMoney, t)}
+                          </span>
+                        )}
                         <StatusBadge status={goal.status} t={t} />
                         <OnTrackBadge status={goal.on_track} t={t} />
                       </div>
@@ -386,36 +395,25 @@ export default function GoalsPage() {
                         </div>
                       )}
 
-                      {/* Regular contribution: a bar per recent period, this period, streak */}
-                      {goal.contribution_amount != null && goal.contribution_period && (
+                      {/* Regular contribution: this period's ring, the recent record, ahead or behind the plan */}
+                      {periodic && (
                         progress ? (
-                          <div className="flex flex-col gap-1.5 mb-1.5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:gap-4">
-                            <ContributionBars
+                          <div className="mb-2">
+                            <ContributionRow
+                              period={periodic.period}
                               progress={progress}
                               money={goalMoney}
+                              planAmount={(aheadBy) => mask(planAmount(aheadBy, goal.currency, locale))}
                               t={t}
                               formatDate={shortDate}
-                              today={today}
-                              className="w-full sm:flex-1"
-                            />
-                            <ContributionLine
-                              amount={Number(goal.contribution_amount)}
-                              period={goal.contribution_period}
-                              progress={progress}
-                              money={goalMoney}
-                              t={t}
                               today={today}
                             />
                           </div>
                         ) : (
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-1.5 text-xs text-muted-foreground">
-                            <ContributionLine
-                              amount={Number(goal.contribution_amount)}
-                              period={goal.contribution_period}
-                              progress={null}
-                              money={goalMoney}
-                              t={t}
-                            />
+                            <span className="font-medium text-foreground tabular-nums">
+                              {contributionTargetLabel(periodic.amount, periodic.period, goalMoney, t)}
+                            </span>
                             {goal.tracking_type !== 'account' && (
                               <span className="italic">{t('goals.savings.needsAccount')}</span>
                             )}

@@ -1485,7 +1485,6 @@
       "streak": "Streak {{count}}",
       "daysLeft_one": "{{count}} day left",
       "daysLeft_other": "{{count}} days left",
-      "periodsMet": "{{met}} of {{total}} met",
       "status": {
         "met": "Met",
         "over": "Over",
@@ -1503,7 +1502,19 @@
       "quickSetupCreate": "Create goals",
       "quickSetupCreated": "Goals created",
       "quickSetupNoneSelected": "Pick at least one account.",
-      "createFromAccount": "Savings goal"
+      "createFromAccount": "Savings goal",
+      "ofLast": "{{met}} of last {{total}}",
+      "ahead": "{{amount}} ahead",
+      "behind": "{{amount}} behind",
+      "onPlan": "On plan",
+      "aheadSince": "Ahead by {{amount}} since {{date}}",
+      "behindSince": "Behind by {{amount}} since {{date}}",
+      "onPlanSince": "On plan since {{date}}",
+      "scale": {
+        "behind": "behind",
+        "plan": "plan",
+        "ahead": "ahead"
+      }
     }
   },
   "recurring": {

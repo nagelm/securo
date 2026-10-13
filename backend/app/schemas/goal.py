@@ -107,8 +107,18 @@ class ContributionProgressRead(BaseModel):
     period: ContributionPeriod
     target: Decimal
     current: ContributionPeriodRead
-    history: list[ContributionPeriodRead]  # oldest first, current last
+    # The last ten finished periods and the current one: oldest first,
+    # current last.
+    history: list[ContributionPeriodRead]
     streak: int
+    # Ahead or behind the plan since money last left the account (the first
+    # deposit, when it never has): deposits since then, what the target asked
+    # for since then, and saved - planned (negative: behind). All None while
+    # the account has had nothing in or out.
+    since: Optional[_Date] = None
+    saved_since: Optional[Decimal] = None
+    planned_since: Optional[Decimal] = None
+    ahead_by: Optional[Decimal] = None
 
 
 class ContributionSuggestionRead(BaseModel):

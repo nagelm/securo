@@ -1,5 +1,6 @@
 import { sortAccountsByDisplayName } from '@/lib/account-utils'
-import type { Account, ContributionPeriod, ContributionProgress, Goal } from '@/types'
+import { formatCurrency } from '@/lib/format'
+import type { Account, ContributionPeriod, ContributionPeriodResult, ContributionProgress, Goal } from '@/types'
 
 type Translate = (key: string, options?: Record<string, unknown>) => string
 
@@ -33,27 +34,76 @@ function localDay(moment: Date): number {
   return Date.UTC(moment.getFullYear(), moment.getMonth(), moment.getDate()) / 86_400_000
 }
 
-/** Share of a period gone by the end of today, 0-1. Both ends are inclusive:
- * on the first day of a week 1/7 has gone, on the last day all of it. */
-export function periodElapsedFraction(start: string, end: string, today: Date): number {
-  const first = isoDay(start)
-  const days = isoDay(end) - first + 1
-  if (days <= 0) return 1
-  return Math.max(0, Math.min(1, (localDay(today) - first + 1) / days))
-}
-
 /** Days left in a period, today included; 0 once it has ended. */
 export function periodDaysLeft(end: string, today: Date): number {
   return Math.max(0, isoDay(end) - localDay(today) + 1)
 }
 
-/** How many recent periods reached their target. The current period counts
- * only once it has: until then it can still go either way. */
-export function periodsMet(progress: ContributionProgress): { met: number; total: number } {
-  const counted = progress.history.filter((p) => !p.current || p.status === 'met' || p.status === 'over')
-  return {
-    met: counted.filter((p) => p.status === 'met' || p.status === 'over').length,
-    total: counted.length,
+/** How many finished periods the record shows, as dots. */
+export const RECORD_PERIODS = 10
+
+/** A period that reached its target. */
+export function isMet(status: ContributionPeriodResult['status']): boolean {
+  return status === 'met' || status === 'over'
+}
+
+/** The last finished periods, oldest first and at most `max` of them, and
+ * how many reached their target. The current period is left out: it can
+ * still go either way. */
+export function recentRecord(
+  progress: ContributionProgress,
+  max: number = RECORD_PERIODS,
+): { periods: ContributionPeriodResult[]; met: number; total: number } {
+  const periods = progress.history.filter((p) => !p.current).slice(-max)
+  return { periods, met: periods.filter((p) => isMet(p.status)).length, total: periods.length }
+}
+
+/** How many periods' target fills one half of the ahead/behind scale. */
+export const SCALE_PERIODS = 4
+
+/** Width of the bar, in percent of the track, when it would be thinner. */
+export const SCALE_MIN_WIDTH = 2
+
+export type PlanState = 'ahead' | 'behind' | 'on'
+
+/** Ahead, behind, or on plan: on plan when the difference rounds to zero cents. */
+export function planState(aheadBy: number): PlanState {
+  const cents = Math.round(aheadBy * 100)
+  if (cents > 0) return 'ahead'
+  if (cents < 0) return 'behind'
+  return 'on'
+}
+
+/** Where the bar sits on the ahead/behind scale, in percent of the track. The
+ * plan is the middle; the bar grows right when ahead and left when behind,
+ * `SCALE_PERIODS` periods' target filling a half and anything beyond it
+ * saturating. On plan, a thin bar sits centred on the plan. */
+export function planScale(
+  aheadBy: number,
+  periodTarget: number,
+): { state: PlanState; left: number; width: number } {
+  const state = planState(aheadBy)
+  if (state === 'on') return { state, left: 50 - SCALE_MIN_WIDTH / 2, width: SCALE_MIN_WIDTH }
+  const half = periodTarget * SCALE_PERIODS
+  const share = half > 0 ? Math.min(1, Math.abs(aheadBy) / half) : 1
+  const width = Math.max(SCALE_MIN_WIDTH, share * 50)
+  return { state, left: state === 'ahead' ? 50 : 50 - width, width }
+}
+
+/** The ahead/behind amount for its label: whole units from 10 up ("$40"),
+ * cents below ("$8.57"). Always positive; the label says which way. */
+export function planAmount(aheadBy: number, currency: string, locale: string): string {
+  const amount = Math.abs(aheadBy)
+  if (amount < 10) return formatCurrency(amount, currency, locale)
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount)
+  } catch {
+    return formatCurrency(Math.round(amount), currency, locale)
   }
 }
 

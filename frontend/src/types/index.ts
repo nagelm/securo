@@ -1094,8 +1094,14 @@ export interface ContributionProgress {
   period: ContributionPeriod
   target: number
   current: ContributionPeriodResult
-  history: ContributionPeriodResult[] // oldest first, current last
+  history: ContributionPeriodResult[] // the last ten finished periods and the current one, oldest first
   streak: number
+  // Ahead or behind the plan since money last left the account (its first
+  // deposit when it never has). All null while nothing has gone in or out.
+  since?: string | null
+  saved_since?: number | null
+  planned_since?: number | null
+  ahead_by?: number | null // saved_since - planned_since; negative: behind
 }
 
 export interface ContributionSuggestion {

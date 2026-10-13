@@ -29,7 +29,12 @@ from app.services.asset_service import _compute_current_value, _get_latest_value
 from app.services.dashboard_service import _account_balance_at, _get_open_accounts
 from app.services.account_service import get_account_name
 from app.services.fx_rate_service import convert
-from app.services.goal_contributions import PeriodResult, compute_contribution_progress, suggest_contribution
+from app.services.goal_contributions import (
+    SHOWN_PERIODS,
+    PeriodResult,
+    compute_contribution_progress,
+    suggest_contribution,
+)
 
 
 async def _get_primary_currency(session: AsyncSession, user_id: uuid.UUID) -> str:
@@ -245,12 +250,18 @@ async def _contribution_progress(
         currency=goal.currency,
         today=app_today(),
     )
+    plan = progress.plan
     return ContributionProgressRead(
         period=period,
         target=progress.target,
         current=_period_read(progress.current),
-        history=[_period_read(p) for p in progress.history],
+        # The streak reads the whole history; the page shows the latest part.
+        history=[_period_read(p) for p in progress.history[-SHOWN_PERIODS:]],
         streak=progress.streak,
+        since=plan.since if plan else None,
+        saved_since=plan.saved if plan else None,
+        planned_since=plan.planned if plan else None,
+        ahead_by=plan.ahead_by if plan else None,
     )
 
 

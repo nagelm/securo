@@ -20,7 +20,7 @@ from app.main import app
 from app.models.account import Account
 from app.models.goal import Goal
 from app.models.transaction import Transaction
-from app.services.goal_contributions import compute_contribution_progress
+from app.services.goal_contributions import compute_contribution_progress, plan_window
 
 pytestmark = pytest.mark.asyncio
 
@@ -137,6 +137,34 @@ async def test_contributions_on_postgres(session, test_user):
     assert progress.history[0].status == "met"
     assert progress.current.status == "pending"
     assert progress.streak == 1
+
+
+async def test_plan_window_reads_the_provider_type_on_postgres(session, test_user):
+    """The bank's own type sits in `raw_data` JSON: tax and fees never open
+    the window and interest is never a deposit, read the same on PostgreSQL."""
+    everyday = await _account(session, test_user, "Everyday", "checking")
+    fund = await _account(session, test_user, "Fund")
+    session.add(_tx(test_user, fund, "30.00", date(2026, 3, 9), "debit", raw_data={"type": "DEBIT"}))
+    await _transfer(session, test_user, everyday, fund, "20.00", date(2026, 3, 10))
+    session.add(_tx(test_user, fund, "0.40", date(2026, 3, 15), "debit", raw_data={"type": "TAX"}))
+    session.add(_tx(test_user, fund, "1.50", date(2026, 3, 15), "credit", raw_data={"type": "INTEREST"}))
+    session.add(_tx(test_user, fund, "9.00", date(2026, 3, 16), "debit", raw_data=None))
+    await session.commit()
+
+    plan = await plan_window(
+        session, account_ids=[fund.id], period="weekly", target=Decimal("20"),
+        currency="BRL", today=date(2026, 3, 15),
+    )
+    assert plan is not None
+    assert (plan.since, plan.saved, plan.planned, plan.ahead_by) == (
+        date(2026, 3, 9), Decimal("20.00"), Decimal("20.00"), Decimal("0.00"),
+    )
+    # A row with no provider data is ordinary money out.
+    plan = await plan_window(
+        session, account_ids=[fund.id], period="weekly", target=Decimal("20"),
+        currency="BRL", today=date(2026, 3, 16),
+    )
+    assert plan is not None and plan.since == date(2026, 3, 16)
 
 
 async def _run(session, step: str) -> None:

@@ -30,8 +30,13 @@ vi.mock('@/hooks/use-display-locale', () => ({
   useDateLocale: () => 'en-US',
 }))
 
+const privacy = vi.hoisted(() => ({ on: false }))
 vi.mock('@/hooks/use-privacy-mode', () => ({
-  usePrivacyMode: () => ({ mask: (value: string) => value, privacyMode: false, MASK: '••••' }),
+  usePrivacyMode: () => ({
+    mask: (value: string) => (privacy.on ? '••••' : value),
+    privacyMode: privacy.on,
+    MASK: '••••',
+  }),
 }))
 
 vi.mock('@/contexts/auth-context', () => ({
@@ -84,16 +89,16 @@ function account(overrides: Partial<Account>): Account {
   }
 }
 
-// Twelve Monday-to-Sunday weeks; the last, 16-22 March 2026, is the current one.
-const CONTRIBUTED = [0, 20, 50, 50, 80, 50, 50, 0, 50, 50, 50, 30]
-const STATUSES = ['short', 'short', 'met', 'met', 'over', 'met', 'met', 'short', 'met', 'met', 'met', 'pending'] as const
+// Ten finished Monday-to-Sunday weeks and the current one, 16-22 March 2026.
+const CONTRIBUTED = [20, 50, 50, 80, 50, 50, 0, 50, 50, 50, 30]
+const STATUSES = ['short', 'met', 'met', 'over', 'met', 'met', 'short', 'met', 'met', 'met', 'pending'] as const
 
 function isoDate(day: Date): string {
   return day.toISOString().slice(0, 10)
 }
 
-function progress(): ContributionProgress {
-  const firstMonday = Date.UTC(2025, 11, 29)
+function progress(overrides: Partial<ContributionProgress> = {}): ContributionProgress {
+  const firstMonday = Date.UTC(2026, 0, 5)
   const history = CONTRIBUTED.map((contributed, i) => {
     const start = new Date(firstMonday + i * 7 * 86_400_000)
     const end = new Date(start.getTime() + 6 * 86_400_000)
@@ -103,10 +108,35 @@ function progress(): ContributionProgress {
       contributed,
       target: 50,
       status: STATUSES[i],
-      current: i === 11,
+      current: i === 10,
     }
   })
-  return { period: 'weekly', target: 50, current: history[11], history, streak: 3 }
+  return {
+    period: 'weekly',
+    target: 50,
+    current: history[10],
+    history,
+    streak: 3,
+    since: '2026-03-09',
+    saved_since: 118.57,
+    planned_since: 78.57,
+    ahead_by: 40,
+    ...overrides,
+  }
+}
+
+function holidayGoal(overrides: Partial<ContributionProgress> = {}): Goal {
+  return goal({
+    name: 'Holiday',
+    target_amount: null,
+    percentage: 0,
+    tracking_type: 'account',
+    account_id: holidayFund.id,
+    account_name: 'Holiday fund',
+    contribution_amount: 50,
+    contribution_period: 'weekly',
+    contribution_progress: progress(overrides),
+  })
 }
 
 function goal(overrides: Partial<Goal>): Goal {
@@ -171,49 +201,102 @@ describe('goal card with a periodic target', () => {
     vi.useRealTimers()
   })
 
-  it('shows a bar per period, this period, days left and the record, and no percentage', async () => {
-    api.goals.list.mockResolvedValue([
-      goal({
-        name: 'Holiday',
-        target_amount: null,
-        percentage: 0,
-        tracking_type: 'account',
-        account_id: holidayFund.id,
-        account_name: 'Holiday fund',
-        contribution_amount: 50,
-        contribution_period: 'weekly',
-        contribution_progress: progress(),
-      }),
-    ])
+  afterEach(() => {
+    privacy.on = false
+  })
+
+  it('shows this period as a ring, the record as dots, and how far ahead of the plan', async () => {
+    api.goals.list.mockResolvedValue([holidayGoal()])
     renderWithProviders(<GoalsPage />)
 
     expect(await screen.findByText('$50.00 / week')).toBeInTheDocument()
+    // This week: 30 of 50 is 60%, and four days are left.
+    expect(within(screen.getByTestId('period-ring')).getByText('60%')).toBeInTheDocument()
     expect(screen.getByText('This week $30.00 of $50.00')).toBeInTheDocument()
     expect(screen.getByText('4 days left')).toBeInTheDocument()
-    expect(screen.getByText('Streak 3')).toBeInTheDocument()
     // Finished weeks only: the current one has not reached its target yet.
-    expect(screen.getByText('8 of 11 met')).toBeInTheDocument()
-    // An ongoing goal shows its balance, not a total.
+    expect(screen.getByText('8 of last 10 · Streak 3')).toBeInTheDocument()
+    // An ongoing goal shows its balance, not a total, and has no total bar.
     expect(screen.getByText(/Balance \$250\.00/)).toBeInTheDocument()
     expect(screen.getByText(/Ongoing/)).toBeInTheDocument()
     expect(screen.queryByText(/\/ \$1,000\.00/)).not.toBeInTheDocument()
-    // No total, so no percentage bar: the period bars replace it.
-    expect(screen.queryByText(/^\d+%$/)).not.toBeInTheDocument()
+    expect(screen.queryByText('0%')).not.toBeInTheDocument()
 
-    const bars = within(screen.getByRole('list', { name: 'Contributions in recent periods' })).getAllByRole('listitem')
-    expect(bars).toHaveLength(12)
-    expect(bars[0]).toHaveAccessibleName('Dec 29 to Jan 4: $0.00 of $50.00 (Short)')
-    expect(bars[4]).toHaveAccessibleName(/\$80\.00 of \$50\.00 \(Over\)/)
-    expect(bars[11]).toHaveAccessibleName('Mar 16 to Mar 22: $30.00 of $50.00 (In progress)')
-    expect(bars.map((b) => b.dataset.status)).toEqual([...STATUSES])
+    const dots = within(screen.getByRole('list', { name: 'Contributions in recent periods' })).getAllByRole('listitem')
+    expect(dots).toHaveLength(10)
+    expect(dots[0]).toHaveAccessibleName('Jan 5 to Jan 11: $20.00 of $50.00 (Short)')
+    expect(dots[3]).toHaveAccessibleName(/\$80\.00 of \$50\.00 \(Over\)/)
+    expect(dots[9]).toHaveAccessibleName('Mar 9 to Mar 15: $50.00 of $50.00 (Met)')
+    expect(dots.map((d) => d.dataset.status)).toEqual([...STATUSES.slice(0, 10)])
 
-    // Only the current week carries the pace tick, at 4/7 of its height.
-    expect(within(bars[10]).queryByTestId('pace-tick')).not.toBeInTheDocument()
-    const tick = within(bars[11]).getByTestId('pace-tick')
-    expect(parseFloat(tick.style.bottom)).toBeCloseTo((4 / 7) * 100)
+    // $40 ahead of a $50-a-week plan: 40 of the 200 that fill the right half.
+    const scale = screen.getByRole('img', { name: 'Ahead by $40 since Mar 9' })
+    expect(scale.dataset.state).toBe('ahead')
+    expect(within(scale).getByText('$40 ahead')).toBeInTheDocument()
+    const bar = within(scale).getByTestId('plan-bar')
+    expect(parseFloat(bar.style.left)).toBe(50)
+    expect(parseFloat(bar.style.width)).toBe(10)
+    expect(within(scale).getByText('behind')).toBeInTheDocument()
+    expect(within(scale).getByText('plan')).toBeInTheDocument()
+    expect(within(scale).getByText('ahead')).toBeInTheDocument()
   })
 
-  it('keeps the total bar above the period bars for a goal with both targets', async () => {
+  it('reads amounts the API sends as strings, and shows a deficit growing left', async () => {
+    api.goals.list.mockResolvedValue([
+      holidayGoal({ ahead_by: '-950.00' as unknown as number, target: '50.00' as unknown as number }),
+    ])
+    renderWithProviders(<GoalsPage />)
+    const scale = await screen.findByRole('img', { name: 'Behind by $950 since Mar 9' })
+    expect(within(scale).getByText('$950 behind')).toBeInTheDocument()
+    const bar = within(scale).getByTestId('plan-bar')
+    // Far more than four weeks behind: the left half is full.
+    expect([parseFloat(bar.style.left), parseFloat(bar.style.width)]).toEqual([0, 50])
+  })
+
+  it('says on plan, and shows cents below ten', async () => {
+    api.goals.list.mockResolvedValue([holidayGoal({ ahead_by: 0 })])
+    const { unmount } = renderWithProviders(<GoalsPage />)
+    const scale = await screen.findByRole('img', { name: 'On plan since Mar 9' })
+    expect(within(scale).getByText('On plan')).toBeInTheDocument()
+    unmount()
+
+    api.goals.list.mockResolvedValue([holidayGoal({ ahead_by: -8.57 })])
+    renderWithProviders(<GoalsPage />)
+    expect(await screen.findByRole('img', { name: 'Behind by $8.57 since Mar 9' })).toBeInTheDocument()
+  })
+
+  it('shows a check mark once this period is met', async () => {
+    const met = progress()
+    met.current = { ...met.current, contributed: 50, status: 'met' }
+    met.history = [...met.history.slice(0, 10), met.current]
+    api.goals.list.mockResolvedValue([goal({ ...holidayGoal(), contribution_progress: met })])
+    renderWithProviders(<GoalsPage />)
+    const ring = await screen.findByTestId('period-ring')
+    expect(within(ring).getByText('Met')).toHaveClass('sr-only')
+    expect(within(ring).queryByText(/%$/)).not.toBeInTheDocument()
+  })
+
+  it('leaves the scale out while nothing has gone in or out', async () => {
+    api.goals.list.mockResolvedValue([
+      holidayGoal({ since: null, saved_since: null, planned_since: null, ahead_by: null }),
+    ])
+    renderWithProviders(<GoalsPage />)
+    expect(await screen.findByTestId('period-ring')).toBeInTheDocument()
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+  })
+
+  it('masks every amount in privacy mode', async () => {
+    privacy.on = true
+    api.goals.list.mockResolvedValue([holidayGoal()])
+    renderWithProviders(<GoalsPage />)
+    const scale = await screen.findByRole('img', { name: 'Ahead by •••• since Mar 9' })
+    expect(within(scale).getByText('•••• ahead')).toBeInTheDocument()
+    expect(screen.queryByText(/\$/)).not.toBeInTheDocument()
+    const dots = within(screen.getByRole('list', { name: 'Contributions in recent periods' })).getAllByRole('listitem')
+    expect(dots[0]).toHaveAccessibleName('Jan 5 to Jan 11: •••• of •••• (Short)')
+  })
+
+  it('keeps the total bar above the periodic row for a goal with both targets', async () => {
     api.goals.list.mockResolvedValue([
       goal({
         name: 'Car',
@@ -226,10 +309,12 @@ describe('goal card with a periodic target', () => {
     ])
     renderWithProviders(<GoalsPage />)
     expect(await screen.findByText('$250.00 / $1,000.00')).toBeInTheDocument()
-    expect(screen.getByText('25%')).toBeInTheDocument()
+    const total = screen.getByText('25%')
+    const ring = screen.getByTestId('period-ring')
+    expect(total.compareDocumentPosition(ring) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(
       within(screen.getByRole('list', { name: 'Contributions in recent periods' })).getAllByRole('listitem'),
-    ).toHaveLength(12)
+    ).toHaveLength(10)
   })
 
   it('keeps the total for a goal that has one', async () => {
