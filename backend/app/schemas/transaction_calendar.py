@@ -23,6 +23,10 @@ class TransactionCalendarItem(BaseModel):
     category_name: Optional[str] = None
     category_icon: Optional[str] = None
     category_color: Optional[str] = None
+    #: The payee's badge, drawn before the category icon: its picked icon,
+    #: else its logo (see app.services.payee_display).
+    payee_logo_url: Optional[str] = None
+    payee_icon: Optional[str] = None
     status: Optional[str] = None
     source: Optional[str] = None
     transfer_pair_id: Optional[uuid.UUID] = None

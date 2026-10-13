@@ -4,7 +4,7 @@ import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
 import { useQuery } from '@tanstack/react-query'
 import { transactions as transactionsApi, dashboard, admin } from '@/lib/api'
 import { AlertTriangle, Clock, Info, Paperclip, X } from 'lucide-react'
-import { CategoryIcon } from '@/components/category-icon'
+import { PayeeIcon } from '@/components/payee-icon'
 import { ProjectedTransactionBadge } from '@/components/projected-transaction-badge'
 import { projectedPnlShare } from '@/lib/loan-payments'
 import { sumDrillDownTotals } from '@/lib/drill-down-totals'
@@ -38,6 +38,8 @@ type DisplayItem = {
   categoryIcon: string | null
   categoryName: string | null
   categoryColor: string | null
+  payeeIcon: string | null
+  payeeLogoUrl: string | null
   isProjected: boolean
   isPending: boolean
   attachmentCount: number
@@ -110,6 +112,8 @@ export function TransactionDrillDown({
         categoryIcon: tx.category?.icon ?? null,
         categoryName: tx.category?.name ?? null,
         categoryColor: tx.category?.color ?? null,
+        payeeIcon: tx.payee_icon ?? null,
+        payeeLogoUrl: tx.payee_logo_url ?? null,
         isProjected: false,
         isPending: tx.status === 'pending',
         attachmentCount: tx.attachment_count ?? 0,
@@ -140,6 +144,8 @@ export function TransactionDrillDown({
         categoryIcon: pt.category_icon,
         categoryName: pt.category_name,
         categoryColor: pt.category_color ?? null,
+        payeeIcon: null,
+        payeeLogoUrl: null,
         isProjected: true,
         isPending: false,
         attachmentCount: 0,
@@ -257,9 +263,11 @@ export function TransactionDrillDown({
                     }
                   }}
                 >
-                  <CategoryIcon
-                    icon={item.categoryIcon}
-                    color={item.categoryColor}
+                  <PayeeIcon
+                    icon={item.payeeIcon}
+                    logoUrl={item.payeeLogoUrl}
+                    fallbackIcon={item.categoryIcon}
+                    fallbackColor={item.categoryColor}
                     size="lg"
                   />
                   <div className="flex-1 min-w-0">

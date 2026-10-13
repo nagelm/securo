@@ -47,7 +47,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { CategoryIcon } from '@/components/category-icon'
+import { PayeeIcon } from '@/components/payee-icon'
 import { DatePickerInput } from '@/components/ui/date-picker-input'
 import { PageHeader } from '@/components/page-header'
 import type { GroupMember, GroupSettlement, Transaction } from '@/types'
@@ -859,9 +859,11 @@ export default function GroupDetailPage() {
                 className="flex items-center gap-3 px-4 py-3 hover:bg-muted cursor-pointer transition-colors"
                 onClick={() => navigate(`/transactions?group_id=${groupId}&highlight=${tx.id}`)}
               >
-                <CategoryIcon
-                  icon={tx.category?.icon}
-                  color={tx.category?.color}
+                <PayeeIcon
+                  icon={tx.payee_icon}
+                  logoUrl={tx.payee_logo_url}
+                  fallbackIcon={tx.category?.icon}
+                  fallbackColor={tx.category?.color}
                   size="md"
                 />
                 <div className="flex-1 min-w-0">

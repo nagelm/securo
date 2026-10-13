@@ -254,6 +254,7 @@ async def _get_forecast_transactions(
         .options(
             selectinload(Transaction.account),
             selectinload(Transaction.category),
+            selectinload(Transaction.payee_entity),
         )
         .order_by(Transaction.date.asc(), Transaction.created_at.asc())
     )

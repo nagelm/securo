@@ -708,6 +708,9 @@ export interface TransactionCalendarItem {
   category_name: string | null
   category_icon: string | null
   category_color: string | null
+  /** The payee's badge, drawn before the category icon. */
+  payee_logo_url?: string | null
+  payee_icon?: string | null
   status: string | null
   source: string | null
   transfer_pair_id: string | null

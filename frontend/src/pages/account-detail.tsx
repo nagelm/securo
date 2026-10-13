@@ -28,6 +28,7 @@ import { MobileTransactionRow } from '@/components/mobile-transaction-row'
 import { TransferAccountsPill } from '@/components/transfer-accounts-pill'
 import { resolveTransferAccounts } from '@/lib/transfer-accounts'
 import { CategoryIcon } from '@/components/category-icon'
+import { PayeeIcon } from '@/components/payee-icon'
 import { ProjectedTransactionBadge } from '@/components/projected-transaction-badge'
 import { TransactionDialog, type TransactionSavePayload } from '@/components/transaction-dialog'
 import { extractApiError } from '@/lib/api-errors'
@@ -1701,6 +1702,16 @@ export default function AccountDetailPage() {
                           {formatDateStr(tx.date, dateLocale)}
                         </td>
                         <td className="px-3 sm:px-4 py-3 w-full max-w-0">
+                          <div className="flex items-center gap-2 md:gap-3 min-w-0">
+                          {/* Payee icon or logo, else the category icon: as on the transactions page. */}
+                          <PayeeIcon
+                            icon={tx.payee_icon}
+                            logoUrl={tx.payee_logo_url}
+                            fallbackIcon={tx.category?.icon}
+                            fallbackColor={tx.category?.color}
+                            size="lg"
+                          />
+                          <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5 min-w-0">
                             {transferAccounts ? (
                               <TransferAccountsPill
@@ -1781,6 +1792,8 @@ export default function AccountDetailPage() {
                           {(tx.payee_name || tx.payee) && (tx.payee_name || tx.payee) !== tx.description && (
                             <p className="text-xs text-muted-foreground mt-0.5 truncate">{tx.payee_name || tx.payee}</p>
                           )}
+                          </div>
+                          </div>
                         </td>
                         <td className="px-4 py-3 hidden md:table-cell">
                           {tx.category ? (

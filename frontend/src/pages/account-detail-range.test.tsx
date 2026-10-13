@@ -1,7 +1,8 @@
 /**
  * The date range an account page opens on: loans and investments open on the
  * last five years, everything else on the current month, and a range longer
- * than one API page is fetched in full and listed a page at a time.
+ * than one API page is fetched in full and listed a page at a time. Rows carry
+ * the payee's badge, as on the transactions page.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
@@ -153,5 +154,24 @@ describe('account page long lists', () => {
     fireEvent.click(more)
     expect(await screen.findByText('Row 0')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: t('accounts.showOlder', { count: 120 }) })).not.toBeInTheDocument()
+  })
+})
+
+describe('account page rows', () => {
+  it('draws the payee logo beside a row, and the category icon when there is none', async () => {
+    api.transactions.list.mockResolvedValue({
+      items: [
+        { ...tx(2), payee_logo_url: 'https://logo.example/shop.png' },
+        { ...tx(1), category: { id: 'c1', name: 'Fees', icon: 'receipt', color: '#000000' } },
+      ],
+      total: 2, page: 1, limit: 500,
+    })
+    renderPage({ ...loan, type: 'checking', balance: 1000, loan_subtype: null })
+
+    await screen.findByText('Row 2')
+    const row = (name: string) => screen.getByText(name).closest('tr') as HTMLElement
+    expect(row('Row 2').querySelector('img')).toHaveAttribute('src', 'https://logo.example/shop.png')
+    expect(row('Row 1').querySelector('img')).toBeNull()
+    expect(row('Row 1').querySelector('svg.lucide-receipt')).not.toBeNull()
   })
 })

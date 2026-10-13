@@ -51,6 +51,21 @@ describe('TransactionDrillDown', () => {
     vi.resetAllMocks()
   })
 
+  it('draws the payee logo beside a row, as the transactions page does', async () => {
+    vi.mocked(transactions.list).mockResolvedValue({
+      items: [{
+        id: 'tx-1', description: 'Corner shop', date: '2026-07-03', type: 'debit', amount: 20,
+        amount_primary: null, currency: 'USD', status: 'posted', category: null,
+        payee_logo_url: 'https://logo.example/shop.png', payee_icon: null,
+      }],
+      total: 1,
+    } as never)
+    renderPanel({ dialogOpen: false })
+
+    const row = (await screen.findByText('Corner shop')).closest('div.flex') as HTMLElement
+    expect(row.parentElement?.parentElement?.querySelector('img')).toHaveAttribute('src', 'https://logo.example/shop.png')
+  })
+
   it('closes on a click outside the panel', async () => {
     const { onClose } = renderPanel({ dialogOpen: false })
     await waitForOutsideClickListener()

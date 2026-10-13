@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.account import Account
 from app.models.category import Category
 from app.models.fx_rate import FxRate
+from app.models.payee import Payee
 from app.models.recurring_transaction import RecurringTransaction
 from app.models.transaction import Transaction
 from app.services.transaction_calendar_service import get_transaction_calendar
@@ -924,3 +925,53 @@ async def test_transaction_calendar_ignored_actual_is_consistent_across_months(
     assert august_september_1.ending_balance == 1000.0
     assert september_september_1.ending_balance == 1000.0
     assert august_september_1.ending_balance == september_september_1.ending_balance
+
+
+@pytest.mark.asyncio
+async def test_transaction_calendar_items_carry_the_payee_badge(
+    session: AsyncSession, test_user, test_workspace
+):
+    """Day rows draw the payee's icon or logo, like the transactions list."""
+    account = Account(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        name="Payee calendar", type="checking", balance=Decimal("0"), currency="BRL",
+    )
+    with_logo = Payee(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        name="Corner shop", logo_url="https://example.test/logo.png",
+    )
+    with_icon = Payee(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        name="Landlord", icon="house",
+    )
+    session.add_all([account, with_logo, with_icon])
+    await session.flush()
+    posted = Transaction(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        account_id=account.id, payee_id=with_logo.id, description="Shop", amount=Decimal("20"),
+        currency="BRL", date=date(2026, 7, 3), type="debit", source="manual",
+    )
+    pending = Transaction(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        account_id=account.id, payee_id=with_icon.id, description="Rent", amount=Decimal("80"),
+        currency="BRL", date=date(2026, 7, 8), type="debit", source="sync", status="pending",
+    )
+    bare = Transaction(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        account_id=account.id, description="Cash", amount=Decimal("5"),
+        currency="BRL", date=date(2026, 7, 9), type="debit", source="manual",
+    )
+    session.add_all([posted, pending, bare])
+    await session.commit()
+
+    calendar = await get_transaction_calendar(
+        session, test_workspace.id, test_user.id, month=date(2026, 7, 1)
+    )
+    items = {item.description: item for day in calendar.days for item in day.items}
+    assert (items["Shop"].kind, items["Shop"].payee_logo_url, items["Shop"].payee_icon) == (
+        "actual", "https://example.test/logo.png", None,
+    )
+    assert (items["Rent"].kind, items["Rent"].payee_logo_url, items["Rent"].payee_icon) == (
+        "projected", None, "house",
+    )
+    assert (items["Cash"].payee_logo_url, items["Cash"].payee_icon) == (None, None)
