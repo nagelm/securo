@@ -849,6 +849,8 @@ export interface PayeeWritePayload {
   phone?: string | null
   address?: string | null
   website?: string | null
+  /** An image URL, or a website to use the favicon of. Null clears it. */
+  logo_url?: string | null
   /** A name from the category icon set. Null clears it, so the logo shows. */
   icon?: string | null
   is_favorite?: boolean
@@ -1632,6 +1634,10 @@ export const importLogs = {
 export const settings = {
   attachments: async (): Promise<{ allowed_extensions: string[]; max_file_size_mb: number; max_attachments_per_transaction: number }> => {
     const { data } = await api.get('/settings/attachments')
+    return data
+  },
+  logos: async (): Promise<{ logo_size: number }> => {
+    const { data } = await api.get('/settings/logos')
     return data
   },
 }

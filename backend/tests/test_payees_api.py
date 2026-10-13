@@ -265,6 +265,90 @@ async def test_payee_icon_and_logo(client: AsyncClient, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_payee_logo_url_set_and_cleared(client: AsyncClient, auth_headers):
+    created = await _create_payee(
+        client, auth_headers, "Logo Shop", logo_url="  https://img.example/logo.png  ",
+    )
+    assert created["logo_url"] == "https://img.example/logo.png"
+    assert created["display_logo_url"] == "https://img.example/logo.png"
+
+    # A URL the user sets wins over the website's favicon.
+    resp = await client.patch(
+        f"/api/payees/{created['id']}", headers=auth_headers,
+        json={"website": "https://shop.example/"},
+    )
+    assert resp.json()["display_logo_url"] == "https://img.example/logo.png"
+
+    resp = await client.patch(
+        f"/api/payees/{created['id']}", headers=auth_headers, json={"logo_url": ""},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["logo_url"] is None
+    assert "domain=shop.example" in resp.json()["display_logo_url"]
+
+    resp = await client.patch(
+        f"/api/payees/{created['id']}", headers=auth_headers,
+        json={"logo_url": "https://img.example/other.svg"},
+    )
+    assert resp.json()["logo_url"] == "https://img.example/other.svg"
+
+    resp = await client.patch(
+        f"/api/payees/{created['id']}", headers=auth_headers, json={"logo_url": None},
+    )
+    assert resp.json()["logo_url"] is None
+
+    # Leaving the field out leaves the logo alone.
+    await client.patch(
+        f"/api/payees/{created['id']}", headers=auth_headers,
+        json={"logo_url": "https://img.example/kept.png"},
+    )
+    resp = await client.patch(
+        f"/api/payees/{created['id']}", headers=auth_headers, json={"notes": "x"},
+    )
+    assert resp.json()["logo_url"] == "https://img.example/kept.png"
+
+
+@pytest.mark.asyncio
+async def test_payee_logo_url_from_a_website(client: AsyncClient, auth_headers):
+    bare = await _create_payee(client, auth_headers, "Bare Domain", logo_url="www.shop.example")
+    assert bare["logo_url"] == "https://www.google.com/s2/favicons?domain=shop.example&sz=128"
+    assert bare["website"] is None  # the website field is left as it was
+
+    site = await _create_payee(client, auth_headers, "Site Root", logo_url="https://shop.example/")
+    assert site["logo_url"] == "https://www.google.com/s2/favicons?domain=shop.example&sz=128"
+
+    # A path means an image, extension or not; a scheme is added when missing.
+    cdn = await _create_payee(client, auth_headers, "Cdn Path", logo_url="cdn.shop.example/brand/logo")
+    assert cdn["logo_url"] == "https://cdn.shop.example/brand/logo"
+
+
+@pytest.mark.parametrize("bad", [
+    "javascript:alert(1)",
+    "JavaScript://shop.example/%0Aalert(1)",
+    "data:image/png;base64,AAAA",
+    "ftp://shop.example/logo.png",
+    "not a url",
+    "https:///logo.png",
+    "https://" + "a" * 495 + ".png",
+])
+@pytest.mark.asyncio
+async def test_payee_logo_url_rejects_unsafe_or_malformed(client: AsyncClient, auth_headers, bad):
+    resp = await client.post("/api/payees", headers=auth_headers, json={"name": "Bad Logo", "logo_url": bad})
+    assert resp.status_code == 422
+
+    created = await _create_payee(client, auth_headers, "Bad Logo Later")
+    resp = await client.patch(f"/api/payees/{created['id']}", headers=auth_headers, json={"logo_url": bad})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_payee_with_a_logo_url_does_not_need_an_icon(client: AsyncClient, auth_headers):
+    logo = await _create_payee(client, auth_headers, "Logo Only", logo_url="https://img.example/l.png")
+    resp = await client.get("/api/payees", headers=auth_headers, params={"needs_icon": "true"})
+    assert logo["id"] not in {p["id"] for p in resp.json()}
+
+
+@pytest.mark.asyncio
 async def test_list_payees_needing_an_icon(client: AsyncClient, auth_headers):
     bare = await _create_payee(client, auth_headers, "Bare")
     picked = await _create_payee(client, auth_headers, "Picked")

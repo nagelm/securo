@@ -1769,6 +1769,47 @@ async def test_sync_connection_writes_provider_notes_and_payee_website(
 
 
 @pytest.mark.asyncio
+async def test_sync_keeps_a_logo_the_user_set(session: AsyncSession, test_user, test_workspace):
+    from app.models.payee import Payee
+
+    own = Payee(
+        user_id=test_user.id, workspace_id=test_workspace.id, name="Example Cafe",
+        website="https://own.example/", logo_url="https://img.example/own-logo.png",
+    )
+    session.add(own)
+    await session.commit()
+
+    conn = await _make_connection(session, test_user.id, "Logo Bank")
+    mock_provider = AsyncMock()
+    mock_provider.refresh_credentials = AsyncMock(return_value={"token": "t"})
+    mock_provider.get_accounts = AsyncMock(return_value=[
+        AccountData(
+            external_id="logo-acc-1", name="Everyday",
+            type="checking", balance=Decimal("100"), currency="NZD",
+        ),
+    ])
+    mock_provider.get_transactions = AsyncMock(return_value=[
+        TransactionData(
+            external_id="logo-tx-1", description="Example Cafe",
+            amount=Decimal("8.50"), date=date.today(), type="debit", currency="NZD",
+            payee="Example Cafe", payee_website="https://cafe.example/",
+            payee_logo_url="https://logo.example/cafe.png",
+        ),
+    ])
+
+    with patch("app.services.connection_service.get_provider", return_value=mock_provider),          patch("app.services.connection_service.detect_transfer_pairs", new_callable=AsyncMock),          patch("app.services.connection_service.stamp_primary_amount", new_callable=AsyncMock):
+        await sync_connection(session, conn.id, test_workspace.id, test_user.id)
+
+    tx = (
+        await session.execute(select(Transaction).where(Transaction.external_id == "logo-tx-1"))
+    ).scalar_one()
+    assert tx.payee_id == own.id
+    await session.refresh(own)
+    assert own.logo_url == "https://img.example/own-logo.png"
+    assert own.website == "https://own.example/"
+
+
+@pytest.mark.asyncio
 async def test_sync_keeps_provider_category_while_normalizing_description(
     session: AsyncSession, test_user, test_workspace
 ):

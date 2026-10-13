@@ -20,6 +20,8 @@ interface PayeeIconProps {
   fallbackColor?: string | null
   size?: keyof typeof BOX
   className?: string
+  /** Called when the logo image fails to load, before the fallback shows. */
+  onLogoError?: (url: string) => void
 }
 
 /** A transaction's or payee's badge: picked icon, else logo, else category icon.
@@ -34,6 +36,7 @@ export function PayeeIcon({
   fallbackColor,
   size = 'md',
   className,
+  onLogoError,
 }: PayeeIconProps) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null)
 
@@ -49,7 +52,10 @@ export function PayeeIcon({
           loading="lazy"
           referrerPolicy="no-referrer"
           className="w-full h-full object-contain"
-          onError={() => setFailedUrl(logoUrl)}
+          onError={() => {
+            setFailedUrl(logoUrl)
+            onLogoError?.(logoUrl)
+          }}
         />
       </div>
     )

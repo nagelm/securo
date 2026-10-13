@@ -8,7 +8,8 @@ import { invalidateFinancialQueries } from '@/lib/invalidate-queries'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { fiscal as fiscalApi, type PayeeWritePayload } from '@/lib/api'
+import { fiscal as fiscalApi, settings as settingsApi, type PayeeWritePayload } from '@/lib/api'
+import { DEFAULT_LOGO_SIZE, faviconUrlFor, normalizeLogoUrl } from '@/lib/payee-logo'
 import { applyMask, formatTaxId } from '@/lib/tax-id'
 import { TaxIdKindPicker } from '@/components/tax-id-kind-picker'
 import { Label } from '@/components/ui/label'
@@ -52,7 +53,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Search, Star, Merge, Trash2, ListFilter, X, Check, Pencil, Plus, ArrowDown, ArrowUp, ImageOff } from 'lucide-react'
+import { Search, Star, Merge, Trash2, ListFilter, X, Check, Pencil, Plus, ArrowDown, ArrowUp, ImageOff, ImagePlus, ChevronDown } from 'lucide-react'
 import { IconPicker } from '@/components/icon-picker'
 import { PayeeIcon } from '@/components/payee-icon'
 import { useWorkspace } from '@/contexts/workspace-context'
@@ -206,6 +207,15 @@ export default function PayeesPage() {
   const [formWebsite, setFormWebsite] = useState('')
   // Empty means no picked icon, so the payee shows its logo when it has one.
   const [formIcon, setFormIcon] = useState('')
+  // The logo URL as typed: an image link, or a website to use the favicon
+  // of. Setting one drops the picked icon, so the logo is what shows.
+  const [formLogoUrl, setFormLogoUrl] = useState('')
+  // The preview URL that failed to load, so the form can say so.
+  const [failedLogoUrl, setFailedLogoUrl] = useState<string | null>(null)
+  const [showIconPicker, setShowIconPicker] = useState(false)
+  const logoInputRef = useRef<HTMLInputElement>(null)
+  // Set by the "Add a logo" row action: the dialog opens on the logo field.
+  const focusLogoOnOpen = useRef(false)
   // Documents this payee has, as ordered rows. A list rather than a slot per
   // possible kind: most cadastros need one document, and a column of empty
   // boxes labelled with documents the user has never heard of reads as a
@@ -221,6 +231,26 @@ export default function PayeesPage() {
     staleTime: 1000 * 60 * 60,
   })
   const allKinds = taxIdMeta?.kinds ?? []
+
+  // The favicon size the server builds logo URLs with, so the preview shows
+  // exactly what will be stored.
+  const { data: logoSettings } = useQuery({
+    queryKey: ['settings', 'logos'],
+    queryFn: settingsApi.logos,
+    staleTime: Infinity,
+  })
+  const logoSize = logoSettings?.logo_size ?? DEFAULT_LOGO_SIZE
+  const logoInput = normalizeLogoUrl(formLogoUrl, logoSize)
+  const typedLogoUrl = logoInput.status === 'ok' ? logoInput.url : null
+  const websiteFavicon = faviconUrlFor(formWebsite, logoSize)
+  // What the payee will show once saved: a picked icon, else the logo URL,
+  // else the website's favicon (PayeeIcon applies the icon-first rule).
+  const previewLogoUrl = typedLogoUrl ?? websiteFavicon
+  const logoLoadFailed = !formIcon && previewLogoUrl !== null && failedLogoUrl === previewLogoUrl
+  // Only a change is sent (and checked), so saving a payee never re-submits
+  // a provider's logo the user did not touch.
+  const logoChanged = formLogoUrl.trim() !== (editingPayee?.logo_url ?? '').trim()
+  const logoInvalid = logoChanged && logoInput.status === 'invalid'
   const kindOption = (kind: string) => allKinds.find((k) => k.kind === kind)
   // What this jurisdiction asks for, in pack order. Drives which document a
   // new row starts on; the picker itself groups every country.
@@ -372,11 +402,15 @@ export default function PayeesPage() {
     setFormAddress('')
     setFormWebsite('')
     setFormIcon('')
+    setFormLogoUrl('')
+    setFailedLogoUrl(null)
+    setShowIconPicker(false)
     setTaxIdRows(seedTaxIdRows())
     setDialogOpen(true)
   }
 
-  const openEdit = (payee: Payee) => {
+  const openEdit = (payee: Payee, options?: { focusLogo?: boolean }) => {
+    focusLogoOnOpen.current = options?.focusLogo ?? false
     setEditingPayee(payee)
     setFormName(payee.name)
     setFormType(payee.type ?? '')
@@ -386,6 +420,9 @@ export default function PayeesPage() {
     setFormAddress(payee.address ?? '')
     setFormWebsite(payee.website ?? '')
     setFormIcon(payee.icon ?? '')
+    setFormLogoUrl(payee.logo_url ?? '')
+    setFailedLogoUrl(null)
+    setShowIconPicker(!!payee.icon)
     // Every stored document becomes a row, including kinds this jurisdiction
     // does not ask for: a German VAT number on a Brazilian workspace is a
     // normal state, and hiding it would be worse than showing it.
@@ -405,6 +442,7 @@ export default function PayeesPage() {
       address: formAddress.trim() || null,
       website: formWebsite.trim() || null,
       icon: formIcon || null,
+      ...(logoChanged ? { logo_url: typedLogoUrl } : {}),
       // An emptied field means "drop this document", so blanks are sent and
       // the server treats them as removals.
       tax_ids: taxIdRows
@@ -832,6 +870,16 @@ export default function PayeesPage() {
                   {canWrite && (
                     <TableCell className="py-2.5 pr-4 sm:pr-5">
                       <div className="flex items-center justify-end gap-1">
+                        {filterNeedsIcon && (
+                          <button
+                            className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
+                            onClick={(e) => { e.stopPropagation(); openEdit(payee, { focusLogo: true }) }}
+                            title={t('payees.addLogo')}
+                            aria-label={t('payees.addLogo')}
+                          >
+                            <ImagePlus size={13} />
+                          </button>
+                        )}
                         <button
                           className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
                           onClick={(e) => { e.stopPropagation(); openEdit(payee) }}
@@ -941,7 +989,15 @@ export default function PayeesPage() {
             jurisdiction's worth of document fields this form is taller than a
             laptop viewport, and a Save button below the fold is a Save button
             nobody can reach. Mirrors transaction-dialog. */}
-        <DialogContent className="sm:max-w-md flex flex-col max-h-[calc(100dvh-2rem)]">
+        <DialogContent
+          className="sm:max-w-md flex flex-col max-h-[calc(100dvh-2rem)]"
+          onOpenAutoFocus={(e) => {
+            if (!focusLogoOnOpen.current) return
+            focusLogoOnOpen.current = false
+            e.preventDefault()
+            logoInputRef.current?.focus()
+          }}
+        >
           <DialogHeader>
             <DialogTitle>{editingPayee ? t('payees.edit') : t('payees.add')}</DialogTitle>
           </DialogHeader>
@@ -997,35 +1053,105 @@ export default function PayeesPage() {
               <Input value={formAddress} onChange={(e) => setFormAddress(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label>{t('payees.website', 'Website')}</Label>
+              <Label htmlFor="payee-website">{t('payees.website', 'Website')}</Label>
               <Input
+                id="payee-website"
                 value={formWebsite}
                 onChange={(e) => setFormWebsite(e.target.value)}
                 placeholder="acme.com"
               />
             </div>
+            {/* The logo: a link the user pastes wins over the website's
+                favicon. A picked icon still wins over both, so typing a
+                link drops it; the icon list stays behind a toggle for the
+                payees no logo exists for. */}
             <div className="space-y-2">
-              <Label>{t('payees.icon')}</Label>
+              <Label htmlFor="payee-logo-url">{t('payees.logo')}</Label>
               <div className="flex items-center gap-3">
                 <PayeeIcon
                   icon={formIcon}
-                  logoUrl={editingPayee?.display_logo_url}
+                  logoUrl={previewLogoUrl}
                   size="lg"
+                  onLogoError={setFailedLogoUrl}
                 />
-                <p className="flex-1 text-xs text-muted-foreground">
+                <p
+                  className={cn('flex-1 text-xs', logoLoadFailed ? 'text-destructive' : 'text-muted-foreground')}
+                  role="status"
+                >
                   {formIcon
                     ? t('payees.iconPicked')
-                    : editingPayee?.display_logo_url
-                      ? t('payees.iconFromLogo')
-                      : t('payees.iconNone')}
+                    : logoLoadFailed
+                      ? t('payees.logoLoadError')
+                      : typedLogoUrl
+                        ? t('payees.logoShowing')
+                        : websiteFavicon
+                          ? t('payees.logoFromWebsite')
+                          : t('payees.logoNone')}
                 </p>
                 {formIcon && (
                   <Button type="button" variant="ghost" size="sm" onClick={() => setFormIcon('')}>
-                    {editingPayee?.display_logo_url ? t('payees.clearIcon') : t('payees.removeIcon')}
+                    {previewLogoUrl ? t('payees.clearIcon') : t('payees.removeIcon')}
                   </Button>
                 )}
               </div>
-              <IconPicker value={formIcon} color="#6B7280" onChange={setFormIcon} />
+              <div className="flex gap-2">
+                <Input
+                  id="payee-logo-url"
+                  ref={logoInputRef}
+                  value={formLogoUrl}
+                  onChange={(e) => {
+                    setFormLogoUrl(e.target.value)
+                    if (e.target.value.trim()) setFormIcon('')
+                  }}
+                  placeholder="https://acme.com/logo.png"
+                  aria-invalid={logoInvalid}
+                  aria-describedby="payee-logo-url-help"
+                />
+                {formLogoUrl && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setFormLogoUrl('')
+                      logoInputRef.current?.focus()
+                    }}
+                  >
+                    {t('payees.logoClear')}
+                  </Button>
+                )}
+              </div>
+              <p
+                id="payee-logo-url-help"
+                className={cn('text-[11px]', logoInvalid ? 'text-destructive' : 'text-muted-foreground')}
+              >
+                {logoInvalid ? t('payees.logoUrlInvalid') : t('payees.logoUrlHelp')}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!websiteFavicon || typedLogoUrl === websiteFavicon}
+                  onClick={() => {
+                    if (!websiteFavicon) return
+                    setFormLogoUrl(websiteFavicon)
+                    setFormIcon('')
+                  }}
+                >
+                  {t('payees.logoUseWebsite')}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-expanded={showIconPicker}
+                  onClick={() => setShowIconPicker((open) => !open)}
+                >
+                  {t('payees.pickIcon')}
+                  <ChevronDown size={14} className={cn('ml-1 transition-transform', showIconPicker && 'rotate-180')} />
+                </Button>
+              </div>
+              {showIconPicker && <IconPicker value={formIcon} color="#6B7280" onChange={setFormIcon} />}
             </div>
 
             {/* Fiscal documents. Which ones appear comes from the workspace's
@@ -1125,7 +1251,12 @@ export default function PayeesPage() {
               </Button>
               <Button
                 onClick={handleSave}
-                disabled={!formName.trim() || createMutation.isPending || updateMutation.isPending}
+                disabled={
+                  !formName.trim()
+                  || logoInvalid
+                  || createMutation.isPending
+                  || updateMutation.isPending
+                }
               >
                 {t('common.save')}
               </Button>

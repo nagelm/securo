@@ -472,7 +472,7 @@ export interface Payee {
   phone: string | null
   address: string | null
   website: string | null
-  /** Merchant logo a provider supplied. Server-set, read-only. */
+  /** The logo image: one the user set, else the merchant logo a provider supplied. */
   logo_url: string | null
   /** An icon the user picked (category icon set); wins over any logo. */
   icon: string | null

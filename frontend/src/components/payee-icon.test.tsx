@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { fireEvent } from '@testing-library/react'
 
 import { PayeeIcon } from '@/components/payee-icon'
@@ -33,6 +33,15 @@ describe('PayeeIcon', () => {
 
     expect(container.querySelector('img')).toBeNull()
     expect(container.querySelector('svg')).toHaveClass('lucide-shopping-cart')
+  })
+
+  it('reports a logo that fails to load', () => {
+    const onLogoError = vi.fn()
+    const { container } = renderWithProviders(<PayeeIcon logoUrl={LOGO} onLogoError={onLogoError} />)
+
+    fireEvent.error(container.querySelector('img')!)
+
+    expect(onLogoError).toHaveBeenCalledWith(LOGO)
   })
 
   it('shows the category icon when the payee has neither', () => {

@@ -1,8 +1,9 @@
 """How a payee is drawn next to its transactions.
 
 A transaction row shows, in order: the icon the user picked for its payee,
-the payee's logo, or (neither) its category icon. The logo is the merchant
-logo a provider supplied, else a favicon built from the payee's website.
+the payee's logo, or (neither) its category icon. The logo is the payee's
+logo URL (set by the user, or supplied by a provider), else a favicon built
+from the payee's website.
 """
 from typing import Optional
 
