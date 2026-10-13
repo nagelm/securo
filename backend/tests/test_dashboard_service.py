@@ -1217,3 +1217,36 @@ async def test_balance_at_multi_currency(session, test_user, test_workspace):
 # ---------------------------------------------------------------------------
 # _total_balance_by_currency
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_balance_history_leaves_out_investment_accounts(
+    session: AsyncSession, test_user, test_workspace
+):
+    """Without an account choice, investment balances don't move the chart."""
+    cash = Account(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        name="Cash", type="checking", balance=Decimal("0"), currency="BRL",
+    )
+    fund = Account(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        name="Fund", type="investment", balance=Decimal("0"), currency="BRL",
+    )
+    session.add_all([cash, fund])
+    session.add_all([
+        Transaction(
+            id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+            account_id=acct.id, description="Opening", amount=Decimal(amount),
+            currency="BRL", date=date.today().replace(day=1), type="credit",
+            source="opening_balance", status="posted",
+        )
+        for acct, amount in ((cash, "100"), (fund, "5000"))
+    ])
+    await session.commit()
+
+    history = await get_balance_history(session, test_workspace.id, test_user.id)
+    assert history.current[0].balance == 100.0
+    chosen = await get_balance_history(
+        session, test_workspace.id, test_user.id, account_ids=[fund.id]
+    )
+    assert chosen.current[0].balance == 5000.0

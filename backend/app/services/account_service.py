@@ -675,7 +675,15 @@ async def sync_opening_balance_for_connected_account(
         )
     )
     oldest_date = oldest_result.scalar()
-    opening_date = (oldest_date - timedelta(days=1)) if oldest_date else app_today()
+    # Fork: an account with no transactions (Akahu investment accounts carry a
+    # balance only) keeps the date its opening row already has; re-dating it to
+    # today on every sync made the balance look newly arrived each day.
+    if oldest_date:
+        opening_date = oldest_date - timedelta(days=1)
+    elif existing_tx is not None:
+        opening_date = existing_tx.date
+    else:
+        opening_date = app_today()
 
     # Sign convention matches the rest of the codebase: credit = +, debit = -
     # regardless of account type. A positive offset needs a credit to raise the

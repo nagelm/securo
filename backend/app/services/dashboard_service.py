@@ -1685,6 +1685,21 @@ async def get_balance_history(
 
     month_start, month_end = _month_range(month)
     prev_month_start = (month_start - timedelta(days=1)).replace(day=1)
+
+    # Fork: without an explicit account choice the chart shows cash, cards and
+    # loans. Investment accounts move with market returns and contributions
+    # that never appear as transactions, so they would only add jumps.
+    if account_ids is None:
+        account_ids = list(
+            (
+                await session.execute(
+                    select(Account.id).where(
+                        Account.workspace_id == workspace_id,
+                        Account.type != "investment",
+                    )
+                )
+            ).scalars()
+        )
     prev_month_end = month_start
 
     today = app_today()

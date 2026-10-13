@@ -1053,6 +1053,8 @@ EXTRA_CATEGORY_HINTS = {
     "childcare": ("Childcare", "education"),
     "games": ("Games", "leisure"),
     "haircuts": ("Personal Care", "health"),
+    # Interest a bank pays on a deposit: income, not an investment transfer.
+    "interest": ("Interest", "investments"),
 }
 
 # Hint keys that name a default category a workspace seeded before that

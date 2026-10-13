@@ -268,6 +268,7 @@ async def test_match_category_hint_travel_prefers_own_category_then_leisure(
     ("childcare", "Childcare", "Education"),
     ("games", "Games", "Leisure"),
     ("haircuts", "Personal Care", "Health"),
+    ("interest", "Interest", "Investments"),
 ])
 async def test_match_category_hint_split_prefers_own_category_then_default(
     session: AsyncSession, test_user, test_workspace, hint, own, default

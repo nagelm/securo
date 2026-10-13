@@ -190,7 +190,7 @@ NZFCC_CATEGORY_HINTS = {
     "Bonuses or commissions": "salary",
     "Redundancy payouts": "salary",
     "Expense reimbursements": "salary",
-    "Interest": "investments",
+    "Interest": "interest",
     "Dividends": "investments",
     "Investment withdrawals": "investments",
     "Kiwisaver withdrawals": "investments",
@@ -200,7 +200,7 @@ NZFCC_CATEGORY_HINTS = {
 # (the-transaction-model: INTEREST "an interest payment from the account
 # provider", FEE "a fee from the account provider", TAX "a tax payment").
 TYPE_HINTS = {
-    ("INTEREST", "in"): "investments",
+    ("INTEREST", "in"): "interest",
     ("INTEREST", "out"): "taxes",
     ("FEE", "out"): "taxes",
     ("TAX", "out"): "taxes",

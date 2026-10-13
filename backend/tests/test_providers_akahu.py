@@ -426,7 +426,7 @@ def test_payment_into_investment_provider_is_investments():
 
 
 @pytest.mark.parametrize("akahu_type,amount,expected", [
-    ("INTEREST", 3.2, "investments"),
+    ("INTEREST", 3.2, "interest"),
     ("INTEREST", -12.0, "taxes"),
     ("FEE", -5.0, "taxes"),
     ("TAX", -0.9, "taxes"),

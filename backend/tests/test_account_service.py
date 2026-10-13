@@ -1502,3 +1502,29 @@ def test_clean_logo_url_drops_overlong_urls():
     assert _clean_logo_url("https://long.example/" + "a" * 500) is None
     assert _clean_logo_url("   ") is None
     assert _clean_logo_url(None) is None
+
+
+@pytest.mark.asyncio
+async def test_opening_balance_date_holds_without_transactions(
+    session: AsyncSession, test_user, test_workspace, test_connection
+):
+    """A balance-only account keeps its opening date instead of moving to today."""
+    account = await _make_account(
+        session, test_user.id, "Fund", acc_type="investment", balance="5000.00",
+        connection_id=test_connection.id, external_id="ext-fund",
+    )
+    earlier = date.today() - timedelta(days=30)
+    await _add_txn(session, test_user.id, account.id, 4000, "credit", earlier, source="opening_balance")
+
+    await sync_opening_balance_for_connected_account(session, account)
+    from sqlalchemy import select
+    opening = (
+        await session.execute(
+            select(Transaction).where(
+                Transaction.account_id == account.id,
+                Transaction.source == "opening_balance",
+            )
+        )
+    ).scalar_one()
+    assert opening.date == earlier
+    assert opening.amount == Decimal("5000.00")
