@@ -354,12 +354,11 @@ async def test_sync_placeholder_provider_category_precedence(
         if placeholder_has_category
         else test_categories[0].id
     )
-    # The placeholder keeps the recurring definition's own wording, so the
-    # description was never rule-managed even though the rule matched and
-    # applied its other actions.
+    # The bank's row replaces the placeholder: its wording, as the rule
+    # normalised it, and its date win over the recurring definition's.
     assert txs[0].description == "iFood"
     assert txs[0].original_description == raw_description
-    assert txs[0].description_is_rule_managed is False
+    assert txs[0].description_is_rule_managed is True
     assert txs[0].source == "sync"
     assert txs[0].status == "posted"
     assert txs[0].external_id == f"ifood-sync-{placeholder_has_category}"
@@ -466,11 +465,11 @@ async def test_sync_placeholder_rule_payee_without_raw_payee(
 async def test_sync_placeholder_keeps_the_payee_the_user_already_chose(
     session, test_user, test_workspace, conn_account, test_categories
 ):
-    """A merge fills the placeholder's gaps, it does not restate it.
+    """The bank's row replaces the placeholder but keeps the user's payee.
 
-    The recurring definition's payee is the user's own choice; the bank's raw
-    counterparty string must not replace it. Only what is still empty is
-    filled, and the raw text is kept as provenance.
+    The recurring definition's payee entity is the user's own choice and
+    survives the merge; the bank's raw counterparty string replaces the
+    placeholder's, as the rest of the bank's data does.
     """
     conn, account = conn_account
     conn_id, account_id = conn.id, account.id
@@ -549,8 +548,9 @@ async def test_sync_placeholder_keeps_the_payee_the_user_already_chose(
     txs = await _all_txs(session, account_id)
     assert len(txs) == 1
     assert txs[0].id == placeholder_id
-    assert txs[0].payee == "iFood Brasil"
+    assert txs[0].payee == "IFOOD.COM AGÊNCIA DE RESTAURANTES ONLINE S.A."
     assert txs[0].payee_id == chosen_payee_id
+    assert txs[0].date == date(2025, 1, 11)
     assert txs[0].description == "iFood"
     assert txs[0].original_description == raw_description
     # The gaps still get filled and the rule's own action still lands.
@@ -594,6 +594,8 @@ async def test_sync_promotes_pending_placeholder_to_posted(
     assert merged.status == "posted"
     assert merged.recurring_transaction_id == bill_id
     assert merged.original_description == "NETFLIX SUBSCRIPTION"
+    assert merged.description == "NETFLIX SUBSCRIPTION"
+    assert merged.date == date(2025, 1, 11)
     refreshed = await session.get(RecurringTransaction, bill_id)
     assert refreshed.next_occurrence == date(2025, 2, 10)  # NOT advanced again
 

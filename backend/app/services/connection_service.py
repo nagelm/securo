@@ -2636,14 +2636,21 @@ async def sync_connection(
                     placeholder.raw_data = txn_data.raw_data
                     # Same shape as the import path: fold in the `preview` the
                     # rules already produced from the incoming charge instead of
-                    # re-running them against the placeholder, whose description
-                    # is the recurring definition's own wording. Existing values
-                    # win, the charge fills the empty ones, and only its
-                    # provenance is recorded outright.
+                    # re-running them against the placeholder. Fork: the bank's
+                    # row replaces the placeholder, so its date, wording (after
+                    # rules) and counterparty win; the user's category, payee
+                    # entity and notes carry over when the charge has none.
                     placeholder.original_description = txn_data.description
+                    placeholder.description = preview.description
+                    placeholder.description_is_rule_managed = (
+                        preview.description_is_rule_managed
+                    )
+                    placeholder.date = transaction.date
+                    placeholder.effective_date = transaction.effective_date
+                    placeholder.bill_id = transaction.bill_id
                     if placeholder.category_id is None:
                         placeholder.category_id = preview.category_id or category_id
-                    if txn_data.payee and not placeholder.payee:
+                    if txn_data.payee:
                         placeholder.payee = txn_data.payee
                     if placeholder.payee_id is None:
                         placeholder.payee_id = preview.payee_id
