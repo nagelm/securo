@@ -1300,6 +1300,7 @@
     "thisMonth": "Tento mesiac",
     "backToAccounts": "Späť na účty",
     "runningBalance": "Zostatok",
+    "showOlder": "Zobraziť {{count}} starších",
     "noTransactions": "Tento účet nemá žiadne transakcie",
     "syncFailed": "Synchronizácia zlyhala",
     "reconnect": "Znovu prepojiť",

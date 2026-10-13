@@ -1236,6 +1236,7 @@
     "thisMonth": "This month",
     "backToAccounts": "Back to accounts",
     "runningBalance": "Balance",
+    "showOlder": "Show {{count}} older",
     "noTransactions": "No transactions for this account",
     "syncFailed": "Sync failed",
     "reconnect": "Reconnect",

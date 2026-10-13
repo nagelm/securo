@@ -1240,6 +1240,7 @@
     "thisMonth": "Este mes",
     "backToAccounts": "Volver a cuentas",
     "runningBalance": "Saldo",
+    "showOlder": "Mostrar {{count}} anteriores",
     "noTransactions": "No hay transacciones para esta cuenta",
     "syncFailed": "Sincronización fallida",
     "reconnect": "Reconectar",

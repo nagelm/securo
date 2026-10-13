@@ -1237,6 +1237,7 @@
     "thisMonth": "Diesen Monat",
     "backToAccounts": "Zurück zu den Konten",
     "runningBalance": "Saldo",
+    "showOlder": "{{count}} ältere anzeigen",
     "noTransactions": "Keine Transaktionen für dieses Konto",
     "syncFailed": "Synchronisierung fehlgeschlagen",
     "reconnect": "Erneut verbinden",

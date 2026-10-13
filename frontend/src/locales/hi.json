@@ -1236,6 +1236,7 @@
     "thisMonth": "इस महीने",
     "backToAccounts": "खातों पर वापस",
     "runningBalance": "शेष",
+    "showOlder": "{{count}} पुराने दिखाएँ",
     "noTransactions": "इस खाते के लिए कोई लेन-देन नहीं",
     "syncFailed": "सिंक विफल",
     "reconnect": "फिर से कनेक्ट करें",

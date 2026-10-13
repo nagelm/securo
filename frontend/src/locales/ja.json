@@ -1236,6 +1236,7 @@
     "thisMonth": "今月",
     "backToAccounts": "口座一覧に戻る",
     "runningBalance": "残高",
+    "showOlder": "古い{{count}}件を表示",
     "noTransactions": "この口座の取引はありません",
     "syncFailed": "同期に失敗しました",
     "reconnect": "再接続",

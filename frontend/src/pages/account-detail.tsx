@@ -11,6 +11,14 @@ import { applyTransactionToBalance, excludeMaterializedProjections, transactionA
 import { invalidateFinancialQueries } from '@/lib/invalidate-queries'
 import { shouldShowPendingBadge } from '@/lib/transaction-status'
 import { closeDateForBill, isOpenCycleWindow } from '@/lib/credit-card-cycle'
+import {
+  TRANSACTION_PAGE_LIMIT,
+  fetchAllTransactionPages,
+  isLongRangeAccount,
+  longRangeDefault,
+  monthlyPoints,
+  yearTicks,
+} from '@/lib/account-long-range'
 import { toast } from 'sonner'
 import type { CreditCardBill, ProjectedTransaction, Transaction } from '@/types'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -369,6 +377,11 @@ export default function AccountDetailPage() {
           : defaultCycleForCreditCard(account.statement_close_day, account.payment_due_day, new Date())
       setFilterFrom(range.start)
       setFilterTo(range.end)
+    } else if (isLongRangeAccount(account?.type) && !filterTouched) {
+      // Loans and investments move over years: open on the last five.
+      const range = longRangeDefault()
+      setFilterFrom(range.start)
+      setFilterTo(range.end)
     }
   }
 
@@ -517,8 +530,9 @@ export default function AccountDetailPage() {
   })
 
   const { data: txData, isLoading: txLoading } = useQuery({
-    queryKey: ['transactions', { account_id: id, bill_id: activeBill?.id, from: filterFrom, to: filterTo, limit: 500, include_opening_balance: true, unbilled_only: isInProgressCycle }],
-    queryFn: () => transactions.list({
+    queryKey: ['transactions', { account_id: id, bill_id: activeBill?.id, from: filterFrom, to: filterTo, limit: TRANSACTION_PAGE_LIMIT, all_pages: true, include_opening_balance: true, unbilled_only: isInProgressCycle }],
+    // Every page of the range: the running balance below walks all of it.
+    queryFn: () => fetchAllTransactionPages(transactions.list, {
       account_id: id,
       // When the active cycle is a real bill, prefer bill_id (Pluggy's
       // truth — picks up charges the bank rolled outside the nominal date
@@ -531,7 +545,6 @@ export default function AccountDetailPage() {
       unbilled_only: isInProgressCycle || undefined,
       from: filterFrom || undefined,
       to: filterTo || undefined,
-      limit: 500,
       include_opening_balance: true,
     }),
     enabled: !!id,
@@ -639,6 +652,7 @@ export default function AccountDetailPage() {
 
   // Whether to use primary currency amounts (for foreign-currency accounts with toggle, or domestic accounts with foreign txs)
   const isCreditCard = account?.type === 'credit_card'
+  const isLongRange = isLongRangeAccount(account?.type)
   // A savings goal can sit on any account money is saved into: not a card or a loan.
   const canAddSavingsGoal = hasModule('goals') && !isCreditCard && account?.type !== 'loan'
   const isForeignCurrency = account ? account.currency !== userCurrency : false
@@ -780,8 +794,21 @@ export default function AccountDetailPage() {
       series.push({ label: formatDateStr(key, dateLocale), date: key, balance })
       cur.setDate(cur.getDate() + 1)
     }
-    return series
-  }, [isCreditCard, txData, projectedRows, filterFrom, filterTo, dateLocale, usePrimary, displayCurrency, summary, openingBalance, activeBill])
+    if (!isLongRange) return series
+    // Years of a loan or investment: one point per month, labelled by month.
+    return monthlyPoints(series).map((p) => ({
+      ...p,
+      label: new Date(p.date + 'T00:00:00').toLocaleDateString(dateLocale, { month: 'short', year: 'numeric' }),
+    }))
+  }, [isCreditCard, isLongRange, txData, projectedRows, filterFrom, filterTo, dateLocale, usePrimary, displayCurrency, summary, openingBalance, activeBill])
+
+  // Year ticks for the monthly chart, each shown as its year.
+  const chartYearTicks = useMemo(() => {
+    if (!isLongRange) return null
+    const ticks = yearTicks(chartData)
+    const yearByLabel = new Map(chartData.map((p) => [p.label, p.date.slice(0, 4)]))
+    return { ticks, format: (label: string) => yearByLabel.get(label) ?? label }
+  }, [isLongRange, chartData])
 
   const ccRunningTotal = useMemo((): TxWithBalance[] => {
     if (!isCreditCard || !txData?.items) return []
@@ -835,15 +862,31 @@ export default function AccountDetailPage() {
 
   const resolvedDefaultRange = account?.type === 'credit_card'
     ? defaultCycleForCreditCard(account.statement_close_day, account.payment_due_day, new Date())
-    : { start: defaultFrom(), end: defaultTo() }
+    : isLongRange
+      ? longRangeDefault()
+      : { start: defaultFrom(), end: defaultTo() }
   const hasFilters = filterFrom !== resolvedDefaultRange.start || filterTo !== resolvedDefaultRange.end
 
   // The mobile transaction view is intentionally grouped by day so the date
   // remains visible without spending a full column on every row.
+  // The list shows a page of rows at a time, newest first; years of a loan
+  // run to many pages. The running balances are already computed over all of
+  // them, so a page cut here never changes a figure.
+  const rowWindowKey = `${id}|${filterFrom}|${filterTo}`
+  const [rowWindow, setRowWindow] = useState({ key: rowWindowKey, limit: TRANSACTION_PAGE_LIMIT })
+  if (rowWindow.key !== rowWindowKey) {
+    setRowWindow({ key: rowWindowKey, limit: TRANSACTION_PAGE_LIMIT })
+  }
+  const visibleRows = useMemo(
+    () => displayRows.slice(0, rowWindow.limit),
+    [displayRows, rowWindow.limit],
+  )
+  const hiddenRowCount = displayRows.length - visibleRows.length
+
   const groupedByDate = useMemo(() => {
     const groups: { date: string; label: string; items: TxWithBalance[] }[] = []
     let current: { date: string; label: string; items: TxWithBalance[] } | null = null
-    for (const tx of displayRows) {
+    for (const tx of visibleRows) {
       if (!current || current.date !== tx.date) {
         current = {
           date: tx.date,
@@ -860,7 +903,7 @@ export default function AccountDetailPage() {
       current.items.push(tx)
     }
     return groups
-  }, [displayRows, dateLocale])
+  }, [visibleRows, dateLocale])
 
   const isLoading = accountLoading || summaryLoading
 
@@ -1049,6 +1092,10 @@ export default function AccountDetailPage() {
                     account.payment_due_day,
                     new Date(),
                   )
+                  setFilterFrom(start)
+                  setFilterTo(end)
+                } else if (isLongRange) {
+                  const { start, end } = longRangeDefault()
                   setFilterFrom(start)
                   setFilterTo(end)
                 } else {
@@ -1510,8 +1557,9 @@ export default function AccountDetailPage() {
                   tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
                   axisLine={false}
                   tickLine={false}
-                  interval="preserveStartEnd"
-                  minTickGap={40}
+                  {...(chartYearTicks
+                    ? { ticks: chartYearTicks.ticks, tickFormatter: chartYearTicks.format, interval: 0 }
+                    : { interval: 'preserveStartEnd' as const, minTickGap: 40 })}
                 />
                 <YAxis
                   tickFormatter={(v) => {
@@ -1632,7 +1680,7 @@ export default function AccountDetailPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {displayRows.map((tx) => {
+                  {visibleRows.map((tx) => {
                     const isOpening = tx.source === 'opening_balance'
                     const isTransfer = !!tx.transfer_pair_id
                     const transferAccounts = resolveTransferAccounts(tx, accountById)
@@ -1760,6 +1808,17 @@ export default function AccountDetailPage() {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+          {!txLoading && hiddenRowCount > 0 && (
+            <div className="border-t border-border p-3 flex justify-center">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setRowWindow((w) => ({ ...w, limit: w.limit + TRANSACTION_PAGE_LIMIT }))}
+              >
+                {t('accounts.showOlder', { count: Math.min(hiddenRowCount, TRANSACTION_PAGE_LIMIT) })}
+              </Button>
             </div>
           )}
         </div>

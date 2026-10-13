@@ -1253,6 +1253,7 @@
     "thisMonth": "Этот месяц",
     "backToAccounts": "Назад к счетам",
     "runningBalance": "Баланс",
+    "showOlder": "Показать ещё {{count}} старых",
     "noTransactions": "Нет транзакций для этого счёта",
     "syncFailed": "Синхронизация не удалась",
     "reconnect": "Переподключиться",

@@ -1286,6 +1286,7 @@
     "thisMonth": "Bieżący miesiąc",
     "backToAccounts": "Powrót do kont",
     "runningBalance": "Saldo",
+    "showOlder": "Pokaż {{count}} starszych",
     "noTransactions": "Brak transakcji dla tego konta",
     "syncFailed": "Synchronizacja nie powiodła się",
     "reconnect": "Połącz ponownie",
