@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { transactions as transactionsApi } from '@/lib/api'
-import { getAccountLabel, sortAccountsByDisplayName } from '@/lib/account-utils'
+import { getAccountLabel, sortAccountsByPosition } from '@/lib/account-utils'
 import { localDateString } from '@/lib/date-utils'
 import { formatCurrency } from '@/lib/format'
 import {
@@ -82,7 +82,7 @@ export function LoanPaymentDialog({
   const bankFixed = editing != null && !editing.cash_leg_created
 
   const payingAccounts = useMemo(
-    () => sortAccountsByDisplayName(payingAccountsFor(loan, accounts)),
+    () => sortAccountsByPosition(payingAccountsFor(loan, accounts)),
     [loan, accounts],
   )
   const interestCategories = useMemo(() => interestCategoriesFrom(categories), [categories])

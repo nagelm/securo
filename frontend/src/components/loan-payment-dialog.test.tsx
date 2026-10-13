@@ -24,6 +24,7 @@ function account(overrides: Partial<Account>): Account {
     external_id: null,
     name: 'Account',
     display_name: null,
+    position: 0,
     masked_number: null,
     institution_name: null,
     institution_logo_url: null,

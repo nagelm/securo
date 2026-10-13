@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useInfiniteQuery } from '@tanstack/react-query'
-import { getAccountName, sortAccountsByDisplayName } from '@/lib/account-utils'
+import { getAccountName, sortAccountsByPosition } from '@/lib/account-utils'
 import { isInvalidDescriptionAction, parseRulePriority, previewableActions } from '@/lib/rule-form-utils'
 import { rules as rulesApi } from '@/lib/api'
 import { formatCurrency } from '@/lib/format'
@@ -124,7 +124,7 @@ function ConditionRow({
   condition, accounts, payees, onChange, onRemove,
 }: {
   condition: RuleCondition
-  accounts: { id: string; name: string; display_name?: string | null }[]
+  accounts: { id: string; name: string; display_name?: string | null; position?: number | null }[]
   payees: Payee[]
   onChange: (key: keyof RuleCondition, val: string | number) => void
   onRemove: () => void
@@ -433,14 +433,14 @@ export function RuleDialog({
   categories: Category[]
   categoryGroups: CategoryGroup[]
   currentCategories?: Category[]
-  accounts: { id: string; name: string; display_name?: string | null }[]
+  accounts: { id: string; name: string; display_name?: string | null; position?: number | null }[]
   payees: Payee[]
   onSave: (data: Partial<Rule>) => void
   loading: boolean
   initialData?: RuleDialogInitialData
 }) {
   const { t } = useTranslation()
-  const sortedAccounts = useMemo(() => sortAccountsByDisplayName(accounts), [accounts])
+  const sortedAccounts = useMemo(() => sortAccountsByPosition(accounts), [accounts])
 
   const defaultConditions: RuleConditionNode[] = initialData?.conditions ?? rule?.conditions ?? [newCondition()]
   const defaultActions: RuleAction[] = initialData?.actions ?? rule?.actions as RuleAction[] ?? [{ op: 'set_category', value: '' }]

@@ -172,6 +172,9 @@ export interface Account {
   external_id: string | null
   name: string
   display_name: string | null
+  // Place in the user's account order, smallest first (set on the Accounts
+  // page). The API lists accounts in this order. Display only.
+  position: number
   // Last 4 chars of the bank's identifier for the account, when the provider
   // exposes one. Tells apart accounts a bank reports under an identical name.
   masked_number: string | null

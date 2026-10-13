@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { getAccountLabel, getAccountName, sortAccountsByAbsoluteBalance, sumAccountBalances } from '@/lib/account-utils'
+import { getAccountLabel, getAccountName, sortAccountsByPosition, sumAccountBalances } from '@/lib/account-utils'
 import { currentMonth, shiftMonth, monthLastDay, monthLabel, monthRange } from '@/lib/month-utils'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
@@ -407,7 +407,7 @@ export default function DashboardPage() {
     (sum, a) => sum + Number(a.balance_primary ?? a.current_balance), 0,
   )
   const sortedAvailableBalanceAccounts = useMemo(
-    () => sortAccountsByAbsoluteBalance(availableBalanceAccounts, (a) => a.balance_primary ?? a.current_balance),
+    () => sortAccountsByPosition(availableBalanceAccounts),
     [availableBalanceAccounts],
   )
   // While accounts are loading or failed to load, treat their balance

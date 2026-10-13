@@ -1,6 +1,6 @@
 import { createElement, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { getAccountName, sortAccountsByDisplayName } from '@/lib/account-utils'
+import { getAccountName, sortAccountsByPosition } from '@/lib/account-utils'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale } from '@/hooks/use-display-locale'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -711,7 +711,7 @@ export default function GoalsPage() {
                 label={t('goals.account')}
                 placeholder={t('goals.selectAccount')}
                 defaultValue={editing?.account_id ?? linkedAccountId}
-                items={sortAccountsByDisplayName(accountsList ?? [])}
+                items={sortAccountsByPosition(accountsList ?? [])}
                 renderOption={(acc) => `${getAccountName(acc)} (${acc.currency})`}
                 onChange={setLinkedAccountId}
               />

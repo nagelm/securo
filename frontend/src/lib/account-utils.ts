@@ -25,6 +25,8 @@ export function sumAccountBalances(
 /**
  * Return a presentation-only copy ordered by the name users see.
  * The input is never mutated, which keeps React Query's cached account list intact.
+ * Account lists follow the user's order (sortAccountsByPosition); this is for
+ * the goals quick setup, which ranks its suggestions by name.
  */
 export function sortAccountsByDisplayName<
   T extends { name: string; display_name?: string | null },
@@ -38,22 +40,51 @@ export function sortAccountsByDisplayName<
 }
 
 /**
- * Return a presentation-only copy with the largest account balances first.
- * Debt accounts participate by magnitude, matching the balance list in the
- * sidebar, while invalid/missing balances sort as zero.
- * Pass a selector to compare multi-currency accounts in a common currency.
+ * Return a presentation-only copy in the user's account order (`position`,
+ * set on the Accounts page). The API already lists accounts this way, ties
+ * included, so the sort is stable and leaves equal positions, and items
+ * without a position (lists mapped down to id and name), where they were.
+ * The input is never mutated, which keeps React Query's cached account list intact.
  */
-export function sortAccountsByAbsoluteBalance<
-  T extends { current_balance?: number | string | null },
->(
+export function sortAccountsByPosition<T extends { id: string; position?: number | null }>(
   accounts: readonly T[],
-  getBalance: (account: T) => number | string | null | undefined = (account) => account.current_balance,
 ): T[] {
-  return [...accounts].sort((left, right) => {
-    const leftBalance = Number(getBalance(left)) || 0
-    const rightBalance = Number(getBalance(right)) || 0
-    return Math.abs(rightBalance) - Math.abs(leftBalance)
+  return [...accounts].sort((left, right) =>
+    left.position == null || right.position == null ? 0 : left.position - right.position,
+  )
+}
+
+/**
+ * Put `orderedIds` in that order, in the places those accounts already hold in
+ * `accounts`: the client-side twin of PUT /api/accounts/order, used to show a
+ * reorder before the server confirms it. Each moved account takes the
+ * `position` of the place it lands on; every other account is untouched.
+ * Ids not in the list are ignored. Returns a new array.
+ */
+export function applyAccountOrder<T extends { id: string; position: number }>(
+  accounts: readonly T[],
+  orderedIds: readonly string[],
+): T[] {
+  const byId = new Map(accounts.map((account) => [account.id, account]))
+  const moving = orderedIds.filter((id) => byId.has(id))
+  const wanted = new Set(moving)
+  const slots = accounts.flatMap((account, index) => (wanted.has(account.id) ? [index] : []))
+  const result = [...accounts]
+  slots.forEach((slot, i) => {
+    const account = byId.get(moving[i]) as T
+    result[slot] = { ...account, position: accounts[slot].position }
   })
+  return result
+}
+
+/** `ids` with the item at `from` moved to `to` (both clamped to the list). */
+export function moveId(ids: readonly string[], from: number, to: number): string[] {
+  const result = [...ids]
+  if (from < 0 || from >= ids.length) return result
+  const target = Math.max(0, Math.min(ids.length - 1, to))
+  const [item] = result.splice(from, 1)
+  result.splice(target, 0, item)
+  return result
 }
 
 /**

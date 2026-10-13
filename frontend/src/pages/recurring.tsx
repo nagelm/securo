@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { getAccountName, sortAccountsByDisplayName } from '@/lib/account-utils'
+import { getAccountName, sortAccountsByPosition } from '@/lib/account-utils'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -345,7 +345,7 @@ function RecurringForm({
   const { t } = useTranslation()
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency_display ?? 'USD'
-  const sortedAccounts = useMemo(() => sortAccountsByDisplayName(accounts), [accounts])
+  const sortedAccounts = useMemo(() => sortAccountsByPosition(accounts), [accounts])
   const { data: supportedCurrencies } = useQuery({
     queryKey: ['currencies'],
     queryFn: currenciesApi.list,
@@ -371,7 +371,7 @@ function RecurringForm({
   // A loan payment schedule: the whole payment goes from the paying account
   // to the loan; only the fixed interest share is an expense.
   const loans = useMemo(
-    () => sortAccountsByDisplayName(
+    () => sortAccountsByPosition(
       accounts.filter((a) => a.type === 'loan' && (!a.is_closed || a.id === recurring?.transfer_account_id)),
     ),
     [accounts, recurring?.transfer_account_id],
@@ -386,7 +386,7 @@ function RecurringForm({
   const [loanProblem, setLoanProblem] = useState<string | null>(null)
   const loan = loans.find((a) => a.id === loanId)
   const payingAccounts = useMemo(
-    () => (loan ? sortAccountsByDisplayName(payingAccountsFor(loan, accounts)) : []),
+    () => (loan ? sortAccountsByPosition(payingAccountsFor(loan, accounts)) : []),
     [loan, accounts],
   )
   const payingId = payingAccounts.some((a) => a.id === accountId) ? accountId : (payingAccounts[0]?.id ?? '')
