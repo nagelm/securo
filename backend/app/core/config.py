@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     supported_currencies: str = "USD,EUR,GBP,BRL,CAD,AUD,CHF,ARS,JPY,MXN,INR,SEK,DKK,NOK,PLN,CZK,HUF,RON,CRC,IDR,COP,CLP,DOP,KZT,RUB,GTQ,PHP,UAH,NZD,VND,SGD,AZN,TRY,PKR,MDL,AED,THB,EGP,MYR,CNY,SAR,QAR,JMD,RSD"  # comma-separated list
     fx_sync_mode: str = "on_demand"  # "on_demand" or "scheduled"
 
+    # Bank sync cadence. The hourly beat syncs a connection once its last sync
+    # is this many minutes old, and asks the provider to re-read the bank (a
+    # provider refresh) at most this often.
+    sync_stale_minutes: int = 240
+    provider_refresh_minutes: int = 1200
+
     # Storage
     storage_provider: str = "local"  # "local" or "s3"
     storage_local_path: str = "./data/attachments"

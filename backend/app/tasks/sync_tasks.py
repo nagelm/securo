@@ -20,8 +20,14 @@ from app.services import connection_service
 
 logger = logging.getLogger(__name__)
 
-STALE_THRESHOLD = timedelta(hours=4)
-PROVIDER_REFRESH_THRESHOLD = timedelta(hours=20)
+def _stale_threshold() -> timedelta:
+    """How old a connection's last sync must be before the beat syncs it again."""
+    return timedelta(minutes=get_settings().sync_stale_minutes)
+
+
+def _provider_refresh_threshold() -> timedelta:
+    """How often a sync may ask the provider to re-read the bank."""
+    return timedelta(minutes=get_settings().provider_refresh_minutes)
 
 
 def _should_trigger_provider_refresh(settings: dict | None, now: datetime) -> bool:
@@ -34,7 +40,7 @@ def _should_trigger_provider_refresh(settings: dict | None, now: datetime) -> bo
         return True
     if last_refresh.tzinfo is None:
         return True
-    return now - last_refresh >= PROVIDER_REFRESH_THRESHOLD
+    return now - last_refresh >= _provider_refresh_threshold()
 
 
 def _make_session_maker():
@@ -47,7 +53,7 @@ async def _sync_all() -> int:
     """Find stale connections and sync each one."""
     engine, session_maker = _make_session_maker()
     try:
-        cutoff = datetime.now(timezone.utc) - STALE_THRESHOLD
+        cutoff = datetime.now(timezone.utc) - _stale_threshold()
         synced = 0
 
         async with session_maker() as session:

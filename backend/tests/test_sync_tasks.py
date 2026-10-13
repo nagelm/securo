@@ -21,6 +21,23 @@ def test_should_trigger_provider_refresh_daily():
     )
 
 
+def test_sync_thresholds_follow_settings(monkeypatch):
+    from app.core.config import get_settings
+    from app.tasks import sync_tasks
+
+    now = datetime(2026, 6, 29, tzinfo=timezone.utc)
+    monkeypatch.setattr(get_settings(), "sync_stale_minutes", 50)
+    monkeypatch.setattr(get_settings(), "provider_refresh_minutes", 55)
+
+    assert sync_tasks._stale_threshold() == timedelta(minutes=50)
+    assert _should_trigger_provider_refresh(
+        {"last_provider_refresh_at": (now - timedelta(minutes=55)).isoformat()}, now
+    )
+    assert not _should_trigger_provider_refresh(
+        {"last_provider_refresh_at": (now - timedelta(minutes=30)).isoformat()}, now
+    )
+
+
 @pytest.mark.asyncio
 async def test_sync_one_forwards_provider_refresh(session, test_user, test_workspace):
     conn = BankConnection(
