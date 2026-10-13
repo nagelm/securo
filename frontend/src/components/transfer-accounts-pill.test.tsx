@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { screen } from '@testing-library/react'
 
 import { TransferAccountsPill } from '@/components/transfer-accounts-pill'
+import { MobileTransactionRow } from '@/components/mobile-transaction-row'
 import { renderWithProviders } from '@/test/utils'
-import type { Account } from '@/types'
+import type { Account, Transaction } from '@/types'
 
 const LOGO = 'https://logo.example/bank.png'
 
@@ -53,5 +54,54 @@ describe('TransferAccountsPill', () => {
     expect(title).toContain('Transfer from Joint Everyday to Home Loan B')
     expect(title).toContain('LOAN PAYMENT 991')
     expect(title).toContain('Transfers are excluded from report and dashboard totals')
+  })
+})
+
+describe('MobileTransactionRow with a transfer', () => {
+  const tx = {
+    id: 'tx-1',
+    account_id: current.id,
+    description: 'LOAN PAYMENT 991',
+    amount: 500,
+    currency: 'NZD',
+    type: 'debit',
+    transfer_pair_id: 'pair-1',
+    transfer_counterpart_account_id: loan.id,
+    amount_primary: null,
+    is_ignored: false,
+    splits: [],
+  } as unknown as Transaction
+
+  const renderRow = (transferAccounts: { from: Account; to: Account } | null) =>
+    renderWithProviders(
+      <MobileTransactionRow
+        tx={tx}
+        account={current}
+        transferAccounts={transferAccounts}
+        groupName={undefined}
+        selected={false}
+        selectable={false}
+        canWrite={false}
+        highlighted={false}
+        locale="en-NZ"
+        userCurrency="NZD"
+        onSelect={() => {}}
+        onClick={() => {}}
+      />,
+    )
+
+  it('puts the pill in the description slot and moves the description under it', () => {
+    renderRow({ from: current, to: loan })
+
+    expect(screen.getByText('Transfer from Joint Everyday to Home Loan B')).toBeInTheDocument()
+    const description = screen.getByText('LOAN PAYMENT 991')
+    expect(description).toHaveClass('text-xs')
+  })
+
+  it('keeps the plain description when the accounts are not known', () => {
+    renderRow(null)
+
+    expect(screen.queryByText(/Transfer from/)).toBeNull()
+    expect(screen.getByText('LOAN PAYMENT 991')).toHaveClass('font-semibold')
   })
 })

@@ -1,6 +1,7 @@
 import { getAccountName } from '@/lib/account-utils'
 import { AccountIcon } from '@/components/account-icon'
 import { PayeeIcon } from '@/components/payee-icon'
+import { TransferAccountsPill } from '@/components/transfer-accounts-pill'
 import type { Transaction, Account } from '@/types'
 import { AlertTriangle, ArrowLeftRight, CalendarClock, ChartNoAxesColumn, Clock, EyeClosed, Paperclip } from 'lucide-react'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
@@ -28,6 +29,8 @@ interface MobileTransactionRowProps {
   onClick: (tx: Transaction) => void
   /** Show the payee instead of the account name in an account-scoped view. */
   showPayee?: boolean
+  /** Both accounts of a linked transfer; drawn in place of the description. */
+  transferAccounts?: { from: Account; to: Account } | null
 }
 
 export function MobileTransactionRow({
@@ -44,6 +47,7 @@ export function MobileTransactionRow({
   onSelect,
   onClick,
   showPayee = false,
+  transferAccounts = null,
 }: MobileTransactionRowProps) {
   const { mask } = usePrivacyMode()
   const { t } = useTranslation()
@@ -108,15 +112,23 @@ export function MobileTransactionRow({
       <div className="min-w-0 flex-1">
         {/* Description row */}
         <div className="flex items-center gap-1.5">
-          <p className={`text-sm font-semibold text-foreground leading-tight min-w-0 ${hasWordBreaks(tx.description) ? 'break-words whitespace-normal' : 'truncate'}`}>
-            {tx.description}
-          </p>
+          {transferAccounts ? (
+            <TransferAccountsPill
+              from={transferAccounts.from}
+              to={transferAccounts.to}
+              description={tx.description}
+            />
+          ) : (
+            <p className={`text-sm font-semibold text-foreground leading-tight min-w-0 ${hasWordBreaks(tx.description) ? 'break-words whitespace-normal' : 'truncate'}`}>
+              {tx.description}
+            </p>
+          )}
           {tx.group_id && (
             <span className="inline-flex items-center text-[9px] font-semibold uppercase tracking-wide text-violet-700 bg-violet-50 border border-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-900 px-1 py-0.5 rounded-full shrink-0">
               {tx.is_shared && tx.parent_owner_name ? tx.parent_owner_name : t('splitGroups.ownerRowBadge', { group: groupName ?? '' })}
             </span>
           )}
-          {!!tx.transfer_pair_id && (
+          {!!tx.transfer_pair_id && !transferAccounts && (
             <ArrowLeftRight className="h-3 w-3 text-blue-600 shrink-0" />
           )}
           {virtual && (
@@ -154,8 +166,11 @@ export function MobileTransactionRow({
           )}
         </div>
 
-        {/* Account row or payee row */}
-        {showPayee ? (
+        {/* Account row or payee row. A transfer pill already names both
+            accounts, so its row shows the bank's own description instead. */}
+        {transferAccounts ? (
+          <p className="text-xs text-muted-foreground mt-0.5 truncate">{tx.description}</p>
+        ) : showPayee ? (
           (tx.payee_name || tx.payee) && (tx.payee_name || tx.payee) !== tx.description ? (
             <p className="text-xs text-muted-foreground mt-0.5 truncate">
               {tx.payee_name || tx.payee}

@@ -17,6 +17,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, ArrowLeftRight, CalendarClock, ChevronLeft, ChevronRight, Clock, EyeClosed, HelpCircle, Paperclip, Pencil, Plus, X } from 'lucide-react'
 import { MobileTransactionRow } from '@/components/mobile-transaction-row'
+import { TransferAccountsPill } from '@/components/transfer-accounts-pill'
+import { resolveTransferAccounts } from '@/lib/transfer-accounts'
 import { CategoryIcon } from '@/components/category-icon'
 import { ProjectedTransactionBadge } from '@/components/projected-transaction-badge'
 import { TransactionDialog, type TransactionSavePayload } from '@/components/transaction-dialog'
@@ -416,6 +418,10 @@ export default function AccountDetailPage() {
     queryKey: ['accounts'],
     queryFn: () => accounts.list(),
   })
+  const accountById = useMemo(
+    () => new Map((accountsList ?? []).map((a) => [a.id, a])),
+    [accountsList],
+  )
 
   const { data: summary, isLoading: summaryLoading } = useQuery({
     // When a real bill anchors the active cycle, send bill_id AND the cycle
@@ -1579,6 +1585,7 @@ export default function AccountDetailPage() {
                       key={tx.id}
                       tx={tx}
                       account={account}
+                      transferAccounts={resolveTransferAccounts(tx, accountById)}
                       groupName={undefined}
                       selected={false}
                       selectable={false}
@@ -1618,6 +1625,7 @@ export default function AccountDetailPage() {
                   {displayRows.map((tx) => {
                     const isOpening = tx.source === 'opening_balance'
                     const isTransfer = !!tx.transfer_pair_id
+                    const transferAccounts = resolveTransferAccounts(tx, accountById)
                     const isIgnored = tx.is_ignored
                     const isVirtual = tx.virtual === true
                     return (
@@ -1636,14 +1644,22 @@ export default function AccountDetailPage() {
                         </td>
                         <td className="px-3 sm:px-4 py-3 w-full max-w-0">
                           <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="font-semibold text-foreground text-sm truncate">{tx.description}</span>
+                            {transferAccounts ? (
+                              <TransferAccountsPill
+                                from={transferAccounts.from}
+                                to={transferAccounts.to}
+                                description={tx.description}
+                              />
+                            ) : (
+                              <span className="font-semibold text-foreground text-sm truncate">{tx.description}</span>
+                            )}
                             <div className="flex items-center gap-1 shrink-0">
                             {isOpening && (
                               <span className="ml-2 text-xs text-muted-foreground font-normal border border-border rounded px-1.5 py-0.5">
                                 {t('accounts.openingBalance')}
                               </span>
                             )}
-                            {isTransfer && (
+                            {isTransfer && !transferAccounts && (
                               <span className="ml-2 inline-flex items-center gap-1 text-xs text-blue-600 font-normal bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5">
                                 <ArrowLeftRight className="h-3 w-3" />
                                 {t('transactions.transfer')}
@@ -1700,6 +1716,10 @@ export default function AccountDetailPage() {
                             )}
                             </div>
                           </div>
+                          {/* The pill took the description's place; keep the bank's text. */}
+                          {transferAccounts && (
+                            <p className="text-xs text-muted-foreground mt-0.5 truncate">{tx.description}</p>
+                          )}
                           {(tx.payee_name || tx.payee) && (tx.payee_name || tx.payee) !== tx.description && (
                             <p className="text-xs text-muted-foreground mt-0.5 truncate">{tx.payee_name || tx.payee}</p>
                           )}

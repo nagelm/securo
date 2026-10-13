@@ -60,6 +60,8 @@ import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useCreateTransaction } from '@/hooks/use-create-transaction'
 import { MobileTransactionRow } from '@/components/mobile-transaction-row'
+import { TransferAccountsPill } from '@/components/transfer-accounts-pill'
+import { resolveTransferAccounts } from '@/lib/transfer-accounts'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { useCollectionFilter } from '@/contexts/collection-filter-context'
@@ -1072,6 +1074,7 @@ export default function TransactionsPage() {
     const showInlineTags = !grid.isVisible('tags')
     const noteText = tx.notes ? stripHashtags(tx.notes) : ''
     const noteTags = tx.notes ? parseHashtags(tx.notes) : []
+    const transferAccounts = resolveTransferAccounts(tx, accountById)
     return (
       <div className="flex items-center gap-2 md:gap-3">
         <PayeeIcon
@@ -1083,7 +1086,15 @@ export default function TransactionsPage() {
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className="text-sm font-semibold text-foreground truncate">{tx.description}</p>
+            {transferAccounts ? (
+              <TransferAccountsPill
+                from={transferAccounts.from}
+                to={transferAccounts.to}
+                description={tx.description}
+              />
+            ) : (
+              <p className="text-sm font-semibold text-foreground truncate">{tx.description}</p>
+            )}
             {tx.group_id && (
               <span
                 className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-violet-700 bg-violet-50 border border-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-900 px-1.5 py-0.5 rounded-full"
@@ -1138,7 +1149,7 @@ export default function TransactionsPage() {
                     : t('transactions.invoiceBadgeNoNumber')}
               </Link>
             ))}
-            {!!tx.transfer_pair_id && (
+            {!!tx.transfer_pair_id && !transferAccounts && (
               <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-blue-600 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">
                 <ArrowLeftRight className="h-3 w-3" />
                 {t('transactions.transfer')}
@@ -1194,6 +1205,10 @@ export default function TransactionsPage() {
               <Paperclip size={12} className="text-muted-foreground shrink-0" />
             )}
           </div>
+          {/* The pill took the description's place; keep the bank's text. */}
+          {transferAccounts && (
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">{tx.description}</p>
+          )}
           {showInlineDate && (
             <p className="text-xs text-muted-foreground mt-0.5">{new Date(tx.date + 'T00:00:00').toLocaleDateString(dateLocale)}</p>
           )}
@@ -1528,6 +1543,7 @@ export default function TransactionsPage() {
                     key={tx.id}
                     tx={tx}
                     account={tx.account_id ? accountById.get(tx.account_id) : undefined}
+                    transferAccounts={resolveTransferAccounts(tx, accountById)}
                     groupName={tx.group_id ? groupNameById.get(tx.group_id) : undefined}
                     selected={selectedIds.has(tx.id)}
                     selectable={canWrite && !tx.is_shared}
