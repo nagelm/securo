@@ -1441,7 +1441,55 @@
     "trackingWallet": "Πορτοφόλι",
     "wallet": "Πορτοφόλι",
     "selectWallet": "Επιλογή πορτοφολιού",
-    "walletHint": "Παρακολουθήστε αυτόν τον στόχο με τη συνολική αξία όλων των περιουσιακών στοιχείων στο επιλεγμένο πορτοφόλι."
+    "walletHint": "Παρακολουθήστε αυτόν τον στόχο με τη συνολική αξία όλων των περιουσιακών στοιχείων στο επιλεγμένο πορτοφόλι.",
+    "savings": {
+      "totalTarget": "Total target (optional)",
+      "totalTargetHint": "Leave empty for an ongoing savings goal, such as a holiday fund.",
+      "contribution": "Regular contribution",
+      "contributionAmount": "Amount",
+      "contributionPeriod": "Every",
+      "periodNone": "No regular target",
+      "contributionHint": "Counts transfers in from your other accounts, minus transfers back out. Interest and fees are left out.",
+      "needsAccount": "Link an account to see what you contribute each period.",
+      "needTarget": "Enter a total target, a regular contribution, or both.",
+      "ongoing": "Ongoing",
+      "balance": "Balance {{amount}}",
+      "periodName": {
+        "weekly": "Week",
+        "biweekly": "Fortnight",
+        "monthly": "Month"
+      },
+      "per": {
+        "weekly": "/ week",
+        "biweekly": "/ fortnight",
+        "monthly": "/ month"
+      },
+      "current": {
+        "weekly": "This week",
+        "biweekly": "This fortnight",
+        "monthly": "This month"
+      },
+      "thisPeriod": "{{label}} {{contributed}} of {{target}}",
+      "streak": "Streak {{count}}",
+      "status": {
+        "met": "Met",
+        "over": "Over",
+        "short": "Short",
+        "pending": "In progress"
+      },
+      "historyTitle": "{{start}} to {{end}}: {{contributed}} of {{target}} ({{status}})",
+      "historyLabel": "Contributions in recent periods",
+      "suggestionRecurring": "Matches the recurring transaction \"{{description}}\": {{amount}} {{period}}",
+      "suggestionHistory": "Matches your regular transfers into this account: {{amount}} {{period}}",
+      "useSuggestion": "Use",
+      "quickSetup": "Set up savings goals",
+      "quickSetupDesc": "Pick the accounts you save into. Each gets its own goal, linked to the account, with a regular target taken from what already pays into it. You can change any of it.",
+      "quickSetupEmpty": "Every open account already has a goal.",
+      "quickSetupCreate": "Create goals",
+      "quickSetupCreated": "Goals created",
+      "quickSetupNoneSelected": "Pick at least one account.",
+      "createFromAccount": "Savings goal"
+    }
   },
   "recurring": {
     "title": "Επαναλαμβανόμενες συναλλαγές",

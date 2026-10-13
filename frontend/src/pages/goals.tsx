@@ -1,4 +1,5 @@
-import { createElement, useState } from 'react'
+import { createElement, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { getAccountName, sortAccountsByDisplayName } from '@/lib/account-utils'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale } from '@/hooks/use-display-locale'
@@ -21,11 +22,14 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from '@/components/ui/popover'
-import type { Account, Asset, AssetGroup, Goal } from '@/types'
+import type { Account, Asset, AssetGroup, ContributionPeriod, Goal } from '@/types'
 import {
   Pencil, Trash2, Plus, Pause, Play, CheckCircle2, Archive, ArchiveRestore, Target,
-  ChevronDown,
+  ChevronDown, PiggyBank,
 } from 'lucide-react'
+import { ContributionDots, ContributionLine } from '@/components/goal-contribution'
+import { GoalQuickSetupDialog } from '@/components/goal-quick-setup-dialog'
+import { CONTRIBUTION_PERIODS, periodPercentage, quickSetupCandidates } from '@/lib/goal-contribution'
 import { ICON_MAP } from '@/lib/category-icons'
 import { IconPicker } from '@/components/icon-picker'
 import { PageHeader } from '@/components/page-header'
@@ -53,6 +57,7 @@ function LinkedResourceSelect<T extends { id: string }>({
   items,
   renderOption,
   hint,
+  onChange,
 }: {
   name: string
   label: string
@@ -61,11 +66,18 @@ function LinkedResourceSelect<T extends { id: string }>({
   items: T[] | undefined
   renderOption: (item: T) => React.ReactNode
   hint?: string
+  onChange?: (value: string) => void
 }) {
   return (
     <div className="space-y-2">
       <Label>{label}</Label>
-      <select name={name} defaultValue={defaultValue ?? ''} className={SELECT_CLASS} required>
+      <select
+        name={name}
+        defaultValue={defaultValue ?? ''}
+        className={SELECT_CLASS}
+        required
+        onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+      >
         <option value="">{placeholder}</option>
         {items?.map((item) => (
           <option key={item.id} value={item.id}>
@@ -150,6 +162,12 @@ export default function GoalsPage() {
   const [selectedIcon, setSelectedIcon] = useState('target')
   const [selectedColor, setSelectedColor] = useState('#3B82F6')
   const [targetDate, setTargetDate] = useState('')
+  const [contributionAmount, setContributionAmount] = useState('')
+  const [contributionPeriod, setContributionPeriod] = useState<ContributionPeriod | ''>('')
+  const [linkedAccountId, setLinkedAccountId] = useState('')
+  const [prefillName, setPrefillName] = useState('')
+  const [quickSetupOpen, setQuickSetupOpen] = useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const { data: goalsList } = useQuery({
     queryKey: ['goals', statusFilter],
@@ -169,6 +187,21 @@ export default function GoalsPage() {
   const { data: walletsList } = useQuery({
     queryKey: ['asset-groups'],
     queryFn: assetGroupsApi.list,
+  })
+
+  // Every goal, whatever the filter: quick setup skips accounts that already have one.
+  const { data: allGoals } = useQuery({
+    queryKey: ['goals', ''],
+    queryFn: () => goalsApi.list(),
+    enabled: quickSetupOpen,
+  })
+
+  // A regular target read from what already pays into the picked account.
+  const { data: suggestion } = useQuery({
+    queryKey: ['goals', 'contribution-suggestion', linkedAccountId],
+    queryFn: () => goalsApi.contributionSuggestion(linkedAccountId),
+    enabled: dialogOpen && trackingType === 'account' && !!linkedAccountId,
+    staleTime: 60_000,
   })
 
   const { data: supportedCurrencies } = useQuery({
@@ -216,12 +249,16 @@ export default function GoalsPage() {
     },
   })
 
-  const openCreateDialog = () => {
+  const openCreateDialog = (account?: Account) => {
     setEditing(null)
-    setTrackingType('manual')
-    setSelectedIcon('target')
-    setSelectedColor('#3B82F6')
+    setTrackingType(account ? 'account' : 'manual')
+    setSelectedIcon(account ? 'piggy-bank' : 'target')
+    setSelectedColor(account ? '#10B981' : '#3B82F6')
     setTargetDate('')
+    setContributionAmount('')
+    setContributionPeriod('')
+    setLinkedAccountId(account?.id ?? '')
+    setPrefillName(account ? getAccountName(account) : '')
     setDialogOpen(true)
   }
 
@@ -231,8 +268,30 @@ export default function GoalsPage() {
     setSelectedIcon(goal.icon ?? 'target')
     setSelectedColor(goal.color ?? '#3B82F6')
     setTargetDate(goal.target_date ?? '')
+    setContributionAmount(goal.contribution_amount != null ? String(goal.contribution_amount) : '')
+    setContributionPeriod(goal.contribution_period ?? '')
+    setLinkedAccountId(goal.account_id ?? '')
+    setPrefillName('')
     setDialogOpen(true)
   }
+
+  // `/goals?new=1` opens the form; `&account_id=` links it to that account
+  // (the "Savings goal" button on an account's page).
+  const wantsNew = searchParams.get('new') === '1'
+  const wantedAccountId = searchParams.get('account_id')
+  useEffect(() => {
+    if (!wantsNew) return
+    if (wantedAccountId && !accountsList) return
+    const account = wantedAccountId ? accountsList?.find((a) => a.id === wantedAccountId) : undefined
+    openCreateDialog(account)
+    setSearchParams({}, { replace: true })
+    // openCreateDialog only sets state; running once per request is the point.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsNew, wantedAccountId, accountsList])
+
+  const money = (currency: string) => (amount: number) => mask(formatCurrency(amount, currency, locale))
+  const shortDate = (iso: string) =>
+    new Date(`${iso}T00:00:00`).toLocaleDateString(locale, { day: 'numeric', month: 'short' })
 
   return (
     <div>
@@ -263,9 +322,14 @@ export default function GoalsPage() {
           title={t('goals.title')}
           action={
             canWrite ? (
-              <Button size="sm" className="gap-1.5 h-8" onClick={openCreateDialog}>
-                <Plus size={13} /> {t('goals.add')}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => setQuickSetupOpen(true)}>
+                  <PiggyBank size={13} /> {t('goals.savings.quickSetup')}
+                </Button>
+                <Button size="sm" className="gap-1.5 h-8" onClick={() => openCreateDialog()}>
+                  <Plus size={13} /> {t('goals.add')}
+                </Button>
+              </div>
             ) : undefined
           }
         />
@@ -273,14 +337,21 @@ export default function GoalsPage() {
           <div className="divide-y divide-border">
             {goalsList.map((goal) => {
               const days = goal.target_date ? daysUntil(goal.target_date) : null
-              const progressColor = goal.percentage >= 100
+              const progress = goal.contribution_progress
+              // An ongoing goal has no total: its bar shows this period's target instead.
+              const ongoing = goal.target_amount == null
+              const barPercentage = ongoing
+                ? (progress ? periodPercentage(Number(progress.current.contributed), Number(progress.current.target)) : 0)
+                : goal.percentage
+              const progressColor = barPercentage >= 100
                 ? 'bg-emerald-500'
-                : goal.percentage >= 60
+                : barPercentage >= 60
                   ? 'bg-blue-500'
-                  : goal.percentage >= 30
+                  : barPercentage >= 30
                     ? 'bg-amber-400'
                     : 'bg-muted-foreground/30'
 
+              const goalMoney = money(goal.currency)
               const GoalIcon = getGoalIcon(goal.icon)
               return (
                 <div key={goal.id} className="px-4 sm:px-5 py-4 hover:bg-muted/50 transition-colors">
@@ -302,24 +373,54 @@ export default function GoalsPage() {
                       </div>
 
                       {/* Progress bar */}
-                      <div className="flex items-center gap-3 mb-1.5">
-                        <div className="flex-1 h-2 bg-muted/60 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all ${progressColor}`}
-                            style={{ width: `${Math.min(goal.percentage, 100)}%` }}
-                          />
+                      {(!ongoing || progress) && (
+                        <div className="flex items-center gap-3 mb-1.5">
+                          <div className="flex-1 h-2 bg-muted/60 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${progressColor}`}
+                              style={{ width: `${Math.min(barPercentage, 100)}%` }}
+                            />
+                          </div>
+                          <span className="text-xs font-bold tabular-nums text-foreground shrink-0">
+                            {barPercentage.toFixed(0)}%
+                          </span>
                         </div>
-                        <span className="text-xs font-bold tabular-nums text-foreground shrink-0">
-                          {goal.percentage.toFixed(0)}%
-                        </span>
-                      </div>
+                      )}
+
+                      {/* Regular contribution: target, this period, streak, recent periods */}
+                      {goal.contribution_amount != null && goal.contribution_period && (
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-1.5 text-xs text-muted-foreground">
+                          <ContributionLine
+                            amount={Number(goal.contribution_amount)}
+                            period={goal.contribution_period}
+                            progress={progress}
+                            money={goalMoney}
+                            t={t}
+                          />
+                          {progress ? (
+                            <ContributionDots progress={progress} money={goalMoney} t={t} formatDate={shortDate} />
+                          ) : goal.tracking_type !== 'account' ? (
+                            <span className="italic">{t('goals.savings.needsAccount')}</span>
+                          ) : null}
+                        </div>
+                      )}
 
                       {/* Details row */}
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                         <span className="tabular-nums font-medium">
-                          {mask(formatCurrency(goal.current_amount, goal.currency, locale))}
-                          {' / '}
-                          {mask(formatCurrency(goal.target_amount, goal.currency, locale))}
+                          {ongoing ? (
+                            <>
+                              {t('goals.savings.balance', { amount: goalMoney(goal.current_amount) })}
+                              {' · '}
+                              {t('goals.savings.ongoing')}
+                            </>
+                          ) : (
+                            <>
+                              {goalMoney(goal.current_amount)}
+                              {' / '}
+                              {goalMoney(goal.target_amount ?? 0)}
+                            </>
+                          )}
                         </span>
                         {goal.monthly_contribution != null && goal.monthly_contribution > 0 && (
                           <span className="tabular-nums">
@@ -333,7 +434,7 @@ export default function GoalsPage() {
                               : t('goals.daysOverdue', { count: Math.abs(days) })}
                           </span>
                         )}
-                        {!goal.target_date && (
+                        {!goal.target_date && !ongoing && (
                           <span>{t('goals.noTargetDate')}</span>
                         )}
                         {goal.account_name && (
@@ -433,9 +534,20 @@ export default function GoalsPage() {
             onSubmit={(e) => {
               e.preventDefault()
               const formData = new FormData(e.currentTarget)
+              const rawTarget = (formData.get('target_amount') as string) ?? ''
+              const target = rawTarget.trim() === '' ? null : parseFloat(rawTarget)
+              const contribution = contributionPeriod && contributionAmount.trim() !== ''
+                ? parseFloat(contributionAmount)
+                : null
+              if ((target == null || Number.isNaN(target)) && !(contribution != null && contribution > 0)) {
+                toast.error(t('goals.savings.needTarget'))
+                return
+              }
               const payload: Record<string, unknown> = {
                 name: formData.get('name') as string,
-                target_amount: parseFloat(formData.get('target_amount') as string),
+                target_amount: target,
+                contribution_amount: contribution,
+                contribution_period: contribution != null ? contributionPeriod : null,
                 currency: (formData.get('currency') as string) || userCurrency,
                 tracking_type: formData.get('tracking_type') as string,
                 target_date: targetDate || null,
@@ -467,18 +579,17 @@ export default function GoalsPage() {
           >
             <div className="space-y-2">
               <Label>{t('goals.name')}</Label>
-              <Input name="name" defaultValue={editing?.name ?? ''} required />
+              <Input name="name" defaultValue={editing?.name ?? prefillName} required />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>{t('goals.targetAmount')}</Label>
+                <Label>{t('goals.savings.totalTarget')}</Label>
                 <Input
                   name="target_amount"
                   type="number"
                   step="0.01"
                   defaultValue={editing?.target_amount?.toString() ?? ''}
-                  required
                 />
               </div>
               <div className="space-y-2">
@@ -495,6 +606,66 @@ export default function GoalsPage() {
                   ))}
                 </select>
               </div>
+            </div>
+
+            <p className="-mt-2 text-xs text-muted-foreground">{t('goals.savings.totalTargetHint')}</p>
+
+            <div className="space-y-2">
+              <Label>{t('goals.savings.contribution')}</Label>
+              <div className="grid grid-cols-2 gap-4">
+                <Input
+                  aria-label={t('goals.savings.contributionAmount')}
+                  placeholder={t('goals.savings.contributionAmount')}
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={contributionAmount}
+                  onChange={(e) => setContributionAmount(e.target.value)}
+                  disabled={!contributionPeriod}
+                />
+                <select
+                  aria-label={t('goals.savings.contributionPeriod')}
+                  value={contributionPeriod}
+                  onChange={(e) => setContributionPeriod(e.target.value as ContributionPeriod | '')}
+                  className={SELECT_CLASS}
+                >
+                  <option value="">{t('goals.savings.periodNone')}</option>
+                  {CONTRIBUTION_PERIODS.map((p) => (
+                    <option key={p} value={p}>{t(`goals.savings.per.${p}`)}</option>
+                  ))}
+                </select>
+              </div>
+              {contributionPeriod && (
+                <p className="text-xs text-muted-foreground">{t('goals.savings.contributionHint')}</p>
+              )}
+              {suggestion && trackingType === 'account' && (
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs">
+                  <span className="text-muted-foreground">
+                    {t(
+                      suggestion.source === 'recurring'
+                        ? 'goals.savings.suggestionRecurring'
+                        : 'goals.savings.suggestionHistory',
+                      {
+                        description: suggestion.description ?? '',
+                        amount: formatCurrency(suggestion.amount, suggestion.currency, locale),
+                        period: t(`goals.savings.per.${suggestion.period}`),
+                      },
+                    )}
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7"
+                    onClick={() => {
+                      setContributionAmount(String(suggestion.amount))
+                      setContributionPeriod(suggestion.period)
+                    }}
+                  >
+                    {t('goals.savings.useSuggestion')}
+                  </Button>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -539,9 +710,10 @@ export default function GoalsPage() {
                 name="account_id"
                 label={t('goals.account')}
                 placeholder={t('goals.selectAccount')}
-                defaultValue={editing?.account_id}
+                defaultValue={editing?.account_id ?? linkedAccountId}
                 items={sortAccountsByDisplayName(accountsList ?? [])}
                 renderOption={(acc) => `${getAccountName(acc)} (${acc.currency})`}
+                onChange={setLinkedAccountId}
               />
             )}
 
@@ -627,6 +799,12 @@ export default function GoalsPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <GoalQuickSetupDialog
+        open={quickSetupOpen}
+        onOpenChange={setQuickSetupOpen}
+        candidates={quickSetupOpen && allGoals ? quickSetupCandidates(accountsList ?? [], allGoals) : []}
+      />
 
       {/* Confirm delete dialog */}
       <Dialog open={!!deletingGoal} onOpenChange={() => setDeletingGoal(null)}>

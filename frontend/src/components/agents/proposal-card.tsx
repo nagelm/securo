@@ -227,7 +227,10 @@ function renderSummary(kind: ProposalKind, d: ProposalData, t: ReturnType<typeof
     case 'create_goal':
       return t('agents.proposal.summary.createGoal', {
         name: String(p.name ?? '?'),
-        target: fmt(p.target_amount, p.currency),
+        // An ongoing savings goal has no total, only a periodic target.
+        target: p.target_amount == null && p.contribution_amount != null && p.contribution_period
+          ? `${fmt(p.contribution_amount, p.currency)} ${t(`goals.savings.per.${String(p.contribution_period)}`)}`
+          : fmt(p.target_amount, p.currency),
         deadline: p.deadline ? String(p.deadline) : '—',
       })
     default:
@@ -400,7 +403,9 @@ async function applyProposal(data: ProposalData): Promise<string | void> {
     case 'create_goal': {
       const g = await goals.create({
         name: String(p.name),
-        target_amount: Number(p.target_amount),
+        target_amount: p.target_amount == null ? null : Number(p.target_amount),
+        contribution_amount: p.contribution_amount == null ? null : Number(p.contribution_amount),
+        contribution_period: (p.contribution_period as string) || null,
         currency: (p.currency as string) || undefined,
         deadline: (p.deadline as string) || undefined,
         initial_amount: (p.initial_amount as number) ?? undefined,

@@ -41,6 +41,7 @@ import {
 import { CheckCircle2, CalendarIcon, Clock, Paperclip, Target, ArrowUpDown, HelpCircle, EyeClosed, AlertCircle } from 'lucide-react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ICON_MAP } from '@/lib/category-icons'
+import { contributionTargetLabel, periodPercentage } from '@/lib/goal-contribution'
 import { PageHeader } from '@/components/page-header'
 import { CategoryIcon } from '@/components/category-icon'
 import { AccountIcon } from '@/components/account-icon'
@@ -1167,11 +1168,18 @@ export default function DashboardPage() {
           </div>
           <div className="divide-y divide-border">
             {goalsSummary.map((goal) => {
-              const progressColor = goal.percentage >= 100
+              // An ongoing goal has no total: its bar shows this period's target.
+              const ongoing = goal.target_amount == null
+              const percentage = ongoing
+                ? (goal.period_contributed != null && goal.contribution_amount != null
+                  ? periodPercentage(Number(goal.period_contributed), Number(goal.contribution_amount))
+                  : 0)
+                : goal.percentage
+              const progressColor = percentage >= 100
                 ? 'bg-emerald-500'
-                : goal.percentage >= 60
+                : percentage >= 60
                   ? 'bg-blue-500'
-                  : goal.percentage >= 30
+                  : percentage >= 30
                     ? 'bg-amber-400'
                     : 'bg-muted-foreground/30'
               const onTrackConfig: Record<string, { cls: string; key: string }> = {
@@ -1195,21 +1203,45 @@ export default function DashboardPage() {
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <span className="text-sm font-medium text-foreground truncate">{goal.name}</span>
                       <span className="text-xs font-bold tabular-nums text-foreground shrink-0">
-                        {mask(formatCurrency(goal.current_amount, goal.currency, locale))} / {mask(formatCurrency(goal.target_amount, goal.currency, locale))}
+                        {mask(formatCurrency(goal.current_amount, goal.currency, locale))}
+                        {!ongoing && <> / {mask(formatCurrency(goal.target_amount ?? 0, goal.currency, locale))}</>}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="flex-1 h-1.5 bg-muted/60 rounded-full overflow-hidden">
                         <div
                           className={`h-full rounded-full transition-all ${progressColor}`}
-                          style={{ width: `${Math.min(goal.percentage, 100)}%` }}
+                          style={{ width: `${Math.min(percentage, 100)}%` }}
                         />
                       </div>
                       <span className="text-[11px] font-bold tabular-nums text-muted-foreground shrink-0">
-                        {goal.percentage.toFixed(0)}%
+                        {percentage.toFixed(0)}%
                       </span>
                     </div>
-                    <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground">
+                    <div className="flex flex-wrap items-center gap-x-3 mt-1 text-[11px] text-muted-foreground">
+                      {goal.contribution_amount != null && goal.contribution_period && (
+                        <span className="tabular-nums">
+                          {contributionTargetLabel(
+                            Number(goal.contribution_amount),
+                            goal.contribution_period,
+                            (n) => mask(formatCurrency(n, goal.currency, locale)),
+                            t,
+                          )}
+                          {goal.period_contributed != null && (
+                            <>
+                              {' · '}
+                              {t('goals.savings.thisPeriod', {
+                                label: t(`goals.savings.current.${goal.contribution_period}`),
+                                contributed: mask(formatCurrency(Number(goal.period_contributed), goal.currency, locale)),
+                                target: mask(formatCurrency(Number(goal.contribution_amount), goal.currency, locale)),
+                              })}
+                            </>
+                          )}
+                          {goal.contribution_streak != null && (
+                            <>{' · '}{t('goals.savings.streak', { count: goal.contribution_streak })}</>
+                          )}
+                        </span>
+                      )}
                       {goal.monthly_contribution != null && goal.monthly_contribution > 0 && (
                         <span className="tabular-nums">
                           {mask(formatCurrency(goal.monthly_contribution, goal.currency, locale))}{t('goals.perMonth')}
