@@ -1,7 +1,7 @@
 import uuid
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Boolean, ForeignKey, String
+from sqlalchemy import Boolean, ForeignKey, Index, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -14,6 +14,18 @@ if TYPE_CHECKING:
 
 class Category(Base):
     __tablename__ = "categories"
+    __table_args__ = (
+        # One category per default key in a workspace. User-made categories
+        # carry no key, so the index only covers the seeded ones.
+        Index(
+            "ux_categories_workspace_default_key",
+            "workspace_id",
+            "default_key",
+            unique=True,
+            postgresql_where=text("default_key IS NOT NULL"),
+            sqlite_where=text("default_key IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
@@ -26,6 +38,10 @@ class Category(Base):
     color: Mapped[str] = mapped_column(String(7), default="#6B7280")
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
     is_hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # The DEFAULT_CATEGORIES_I18N key this category was seeded from (e.g.
+    # "transfers"), None for one the user made. Code that needs a default
+    # finds it by this key, so renaming the category doesn't lose it.
+    default_key: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # Flag for "money that moves rather than money earned or spent".
     # Transactions in these categories are excluded from income/expense

@@ -79,14 +79,30 @@ async def find_default_category(
 ) -> Optional[uuid.UUID]:
     """The workspace category for the default key ``key``, or None.
 
-    A renamed or deleted default doesn't match.
+    The category seeded from ``key`` carries it in ``default_key``, so it is
+    found under any name the user gives it. A workspace with no category
+    carrying the key (a deleted default, or rows the key was never recorded
+    on) falls back to the first unkeyed category with one of the key's
+    translated names.
     """
     names = default_category_names(key)
     if not names:
         return None
+    keyed = await session.execute(
+        select(Category.id)
+        .where(Category.workspace_id == workspace_id, Category.default_key == key)
+        .limit(1)
+    )
+    found = keyed.scalars().first()
+    if found is not None:
+        return found
     result = await session.execute(
         select(Category.id)
-        .where(Category.workspace_id == workspace_id, Category.name.in_(names))
+        .where(
+            Category.workspace_id == workspace_id,
+            Category.default_key.is_(None),
+            Category.name.in_(names),
+        )
         .order_by(Category.id)
         .limit(1)
     )
@@ -143,6 +159,7 @@ async def create_default_categories(
             is_system=True,
             group_id=group.id if group else None,
             treat_as_transfer=data.get("treat_as_transfer", False),
+            default_key=key,
         )
         session.add(category)
         categories.append(category)

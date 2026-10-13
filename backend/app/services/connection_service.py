@@ -900,6 +900,22 @@ async def _match_pluggy_category(
         app_name = PLUGGY_CATEGORY_MAP.get(pluggy_category.split(" - ")[0])
     if not app_name:
         return None
+    # The map names pt-BR defaults; the default seeded under that name keeps
+    # its key when the user renames it, so look the key up first.
+    from app.services.category_service import DEFAULT_CATEGORIES_I18N
+
+    default_key = next(
+        (key for key, data in DEFAULT_CATEGORIES_I18N.items() if data.get("pt-BR") == app_name), None
+    )
+    if default_key is not None:
+        keyed = await session.execute(
+            select(Category.id)
+            .where(Category.workspace_id == workspace_id, Category.default_key == default_key)
+            .limit(1)
+        )
+        found = keyed.scalars().first()
+        if found is not None:
+            return found
     # Scope to the connection's workspace: a user in multiple workspaces owns
     # the same default category names in each, so a user_id-only lookup returns
     # several rows. `.first()` is belt-and-suspenders — a category match must
