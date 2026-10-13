@@ -41,7 +41,7 @@ vi.mock('@/contexts/auth-context', () => ({
 }))
 
 vi.mock('@/contexts/workspace-context', () => ({
-  useWorkspace: () => ({ canWrite: true }),
+  useWorkspace: () => ({ canWrite: true, hasModule: () => true }),
 }))
 
 // Made-up figures.
@@ -116,5 +116,21 @@ describe('account page loan block', () => {
     await waitFor(() => expect(api.transactions.list).toHaveBeenCalled())
     expect(screen.queryByRole('region', { name: t('loans.summary.title') })).not.toBeInTheDocument()
     expect(api.accounts.loanSummary).not.toHaveBeenCalled()
+  })
+})
+
+describe('savings goal button', () => {
+  it('opens a new goal linked to a savings account', async () => {
+    renderPage({ ...mortgage, type: 'savings', balance: 500, loan_subtype: null })
+
+    const link = await screen.findByRole('link', { name: t('goals.savings.createFromAccount') })
+    expect(link).toHaveAttribute('href', '/goals?new=1&account_id=acc-1')
+  })
+
+  it('is not offered on a loan', async () => {
+    renderPage(mortgage)
+
+    expect(await screen.findByRole('region', { name: t('loans.summary.title') })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: t('goals.savings.createFromAccount') })).not.toBeInTheDocument()
   })
 })

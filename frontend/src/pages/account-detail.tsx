@@ -15,7 +15,7 @@ import { toast } from 'sonner'
 import type { CreditCardBill, ProjectedTransaction, Transaction } from '@/types'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, ArrowLeftRight, CalendarClock, ChevronLeft, ChevronRight, Clock, EyeClosed, HelpCircle, Paperclip, Pencil, Plus, X } from 'lucide-react'
+import { ArrowLeft, ArrowLeftRight, CalendarClock, ChevronLeft, ChevronRight, Clock, EyeClosed, HelpCircle, Paperclip, Pencil, PiggyBank, Plus, X } from 'lucide-react'
 import { MobileTransactionRow } from '@/components/mobile-transaction-row'
 import { TransferAccountsPill } from '@/components/transfer-accounts-pill'
 import { resolveTransferAccounts } from '@/lib/transfer-accounts'
@@ -269,7 +269,7 @@ export default function AccountDetailPage() {
   const { t, i18n } = useTranslation()
   const { mask, privacyMode, MASK } = usePrivacyMode()
   const { user } = useAuth()
-  const { canWrite } = useWorkspace()
+  const { canWrite, hasModule } = useWorkspace()
   const userCurrency = user?.preferences?.currency_display ?? 'USD'
   const locale = useDisplayLocale()
   const dateLocale = useDateLocale()
@@ -639,6 +639,8 @@ export default function AccountDetailPage() {
 
   // Whether to use primary currency amounts (for foreign-currency accounts with toggle, or domestic accounts with foreign txs)
   const isCreditCard = account?.type === 'credit_card'
+  // A savings goal can sit on any account money is saved into: not a card or a loan.
+  const canAddSavingsGoal = hasModule('goals') && !isCreditCard && account?.type !== 'loan'
   const isForeignCurrency = account ? account.currency !== userCurrency : false
   const usePrimary = !isForeignCurrency || showPrimary
   const displayCurrency = (isForeignCurrency && !showPrimary) ? (account?.currency || userCurrency) : userCurrency
@@ -936,6 +938,14 @@ export default function AccountDetailPage() {
           </div>
           {!account.is_closed && canWrite && (
             <div className="flex shrink-0 items-center gap-2">
+              {canAddSavingsGoal && (
+                <Button variant="outline" size="sm" asChild>
+                  <Link to={`/goals?new=1&account_id=${account.id}`}>
+                    <PiggyBank className="h-4 w-4 mr-1" />
+                    {t('goals.savings.createFromAccount')}
+                  </Link>
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
