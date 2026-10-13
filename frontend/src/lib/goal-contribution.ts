@@ -91,7 +91,7 @@ export function planScale(
 }
 
 /** The ahead/behind amount for its label: whole units from 10 up ("$40"),
- * cents below ("$8.57"). Always positive; the label says which way. */
+ * cents below ("$2.50"). Always positive; the label says which way. */
 export function planAmount(aheadBy: number, currency: string, locale: string): string {
   const amount = Math.abs(aheadBy)
   if (amount < 10) return formatCurrency(amount, currency, locale)

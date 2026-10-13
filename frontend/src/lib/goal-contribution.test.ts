@@ -115,7 +115,7 @@ describe('planAmount', () => {
     expect(planAmount(40.4, 'USD', 'en-US')).toBe('$40')
     expect(planAmount(-950.6, 'USD', 'en-US')).toBe('$951')
     expect(planAmount(10, 'USD', 'en-US')).toBe('$10')
-    expect(planAmount(8.57, 'USD', 'en-US')).toBe('$8.57')
+    expect(planAmount(2.5, 'USD', 'en-US')).toBe('$2.50')
     expect(planAmount(-9.994, 'USD', 'en-US')).toBe('$9.99')
   })
 

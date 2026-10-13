@@ -36,11 +36,20 @@ last left the account (`plan_window`):
               the day of the withdrawal counts; the withdrawal itself is a
               debit and never does). A deposit is a contribution credit as
               above: a transfer in, never interest.
-    planned = the periodic target for every day from `since` through today,
-              each period's target spread over its own days (a week's
-              over 7, a month's over its 28 to 31), so on the third day of
-              a week a 20-a-week plan has asked for 20 x 3/7 so far.
+    planned = whole periods only: the plan steps up once per period.
+              * each finished period that starts on or after `since`:
+                the full target;
+              * the finished period holding `since`, when it started
+                before it: what went in from `since`, up to the target
+                (a payment made earlier in that period, before the
+                withdrawal, never makes it a missed period);
+              * the current period, not over yet: what went in so far,
+                up to the target.
     ahead   = saved - planned (negative: behind).
+
+So paying on time reads on plan; a period not paid yet reads on plan until
+it ends, then behind by its target; paying more than the target reads
+ahead by the excess.
 
 All of this is display-only: nothing here writes, and no balance, net
 worth, P&L or budget reads it.
@@ -50,6 +59,7 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
@@ -248,16 +258,30 @@ async def _in_currency(session: AsyncSession, amount: Decimal, from_cur: str, to
     return converted
 
 
-def planned_between(period: str, target: Decimal, start: date, today: date) -> Decimal:
-    """What the plan asks for from `start` through `today`, both included:
-    each period's target spread evenly over that period's own days."""
+def planned_between(
+    period: str,
+    target: Decimal,
+    since: date,
+    today: date,
+    deposits: Iterable[tuple[date, Decimal]],
+) -> Decimal:
+    """What the plan asks for from `since` through `today`, in whole
+    periods (see the module docstring). `deposits` are (date, amount) in the
+    goal's currency; only those from `since` through `today` are read."""
+    paid: dict[date, Decimal] = {}
+    for day, amount in deposits:
+        if since <= day <= today:
+            start = period_bounds(period, day)[0]
+            paid[start] = paid.get(start, Decimal("0")) + amount
     total = Decimal("0")
-    day = start
+    day = since
     while day <= today:
         period_start, period_end = period_bounds(period, day)
-        days_in_period = (period_end - period_start).days + 1
-        days_counted = (min(period_end, today) - day).days + 1
-        total += target * days_counted / days_in_period
+        finished = period_end < today
+        if finished and period_start >= since:
+            total += target
+        else:
+            total += min(target, paid.get(period_start, Decimal("0")))
         day = period_end + timedelta(days=1)
     return total
 
@@ -322,12 +346,12 @@ async def plan_window(
     since = await _window_start(session, account_ids, today)
     if since is None:
         return None
-    saved = Decimal("0")
-    for _row_date, row_type, amount, row_currency in await _contribution_rows(session, account_ids, since, today):
+    deposits: list[tuple[date, Decimal]] = []
+    for row_date, row_type, amount, row_currency in await _contribution_rows(session, account_ids, since, today):
         if row_type == "credit":
-            saved += await _in_currency(session, abs(amount), row_currency, currency)
-    saved = saved.quantize(_CENT)
-    planned = planned_between(period, target, since, today).quantize(_CENT)
+            deposits.append((row_date, await _in_currency(session, abs(amount), row_currency, currency)))
+    saved = sum((amount for _, amount in deposits), Decimal("0")).quantize(_CENT)
+    planned = planned_between(period, target, since, today, deposits).quantize(_CENT)
     return PlanWindow(since=since, saved=saved, planned=planned, ahead_by=saved - planned)
 
 

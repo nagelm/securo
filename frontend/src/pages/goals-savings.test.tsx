@@ -118,8 +118,8 @@ function progress(overrides: Partial<ContributionProgress> = {}): ContributionPr
     history,
     streak: 3,
     since: '2026-03-09',
-    saved_since: 118.57,
-    planned_since: 78.57,
+    saved_since: 140,
+    planned_since: 100,
     ahead_by: 40,
     ...overrides,
   }
@@ -260,9 +260,9 @@ describe('goal card with a periodic target', () => {
     expect(within(scale).getByText('On plan')).toBeInTheDocument()
     unmount()
 
-    api.goals.list.mockResolvedValue([holidayGoal({ ahead_by: -8.57 })])
+    api.goals.list.mockResolvedValue([holidayGoal({ ahead_by: 2.5 })])
     renderWithProviders(<GoalsPage />)
-    expect(await screen.findByRole('img', { name: 'Behind by $8.57 since Mar 9' })).toBeInTheDocument()
+    expect(await screen.findByRole('img', { name: 'Ahead by $2.50 since Mar 9' })).toBeInTheDocument()
   })
 
   it('shows a check mark once this period is met', async () => {

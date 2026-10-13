@@ -210,29 +210,46 @@ async def test_streak_counts_back_from_the_latest_finished_period(session: Async
 # Ahead or behind the plan since money last left the account
 # ---------------------------------------------------------------------------
 
-_C = Decimal("0.01")
+_D = Decimal
 
 
-def test_planned_spreads_each_weekly_target_over_its_days():
-    # Monday to Wednesday is 3 days of 7.
-    assert planned_between("weekly", Decimal("20"), date(2026, 3, 16), TODAY).quantize(_C) == Decimal("8.57")
-    # A full earlier week plus those 3 days.
-    assert planned_between("weekly", Decimal("20"), date(2026, 3, 9), TODAY).quantize(_C) == Decimal("28.57")
-    # A window opening mid-week counts only its own days of that week: Thu..Sun.
-    assert planned_between("weekly", Decimal("70"), date(2026, 3, 12), date(2026, 3, 15)) == Decimal("40")
+def test_plan_steps_up_once_per_period_never_by_the_day():
+    # Window opens Monday 2 March; today is Wednesday 18 March.
+    since = date(2026, 3, 2)
+    weekly = date(2026, 3, 4), date(2026, 3, 11)
+    # Paid on time each week, this week not yet: on plan.
+    assert planned_between("weekly", _D("20"), since, TODAY, [(d, _D("20")) for d in weekly]) == _D("40")
+    # Paid this week too: still exactly the deposits.
+    paid = [(d, _D("20")) for d in (*weekly, date(2026, 3, 17))]
+    assert planned_between("weekly", _D("20"), since, TODAY, paid) == _D("60")
+    # Nothing at all: the two finished weeks are owed, this week is not yet.
+    assert planned_between("weekly", _D("20"), since, TODAY, []) == _D("40")
+    # Paying more this week does not raise the plan past the target.
+    assert planned_between("weekly", _D("20"), since, TODAY, [(date(2026, 3, 16), _D("35"))]) == _D("60")
 
 
-def test_planned_uses_each_months_own_length():
-    # Half of February (14 of 28 days), then 10 of March's 31.
-    planned = planned_between("monthly", Decimal("300"), date(2026, 2, 15), date(2026, 3, 10))
-    assert planned.quantize(_C) == Decimal("246.77")
+def test_plan_for_a_period_the_window_opens_part_way_through():
+    # Window opens Thursday 5 March, inside the week of 2 March.
+    since = date(2026, 3, 5)
+    # A payment made on the Monday, before the withdrawal, is outside the
+    # window: that week asks for nothing rather than counting as missed.
+    assert planned_between("weekly", _D("20"), since, date(2026, 3, 9), [(date(2026, 3, 2), _D("20"))]) == _D("0")
+    # Paid after the withdrawal in the same week: up to the target.
+    assert planned_between("weekly", _D("20"), since, date(2026, 3, 9), [(date(2026, 3, 6), _D("15"))]) == _D("15")
+    assert planned_between("weekly", _D("20"), since, date(2026, 3, 9), [(date(2026, 3, 6), _D("30"))]) == _D("20")
+    # A window opening on a period's first day owes that period in full.
+    assert planned_between("weekly", _D("20"), date(2026, 3, 2), date(2026, 3, 9), []) == _D("20")
 
 
-def test_planned_for_a_fortnight_counts_fourteen_days():
-    start, _ = period_bounds("biweekly", TODAY)
-    assert planned_between("biweekly", Decimal("140"), start, start + timedelta(days=4)) == Decimal("50")
-    # The next fortnight starts a new target.
-    assert planned_between("biweekly", Decimal("140"), start, start + timedelta(days=14)) == Decimal("150")
+def test_plan_for_months_and_fortnights():
+    # Window opens 31 January: January asks for what went in from then,
+    # February in full, March (current) for what went in so far.
+    deposits = [(date(2026, 2, 1), _D("310")), (date(2026, 3, 1), _D("100"))]
+    assert planned_between("monthly", _D("310"), date(2026, 1, 31), TODAY, deposits) == _D("410")
+    start, end = period_bounds("biweekly", TODAY)
+    # On the fortnight's last day it is still under way.
+    assert planned_between("biweekly", _D("140"), start, end, []) == _D("0")
+    assert planned_between("biweekly", _D("140"), start, end + timedelta(days=1), []) == _D("140")
 
 
 async def _plan(session: AsyncSession, account: Account, target: str = "20", period: Period = "weekly"):
@@ -267,19 +284,49 @@ async def test_window_opens_at_the_latest_money_out(session: AsyncSession, test_
     plan = await _plan(session, fund)
     assert plan is not None
     assert plan.since == date(2026, 3, 9)
-    assert plan.saved == Decimal("40.00")
-    # The week of the 9th in full, then 3 days of 7 of this one.
-    assert plan.planned == Decimal("28.57")
-    assert plan.ahead_by == Decimal("11.43")
+    # Paid on time both weeks: on plan.
+    assert (plan.saved, plan.planned, plan.ahead_by) == (Decimal("40.00"), Decimal("40.00"), Decimal("0.00"))
 
     # A transfer out to another account is money out too, and moves the window.
     await _transfer(session, test_user, fund, everyday, "10.00", date(2026, 3, 17), transfers)
     plan = await _plan(session, fund)
     assert plan is not None
     assert plan.since == date(2026, 3, 17)
-    assert plan.saved == Decimal("0.00")
-    assert plan.planned == Decimal("5.71")
-    assert plan.ahead_by == Decimal("-5.71")
+    # Nothing in since, but the week is not over: still on plan.
+    assert (plan.saved, plan.planned, plan.ahead_by) == (Decimal("0.00"), Decimal("0.00"), Decimal("0.00"))
+
+
+@pytest.mark.asyncio
+async def test_unpaid_finished_period_is_behind_and_overpaying_is_ahead(session: AsyncSession, test_user: User):
+    everyday = await _account(session, test_user, "Everyday", "checking")
+    fund = await _account(session, test_user, "Fund")
+    session.add(_tx(test_user, fund, "60.00", date(2026, 3, 2), "debit"))
+    # Week of 2 March paid, week of 9 March missed.
+    await _transfer(session, test_user, everyday, fund, "20.00", date(2026, 3, 4))
+    plan = await _plan(session, fund)
+    assert plan is not None
+    assert (plan.saved, plan.planned, plan.ahead_by) == (Decimal("20.00"), Decimal("40.00"), Decimal("-20.00"))
+
+    # 55 this week: this week's 20, and 35 over.
+    await _transfer(session, test_user, everyday, fund, "55.00", date(2026, 3, 17))
+    plan = await _plan(session, fund)
+    assert plan is not None
+    assert (plan.saved, plan.planned, plan.ahead_by) == (Decimal("75.00"), Decimal("60.00"), Decimal("15.00"))
+
+
+@pytest.mark.asyncio
+async def test_window_opening_mid_period_ignores_the_payment_before_it(session: AsyncSession, test_user: User):
+    everyday = await _account(session, test_user, "Everyday", "checking")
+    fund = await _account(session, test_user, "Fund")
+    # Paid on Monday 2 March, then a withdrawal on Thursday 5 March.
+    await _transfer(session, test_user, everyday, fund, "20.00", date(2026, 3, 2))
+    session.add(_tx(test_user, fund, "50.00", date(2026, 3, 5), "debit"))
+    await _transfer(session, test_user, everyday, fund, "20.00", date(2026, 3, 10))
+    plan = await _plan(session, fund)
+    assert plan is not None
+    assert plan.since == date(2026, 3, 5)
+    # The week of the withdrawal asks for nothing more; the next was paid.
+    assert (plan.saved, plan.planned, plan.ahead_by) == (Decimal("20.00"), Decimal("20.00"), Decimal("0.00"))
 
 
 @pytest.mark.asyncio
@@ -290,7 +337,7 @@ async def test_deposit_on_the_day_of_a_withdrawal_counts(session: AsyncSession, 
     await _transfer(session, test_user, everyday, fund, "15.00", date(2026, 3, 16))
     plan = await _plan(session, fund)
     assert plan is not None
-    assert (plan.since, plan.saved, plan.planned) == (date(2026, 3, 16), Decimal("15.00"), Decimal("8.57"))
+    assert (plan.since, plan.saved, plan.planned) == (date(2026, 3, 16), Decimal("15.00"), Decimal("15.00"))
 
 
 @pytest.mark.asyncio
@@ -306,10 +353,8 @@ async def test_window_opens_at_the_first_deposit_when_nothing_ever_left(
     plan = await _plan(session, fund)
     assert plan is not None
     assert plan.since == date(2026, 3, 4)
-    assert plan.saved == Decimal("60.00")
-    # Wed..Sun of the first week (5/7), a full week, then 3/7 of this one.
-    assert plan.planned == Decimal("42.86")
-    assert plan.ahead_by == Decimal("17.14")
+    # Every week paid on time.
+    assert (plan.saved, plan.planned, plan.ahead_by) == (Decimal("60.00"), Decimal("60.00"), Decimal("0.00"))
 
 
 @pytest.mark.asyncio
@@ -333,6 +378,8 @@ async def test_interest_is_never_a_deposit(session: AsyncSession, test_user: Use
     plan = await _plan(session, fund)
     assert plan is not None
     assert plan.saved == Decimal("20.00")
+    # The interest this week does not count towards it either.
+    assert plan.planned == Decimal("20.00")
     # The periods agree: interest is not a contribution.
     progress = await compute_contribution_progress(
         session, account_ids=[fund.id], period="weekly", target=Decimal("20"),
@@ -347,12 +394,12 @@ async def test_no_window_until_money_moves(session: AsyncSession, test_user: Use
     fund = await _account(session, test_user, "Fund")
     assert await _plan(session, fund) is None
 
-    # Only a withdrawal and nothing saved since: behind by the plan so far.
+    # Only a withdrawal, this week: on plan until the week ends.
     session.add(_tx(test_user, fund, "25.00", date(2026, 3, 16), "debit"))
     await session.commit()
     plan = await _plan(session, fund)
     assert plan is not None
-    assert (plan.saved, plan.planned, plan.ahead_by) == (Decimal("0.00"), Decimal("8.57"), Decimal("-8.57"))
+    assert (plan.saved, plan.planned, plan.ahead_by) == (Decimal("0.00"), Decimal("0.00"), Decimal("0.00"))
 
 
 @pytest.mark.asyncio
@@ -361,13 +408,23 @@ async def test_monthly_plan_window(session: AsyncSession, test_user: User):
     fund = await _account(session, test_user, "Fund")
     session.add(_tx(test_user, fund, "500.00", date(2026, 1, 31), "debit"))
     await _transfer(session, test_user, everyday, fund, "310.00", date(2026, 2, 1))
-    await _transfer(session, test_user, everyday, fund, "310.00", date(2026, 3, 1))
+    await _transfer(session, test_user, everyday, fund, "100.00", date(2026, 3, 1))
     plan = await _plan(session, fund, target="310", period="monthly")
     assert plan is not None
-    # 1 of January's 31 days (10), all of February (310), 18 of March's 31 (180).
+    # January from the 31st: nothing went in, nothing owed. February in
+    # full, paid. March under way: 100 of 310 so far, on plan.
     assert plan.since == date(2026, 1, 31)
-    assert plan.planned == Decimal("500.00")
-    assert plan.ahead_by == Decimal("120.00")
+    assert (plan.saved, plan.planned, plan.ahead_by) == (Decimal("410.00"), Decimal("410.00"), Decimal("0.00"))
+
+
+@pytest.mark.asyncio
+async def test_monthly_plan_window_behind_once_a_month_ends_unpaid(session: AsyncSession, test_user: User):
+    fund = await _account(session, test_user, "Fund")
+    session.add(_tx(test_user, fund, "500.00", date(2026, 2, 1), "debit"))
+    await session.commit()
+    plan = await _plan(session, fund, target="310", period="monthly")
+    assert plan is not None
+    assert (plan.planned, plan.ahead_by) == (Decimal("310.00"), Decimal("-310.00"))
 
 
 # ---------------------------------------------------------------------------
@@ -412,12 +469,12 @@ async def test_ongoing_goal_has_no_total_and_reports_period_progress(
     assert float(progress["current"]["contributed"]) == 30.0
     assert progress["current"]["status"] == "pending"
     assert progress["streak"] == 0
-    # Nothing ever left the account: the window opens on the first deposit,
-    # and Tuesday and Wednesday of a 50-a-week plan ask for 2/7 of 50.
+    # Nothing ever left the account: the window opens on the first deposit.
+    # The week is not over, so 30 of 50 is on plan.
     assert progress["since"] == "2026-03-17"
     assert float(progress["saved_since"]) == 30.0
-    assert float(progress["planned_since"]) == 14.29
-    assert float(progress["ahead_by"]) == 15.71
+    assert float(progress["planned_since"]) == 30.0
+    assert float(progress["ahead_by"]) == 0.0
 
     summary = (await client.get("/api/goals/summary", headers=auth_headers)).json()
     assert summary[0]["target_amount"] is None
