@@ -27,9 +27,9 @@ import {
   Pencil, Trash2, Plus, Pause, Play, CheckCircle2, Archive, ArchiveRestore, Target,
   ChevronDown, PiggyBank,
 } from 'lucide-react'
-import { ContributionDots, ContributionLine } from '@/components/goal-contribution'
+import { ContributionBars, ContributionLine } from '@/components/goal-contribution'
 import { GoalQuickSetupDialog } from '@/components/goal-quick-setup-dialog'
-import { CONTRIBUTION_PERIODS, periodPercentage, quickSetupCandidates } from '@/lib/goal-contribution'
+import { CONTRIBUTION_PERIODS, quickSetupCandidates } from '@/lib/goal-contribution'
 import { ICON_MAP } from '@/lib/category-icons'
 import { IconPicker } from '@/components/icon-picker'
 import { PageHeader } from '@/components/page-header'
@@ -292,6 +292,7 @@ export default function GoalsPage() {
   const money = (currency: string) => (amount: number) => mask(formatCurrency(amount, currency, locale))
   const shortDate = (iso: string) =>
     new Date(`${iso}T00:00:00`).toLocaleDateString(locale, { day: 'numeric', month: 'short' })
+  const today = new Date()
 
   return (
     <div>
@@ -338,11 +339,9 @@ export default function GoalsPage() {
             {goalsList.map((goal) => {
               const days = goal.target_date ? daysUntil(goal.target_date) : null
               const progress = goal.contribution_progress
-              // An ongoing goal has no total: its bar shows this period's target instead.
+              // An ongoing goal has no total, so no total bar: its period bars stand alone.
               const ongoing = goal.target_amount == null
-              const barPercentage = ongoing
-                ? (progress ? periodPercentage(Number(progress.current.contributed), Number(progress.current.target)) : 0)
-                : goal.percentage
+              const barPercentage = goal.percentage
               const progressColor = barPercentage >= 100
                 ? 'bg-emerald-500'
                 : barPercentage >= 60
@@ -372,8 +371,8 @@ export default function GoalsPage() {
                         <OnTrackBadge status={goal.on_track} t={t} />
                       </div>
 
-                      {/* Progress bar */}
-                      {(!ongoing || progress) && (
+                      {/* Progress towards the total */}
+                      {!ongoing && (
                         <div className="flex items-center gap-3 mb-1.5">
                           <div className="flex-1 h-2 bg-muted/60 rounded-full overflow-hidden">
                             <div
@@ -387,22 +386,41 @@ export default function GoalsPage() {
                         </div>
                       )}
 
-                      {/* Regular contribution: target, this period, streak, recent periods */}
+                      {/* Regular contribution: a bar per recent period, this period, streak */}
                       {goal.contribution_amount != null && goal.contribution_period && (
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-1.5 text-xs text-muted-foreground">
-                          <ContributionLine
-                            amount={Number(goal.contribution_amount)}
-                            period={goal.contribution_period}
-                            progress={progress}
-                            money={goalMoney}
-                            t={t}
-                          />
-                          {progress ? (
-                            <ContributionDots progress={progress} money={goalMoney} t={t} formatDate={shortDate} />
-                          ) : goal.tracking_type !== 'account' ? (
-                            <span className="italic">{t('goals.savings.needsAccount')}</span>
-                          ) : null}
-                        </div>
+                        progress ? (
+                          <div className="flex flex-col gap-1.5 mb-1.5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:gap-4">
+                            <ContributionBars
+                              progress={progress}
+                              money={goalMoney}
+                              t={t}
+                              formatDate={shortDate}
+                              today={today}
+                              className="w-full sm:flex-1"
+                            />
+                            <ContributionLine
+                              amount={Number(goal.contribution_amount)}
+                              period={goal.contribution_period}
+                              progress={progress}
+                              money={goalMoney}
+                              t={t}
+                              today={today}
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-1.5 text-xs text-muted-foreground">
+                            <ContributionLine
+                              amount={Number(goal.contribution_amount)}
+                              period={goal.contribution_period}
+                              progress={null}
+                              money={goalMoney}
+                              t={t}
+                            />
+                            {goal.tracking_type !== 'account' && (
+                              <span className="italic">{t('goals.savings.needsAccount')}</span>
+                            )}
+                          </div>
+                        )
                       )}
 
                       {/* Details row */}

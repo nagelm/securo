@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 
 import GoalsPage from '@/pages/goals'
@@ -84,20 +84,29 @@ function account(overrides: Partial<Account>): Account {
   }
 }
 
+// Twelve Monday-to-Sunday weeks; the last, 16-22 March 2026, is the current one.
+const CONTRIBUTED = [0, 20, 50, 50, 80, 50, 50, 0, 50, 50, 50, 30]
+const STATUSES = ['short', 'short', 'met', 'met', 'over', 'met', 'met', 'short', 'met', 'met', 'met', 'pending'] as const
+
+function isoDate(day: Date): string {
+  return day.toISOString().slice(0, 10)
+}
+
 function progress(): ContributionProgress {
-  const history = Array.from({ length: 12 }, (_, i) => {
-    const day = String(i + 1).padStart(2, '0')
-    const current = i === 11
+  const firstMonday = Date.UTC(2025, 11, 29)
+  const history = CONTRIBUTED.map((contributed, i) => {
+    const start = new Date(firstMonday + i * 7 * 86_400_000)
+    const end = new Date(start.getTime() + 6 * 86_400_000)
     return {
-      start: `2026-01-${day}`,
-      end: `2026-01-${day}`,
-      contributed: current ? 30 : i >= 9 ? 50 : 0,
+      start: isoDate(start),
+      end: isoDate(end),
+      contributed,
       target: 50,
-      status: (current ? 'pending' : i >= 9 ? 'met' : 'short') as 'pending' | 'met' | 'short',
-      current,
+      status: STATUSES[i],
+      current: i === 11,
     }
   })
-  return { period: 'weekly', target: 50, current: history[11], history, streak: 2 }
+  return { period: 'weekly', target: 50, current: history[11], history, streak: 3 }
 }
 
 function goal(overrides: Partial<Goal>): Goal {
@@ -153,7 +162,16 @@ beforeEach(() => {
 })
 
 describe('goal card with a periodic target', () => {
-  it('shows the target, this period, the streak and one dot per period', async () => {
+  beforeEach(() => {
+    // Thursday evening of the current week: four days left, 4/7 of it gone.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 2, 19, 21, 30))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('shows a bar per period, this period, days left and the record, and no percentage', async () => {
     api.goals.list.mockResolvedValue([
       goal({
         name: 'Holiday',
@@ -171,18 +189,47 @@ describe('goal card with a periodic target', () => {
 
     expect(await screen.findByText('$50.00 / week')).toBeInTheDocument()
     expect(screen.getByText('This week $30.00 of $50.00')).toBeInTheDocument()
-    expect(screen.getByText('Streak 2')).toBeInTheDocument()
+    expect(screen.getByText('4 days left')).toBeInTheDocument()
+    expect(screen.getByText('Streak 3')).toBeInTheDocument()
+    // Finished weeks only: the current one has not reached its target yet.
+    expect(screen.getByText('8 of 11 met')).toBeInTheDocument()
     // An ongoing goal shows its balance, not a total.
     expect(screen.getByText(/Balance \$250\.00/)).toBeInTheDocument()
     expect(screen.getByText(/Ongoing/)).toBeInTheDocument()
     expect(screen.queryByText(/\/ \$1,000\.00/)).not.toBeInTheDocument()
-    // The bar follows this period: 30 of 50.
-    expect(screen.getByText('60%')).toBeInTheDocument()
+    // No total, so no percentage bar: the period bars replace it.
+    expect(screen.queryByText(/^\d+%$/)).not.toBeInTheDocument()
 
-    const dots = within(screen.getByRole('list', { name: 'Contributions in recent periods' })).getAllByRole('listitem')
-    expect(dots).toHaveLength(12)
-    expect(dots[0]).toHaveAccessibleName(/\$0\.00 of \$50\.00 \(Short\)/)
-    expect(dots[11]).toHaveAccessibleName(/\(In progress\)/)
+    const bars = within(screen.getByRole('list', { name: 'Contributions in recent periods' })).getAllByRole('listitem')
+    expect(bars).toHaveLength(12)
+    expect(bars[0]).toHaveAccessibleName('Dec 29 to Jan 4: $0.00 of $50.00 (Short)')
+    expect(bars[4]).toHaveAccessibleName(/\$80\.00 of \$50\.00 \(Over\)/)
+    expect(bars[11]).toHaveAccessibleName('Mar 16 to Mar 22: $30.00 of $50.00 (In progress)')
+    expect(bars.map((b) => b.dataset.status)).toEqual([...STATUSES])
+
+    // Only the current week carries the pace tick, at 4/7 of its height.
+    expect(within(bars[10]).queryByTestId('pace-tick')).not.toBeInTheDocument()
+    const tick = within(bars[11]).getByTestId('pace-tick')
+    expect(parseFloat(tick.style.bottom)).toBeCloseTo((4 / 7) * 100)
+  })
+
+  it('keeps the total bar above the period bars for a goal with both targets', async () => {
+    api.goals.list.mockResolvedValue([
+      goal({
+        name: 'Car',
+        tracking_type: 'account',
+        account_id: carFund.id,
+        contribution_amount: 50,
+        contribution_period: 'weekly',
+        contribution_progress: progress(),
+      }),
+    ])
+    renderWithProviders(<GoalsPage />)
+    expect(await screen.findByText('$250.00 / $1,000.00')).toBeInTheDocument()
+    expect(screen.getByText('25%')).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('list', { name: 'Contributions in recent periods' })).getAllByRole('listitem'),
+    ).toHaveLength(12)
   })
 
   it('keeps the total for a goal that has one', async () => {

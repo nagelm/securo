@@ -1551,6 +1551,9 @@
       },
       "thisPeriod": "{{label}} {{contributed}} of {{target}}",
       "streak": "Streak {{count}}",
+      "daysLeft_one": "{{count}} day left",
+      "daysLeft_other": "{{count}} days left",
+      "periodsMet": "{{met}} of {{total}} met",
       "status": {
         "met": "Met",
         "over": "Over",
