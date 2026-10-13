@@ -1,7 +1,7 @@
 import uuid
 from datetime import date
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,11 +13,23 @@ from app.models.asset import Asset
 from app.models.asset_group import AssetGroup
 from app.models.goal import Goal
 from app.models.user import User
-from app.schemas.goal import GoalCreate, GoalRead, GoalSummary, GoalUpdate
+from app.schemas.goal import (
+    ContributionPeriod,
+    ContributionPeriodRead,
+    ContributionProgressRead,
+    ContributionSuggestionRead,
+    GoalBulkCreate,
+    GoalCreate,
+    GoalRead,
+    GoalSummary,
+    GoalUpdate,
+    check_targets,
+)
 from app.services.asset_service import _compute_current_value, _get_latest_value, get_asset_values_at
 from app.services.dashboard_service import _account_balance_at, _get_open_accounts
 from app.services.account_service import get_account_name
 from app.services.fx_rate_service import convert
+from app.services.goal_contributions import PeriodResult, compute_contribution_progress, suggest_contribution
 
 
 async def _get_primary_currency(session: AsyncSession, user_id: uuid.UUID) -> str:
@@ -139,16 +151,19 @@ def _clear_inactive_tracking_links(goal: Goal) -> None:
         goal.asset_group_id = None
 
 
-def _compute_percentage(current: Decimal, target: Decimal) -> float:
+def _compute_percentage(current: Decimal, target: Optional[Decimal]) -> float:
+    if target is None:
+        # An ongoing savings goal has no total to be a percentage of.
+        return 0.0
     if target <= 0:
         return 100.0 if current > 0 else 0.0
     return round(float(current / target) * 100, 1)
 
 
 def _compute_monthly_contribution(
-    current: Decimal, target: Decimal, target_date: Optional[date]
+    current: Decimal, target: Optional[Decimal], target_date: Optional[date]
 ) -> Optional[float]:
-    if not target_date:
+    if not target_date or target is None:
         return None
     today = app_today()
     if today >= target_date:
@@ -164,10 +179,10 @@ def _compute_monthly_contribution(
 
 
 def _compute_on_track(
-    current: Decimal, target: Decimal, target_date: Optional[date],
+    current: Decimal, target: Optional[Decimal], target_date: Optional[date],
     created_at: Optional[date] = None, initial_amount: Decimal = Decimal("0"),
 ) -> Optional[str]:
-    if not target_date:
+    if not target_date or target is None:
         return None
     if current >= target:
         return "achieved"
@@ -203,6 +218,42 @@ def _compute_on_track(
     return "behind"
 
 
+def _period_read(p: PeriodResult) -> ContributionPeriodRead:
+    return ContributionPeriodRead(
+        start=p.start, end=p.end, contributed=p.contributed,
+        target=p.target, status=p.status, current=p.current,
+    )
+
+
+async def _contribution_progress(
+    session: AsyncSession, goal: Goal
+) -> Optional[ContributionProgressRead]:
+    """Contributed vs the periodic target, when the goal tracks an account."""
+    if (
+        goal.contribution_amount is None
+        or goal.contribution_period is None
+        or goal.tracking_type != "account"
+        or goal.account_id is None
+    ):
+        return None
+    period = cast(ContributionPeriod, goal.contribution_period)
+    progress = await compute_contribution_progress(
+        session,
+        account_ids=[goal.account_id],
+        period=period,
+        target=Decimal(goal.contribution_amount),
+        currency=goal.currency,
+        today=app_today(),
+    )
+    return ContributionProgressRead(
+        period=period,
+        target=progress.target,
+        current=_period_read(progress.current),
+        history=[_period_read(p) for p in progress.history],
+        streak=progress.streak,
+    )
+
+
 async def _enrich_goal(
     session: AsyncSession, goal: Goal, user_id: uuid.UUID
 ) -> GoalRead:
@@ -215,6 +266,8 @@ async def _enrich_goal(
         current, goal.target_amount, goal.target_date, goal_start, goal.initial_amount
     )
 
+    contribution_progress = await _contribution_progress(session, goal)
+
     account_name = await _linked_name(session, Account, goal.account_id)
     asset_name = await _linked_name(session, Asset, goal.asset_id)
     asset_group_name = await _linked_name(session, AssetGroup, goal.asset_group_id)
@@ -224,7 +277,8 @@ async def _enrich_goal(
     target_primary = None
     current_primary = None
     if goal.currency != primary_currency:
-        target_primary = await _convert_amount(session, goal.target_amount, goal.currency, primary_currency)
+        if goal.target_amount is not None:
+            target_primary = await _convert_amount(session, goal.target_amount, goal.currency, primary_currency)
         current_primary = await _convert_amount(session, current, goal.currency, primary_currency)
 
     return GoalRead(
@@ -232,6 +286,8 @@ async def _enrich_goal(
         user_id=goal.user_id,
         name=goal.name,
         target_amount=goal.target_amount,
+        contribution_amount=goal.contribution_amount,
+        contribution_period=cast(Optional[ContributionPeriod], goal.contribution_period),
         current_amount=current,
         currency=goal.currency,
         target_amount_primary=target_primary,
@@ -251,6 +307,7 @@ async def _enrich_goal(
         percentage=percentage,
         monthly_contribution=monthly,
         on_track=on_track,
+        contribution_progress=contribution_progress,
         account_name=account_name,
         asset_name=asset_name,
         asset_group_name=asset_group_name,
@@ -286,18 +343,20 @@ async def get_goal(
     return await _enrich_goal(session, goal, user_id)
 
 
-async def create_goal(
+async def _new_goal(
     session: AsyncSession,
     workspace_id: uuid.UUID,
     user_id: uuid.UUID,
     data: GoalCreate,
-) -> GoalRead:
+) -> Goal:
     await _ensure_goal_link_scope(session, workspace_id, data)
     goal = Goal(
         user_id=user_id,
         workspace_id=workspace_id,
         name=data.name,
         target_amount=data.target_amount,
+        contribution_amount=data.contribution_amount,
+        contribution_period=data.contribution_period,
         current_amount=data.current_amount,
         currency=data.currency,
         target_date=data.target_date,
@@ -314,9 +373,63 @@ async def create_goal(
     initial = await _resolve_current_amount(session, goal, user_id)
     goal.initial_amount = initial
     session.add(goal)
+    return goal
+
+
+async def create_goal(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    data: GoalCreate,
+) -> GoalRead:
+    goal = await _new_goal(session, workspace_id, user_id, data)
     await session.commit()
     await session.refresh(goal)
     return await _enrich_goal(session, goal, user_id)
+
+
+async def create_goals(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    data: GoalBulkCreate,
+) -> list[GoalRead]:
+    """Create several goals at once, all or none (quick setup)."""
+    created = []
+    try:
+        for item in data.goals:
+            created.append(await _new_goal(session, workspace_id, user_id, item))
+    except Exception:
+        await session.rollback()
+        raise
+    await session.commit()
+    for goal in created:
+        await session.refresh(goal)
+    return [await _enrich_goal(session, goal, user_id) for goal in created]
+
+
+async def get_contribution_suggestion(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    account_id: uuid.UUID,
+) -> Optional[ContributionSuggestionRead]:
+    """A periodic target for a goal on the account, from what pays into it."""
+    account = await session.get(Account, account_id)
+    if not account or account.workspace_id != workspace_id:
+        raise ValueError("Linked account not found")
+    suggestion = await suggest_contribution(
+        session, workspace_id=workspace_id, account_id=account_id, today=app_today()
+    )
+    if suggestion is None:
+        return None
+    return ContributionSuggestionRead(
+        amount=suggestion.amount,
+        period=suggestion.period,
+        currency=suggestion.currency,
+        source=suggestion.source,
+        recurring_transaction_id=suggestion.recurring_transaction_id,
+        description=suggestion.description,
+    )
 
 
 async def update_goal(
@@ -335,6 +448,11 @@ async def update_goal(
     await _ensure_goal_link_scope(session, workspace_id, data)
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(goal, field, value)
+    try:
+        check_targets(goal.target_amount, goal.contribution_amount, goal.contribution_period)
+    except ValueError:
+        await session.rollback()
+        raise
     _clear_inactive_tracking_links(goal)
     await session.commit()
     await session.refresh(goal)
@@ -378,10 +496,16 @@ async def get_goal_summary(
         on_track = _compute_on_track(
             current, goal.target_amount, goal.target_date, goal_start, goal.initial_amount
         )
+        progress = await _contribution_progress(session, goal)
         summaries.append(GoalSummary(
             id=goal.id,
             name=goal.name,
             target_amount=goal.target_amount,
+            contribution_amount=goal.contribution_amount,
+            contribution_period=cast(Optional[ContributionPeriod], goal.contribution_period),
+            period_contributed=progress.current.contributed if progress else None,
+            period_status=progress.current.status if progress else None,
+            contribution_streak=progress.streak if progress else None,
             current_amount=current,
             currency=goal.currency,
             target_date=goal.target_date,

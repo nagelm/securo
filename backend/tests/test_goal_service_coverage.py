@@ -565,6 +565,7 @@ async def test_update_goal_found(session, test_user, test_workspace):
     )
     assert result is not None
     assert result.name == "New"
+    assert result.target_amount is not None
     assert float(result.target_amount) == 2000.0
 
 

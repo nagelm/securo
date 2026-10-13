@@ -10,7 +10,14 @@ from app.core.workspace_context import (
     current_workspace,
     current_writable_workspace,
 )
-from app.schemas.goal import GoalCreate, GoalRead, GoalSummary, GoalUpdate
+from app.schemas.goal import (
+    ContributionSuggestionRead,
+    GoalBulkCreate,
+    GoalCreate,
+    GoalRead,
+    GoalSummary,
+    GoalUpdate,
+)
 from app.services import goal_service
 
 router = APIRouter(prefix="/api/goals", tags=["goals"])
@@ -32,6 +39,34 @@ async def goal_summary(
     session: AsyncSession = Depends(get_async_session),
 ):
     return await goal_service.get_goal_summary(session, ctx.workspace.id, ctx.user_id, limit)
+
+
+@router.get("/contribution-suggestion", response_model=Optional[ContributionSuggestionRead])
+async def contribution_suggestion(
+    account_id: uuid.UUID = Query(...),
+    ctx: WorkspaceContext = Depends(current_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """A periodic target for a goal on the account, from the recurring
+    transaction or the regular transfers that already pay into it; null
+    when nothing regular does."""
+    try:
+        return await goal_service.get_contribution_suggestion(session, ctx.workspace.id, account_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.post("/bulk", response_model=list[GoalRead], status_code=status.HTTP_201_CREATED)
+async def create_goals(
+    data: GoalBulkCreate,
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Create several goals at once (one per savings account); all or none."""
+    try:
+        return await goal_service.create_goals(session, ctx.workspace.id, ctx.user_id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.post("", response_model=GoalRead, status_code=status.HTTP_201_CREATED)

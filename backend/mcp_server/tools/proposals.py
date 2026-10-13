@@ -16,7 +16,7 @@ unchanged for Securo's own UI.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +29,7 @@ from app.models.recurring_transaction import RecurringTransaction
 from app.models.transaction import Transaction
 from app.schemas.budget import BudgetCreate
 from app.schemas.category import CategoryCreate
-from app.schemas.goal import GoalCreate
+from app.schemas.goal import ContributionPeriod, GoalCreate
 from app.schemas.recurring_transaction import (
     RecurringTransactionCreate,
     RecurringTransactionUpdate,
@@ -954,13 +954,17 @@ async def propose_cancel_recurring_transaction(
     description=_PROPOSAL_PREFACE
     + (
         "Build a preview for creating a savings/financial goal (e.g. "
-        "'set a R$10k goal for travel')."
+        "'set a R$10k goal for travel'). Give a target_amount, a periodic "
+        "contribution target (contribution_amount + contribution_period, "
+        "e.g. 'save 50 a week for the holiday'), or both."
     ),
     parameters={
         "type": "object",
         "properties": {
             "name": {"type": "string", "minLength": 1, "maxLength": 255},
             "target_amount": {"type": "number", "exclusiveMinimum": 0},
+            "contribution_amount": {"type": "number", "exclusiveMinimum": 0},
+            "contribution_period": {"type": "string", "enum": ["weekly", "biweekly", "monthly"]},
             "currency": {"type": "string", "description": "Defaults to user's primary currency"},
             "deadline": {"type": "string", "format": "date"},
             "initial_amount": {
@@ -972,7 +976,7 @@ async def propose_cancel_recurring_transaction(
             "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
             "apply": _APPLY_FIELD,
         },
-        "required": ["name", "target_amount"],
+        "required": ["name"],
         "additionalProperties": False,
     },
     is_proposal=True,
@@ -983,7 +987,9 @@ async def propose_create_goal(
     session: AsyncSession,
     ctx: CallContext,
     name: str,
-    target_amount: float,
+    target_amount: float | None = None,
+    contribution_amount: float | None = None,
+    contribution_period: str | None = None,
     currency: str | None = None,
     deadline: str | None = None,
     initial_amount: float | None = None,
@@ -994,11 +1000,17 @@ async def propose_create_goal(
     resolved_currency = (currency or "BRL").upper()
     resolved_deadline = parse_date(deadline) if deadline else None
     resolved_initial = float(initial_amount) if initial_amount is not None else 0.0
+    if (contribution_amount is None) != (contribution_period is None):
+        return {"kind": "create_goal", "error": "contribution_amount and contribution_period go together"}
+    if target_amount is None and contribution_amount is None:
+        return {"kind": "create_goal", "error": "give a target_amount, a periodic contribution target, or both"}
     preview = {
         "kind": "create_goal",
         "proposed": {
             "name": name.strip(),
-            "target_amount": float(target_amount),
+            "target_amount": float(target_amount) if target_amount is not None else None,
+            "contribution_amount": float(contribution_amount) if contribution_amount is not None else None,
+            "contribution_period": contribution_period,
             "currency": resolved_currency,
             "deadline": resolved_deadline.isoformat() if resolved_deadline else None,
             "initial_amount": resolved_initial,
@@ -1016,7 +1028,11 @@ async def propose_create_goal(
             ctx.user_id,
             GoalCreate(
                 name=name.strip(),
-                target_amount=Decimal(str(target_amount)),
+                target_amount=Decimal(str(target_amount)) if target_amount is not None else None,
+                contribution_amount=(
+                    Decimal(str(contribution_amount)) if contribution_amount is not None else None
+                ),
+                contribution_period=cast("ContributionPeriod | None", contribution_period),
                 current_amount=Decimal(str(resolved_initial)),
                 currency=resolved_currency,
                 target_date=resolved_deadline,

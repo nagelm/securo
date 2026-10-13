@@ -98,8 +98,10 @@ async def list_assets(
     name="list_goals",
     description=(
         "List the user's savings / financial goals with target, current "
-        "amount, deadline, and progress. Use for 'how are my goals "
-        "going?' / 'am I on track?'."
+        "amount, deadline, and progress. A goal may have a periodic "
+        "contribution target (contribution_amount per contribution_period) "
+        "and no total target (target_amount null: an ongoing savings goal). "
+        "Use for 'how are my goals going?' / 'am I on track?'."
     ),
     parameters={
         "type": "object",
@@ -128,6 +130,13 @@ async def list_goals(
             "status": d.get("status"),
             "progress_pct": num(d.get("progress_pct")),
             "category_id": str(d.get("category_id")) if d.get("category_id") else None,
+            # Periodic target (null for a goal without one) and, for a goal
+            # on an account, what was contributed in the current period.
+            "contribution_amount": num(d.get("contribution_amount")),
+            "contribution_period": d.get("contribution_period"),
+            "period_contributed": num((d.get("contribution_progress") or {}).get("current", {}).get("contributed")),
+            "period_status": (d.get("contribution_progress") or {}).get("current", {}).get("status"),
+            "contribution_streak": (d.get("contribution_progress") or {}).get("streak"),
         })
     return {"items": items, "total": len(items)}
 

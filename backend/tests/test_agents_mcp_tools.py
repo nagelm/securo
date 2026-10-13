@@ -1030,6 +1030,7 @@ async def test_propose_create_goal_external_apply_writes(
         select(Goal).where(Goal.id == uuid.UUID(result["id"]))
     )).scalar_one()
     assert row.name == "Travel fund"
+    assert row.target_amount is not None
     assert float(row.target_amount) == 10000.0
 
 
