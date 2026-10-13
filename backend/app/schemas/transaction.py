@@ -156,6 +156,17 @@ class TransactionInvoiceLink(BaseModel):
     amount: Decimal
 
 
+class TransferAccountRef(BaseModel):
+    """Enough of an account to draw it in a transfer pill, closed or not."""
+
+    id: uuid.UUID
+    name: str
+    display_name: Optional[str] = None
+    type: str
+    institution_logo_url: Optional[str] = None
+    is_closed: bool = False
+
+
 class TransactionRead(TransactionBase):
     id: uuid.UUID
     user_id: uuid.UUID
@@ -182,6 +193,10 @@ class TransactionRead(TransactionBase):
     #: The account the other leg of a linked transfer sits in, so a list
     #: can show "From A → To B" without fetching the pair row by row.
     transfer_counterpart_account_id: Optional[uuid.UUID] = None
+    #: Both accounts of a linked transfer, drawable without the accounts
+    #: list (which leaves closed accounts out). None on unpaired rows.
+    transfer_account: Optional[TransferAccountRef] = None
+    transfer_counterpart_account: Optional[TransferAccountRef] = None
     amount_primary: Optional[float] = None
     fx_rate_used: Optional[float] = None
     fx_fallback: bool = False

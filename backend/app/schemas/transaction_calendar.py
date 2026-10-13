@@ -4,6 +4,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from app.schemas.transaction import TransferAccountRef
+
 
 class TransactionCalendarItem(BaseModel):
     kind: Literal["actual", "projected"]
@@ -26,6 +28,8 @@ class TransactionCalendarItem(BaseModel):
     transfer_pair_id: Optional[uuid.UUID] = None
     #: The account the other leg of a linked transfer sits in.
     transfer_counterpart_account_id: Optional[uuid.UUID] = None
+    transfer_account: Optional[TransferAccountRef] = None
+    transfer_counterpart_account: Optional[TransferAccountRef] = None
     is_transfer: bool = False
     is_ignored: bool = False
     #: Kept out of the day's income/expense totals but still moving the

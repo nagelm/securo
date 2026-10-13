@@ -145,6 +145,9 @@ class Transaction(Base):
     # The account of the other leg of a linked transfer. Set by
     # app.services.transfer_counterpart.attach_transfer_counterpart_accounts.
     transfer_counterpart_account_id = cast(Optional[uuid.UUID], None)
+    # Name/thumbnail summaries of this leg's account and the other leg's.
+    transfer_account = cast(Optional[dict], None)
+    transfer_counterpart_account = cast(Optional[dict], None)
 
 
 # Safety net: `effective_date` is NOT NULL. For non-CC transactions it always

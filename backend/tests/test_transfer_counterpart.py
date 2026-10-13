@@ -90,19 +90,7 @@ async def test_single_transaction_carries_the_counterpart_account(
     assert response.json()["transfer_counterpart_account_id"] == str(test_account.id)
 
 
-@pytest.mark.asyncio
-async def test_one_query_for_a_whole_page(
-    session: AsyncSession, client: AsyncClient, auth_headers, test_account: Account, savings: Account
-):
-    account_id, savings_id = test_account.id, savings.id
-    pairs = [await _transfer(client, auth_headers, account_id, savings_id, amount=10 + i) for i in range(4)]
-    ids = [uuid.UUID(p[leg]["id"]) for p in pairs for leg in ("debit", "credit")]
-    txs: list[Transaction] = []
-    for tx_id in ids:
-        loaded = await session.get(Transaction, tx_id)
-        assert loaded is not None
-        txs.append(loaded)
-
+async def _count_statements(session: AsyncSession, txs: list[Transaction]) -> int:
     statements: list[str] = []
 
     def count(conn, cursor, statement, *args):
@@ -114,13 +102,72 @@ async def test_one_query_for_a_whole_page(
         await attach_transfer_counterpart_accounts(session, txs)
     finally:
         event.remove(sync_engine, "before_cursor_execute", count)
+    return len(statements)
 
-    assert len(statements) == 1
+
+async def _load(session: AsyncSession, ids: list[uuid.UUID]) -> list[Transaction]:
+    txs: list[Transaction] = []
+    for tx_id in ids:
+        loaded = await session.get(Transaction, tx_id)
+        assert loaded is not None
+        txs.append(loaded)
+    return txs
+
+
+@pytest.mark.asyncio
+async def test_a_page_costs_the_same_queries_however_many_pairs_it_holds(
+    session: AsyncSession, client: AsyncClient, auth_headers, test_account: Account, savings: Account
+):
+    # Legs, their accounts, and the connections' institution list (an eager
+    # relationship on BankConnection): three, never one per row.
+    account_id, savings_id = test_account.id, savings.id
+    pairs = [await _transfer(client, auth_headers, account_id, savings_id, amount=10 + i) for i in range(4)]
+    ids = [uuid.UUID(p[leg]["id"]) for p in pairs for leg in ("debit", "credit")]
+
+    one_pair = await _count_statements(session, await _load(session, ids[:2]))
+    txs = await _load(session, ids)
+    four_pairs = await _count_statements(session, txs)
+
+    assert four_pairs == one_pair
+    assert four_pairs <= 3
     for p in pairs:
         debit = next(t for t in txs if str(t.id) == p["debit"]["id"])
         credit = next(t for t in txs if str(t.id) == p["credit"]["id"])
         assert debit.transfer_counterpart_account_id == savings_id
         assert credit.transfer_counterpart_account_id == account_id
+
+
+@pytest.mark.asyncio
+async def test_a_closed_account_is_still_drawable(
+    session: AsyncSession, client: AsyncClient, auth_headers,
+    test_account: Account, savings: Account, test_connection: BankConnection,
+):
+    pair = await _transfer(client, auth_headers, test_account.id, savings.id)
+    savings.is_closed = True
+    savings.display_name = "Old Savings"
+    test_connection.logo_url = "https://logo.example/bank.png"
+    await session.commit()
+
+    response = await client.get("/api/transactions", headers=auth_headers)
+    assert response.status_code == 200
+    by_id = {item["id"]: item for item in response.json()["items"]}
+
+    debit = by_id[pair["debit"]["id"]]
+    assert debit["transfer_counterpart_account"] == {
+        "id": str(savings.id),
+        "name": "Rainy Day",
+        "display_name": "Old Savings",
+        "type": "savings",
+        "institution_logo_url": "https://logo.example/bank.png",
+        "is_closed": True,
+    }
+    assert debit["transfer_account"]["id"] == str(test_account.id)
+    assert debit["transfer_account"]["is_closed"] is False
+
+    # The closed account's own leg carries itself too.
+    credit = by_id[pair["credit"]["id"]]
+    assert credit["transfer_account"]["display_name"] == "Old Savings"
+    assert credit["transfer_counterpart_account"]["id"] == str(test_account.id)
 
 
 @pytest.mark.asyncio
@@ -136,19 +183,7 @@ async def test_no_query_when_nothing_is_paired(session: AsyncSession, test_user:
         type="debit",
         source="manual",
     )
-    statements: list[str] = []
-
-    def count(conn, cursor, statement, *args):
-        statements.append(statement)
-
-    sync_engine = session.bind.sync_engine  # type: ignore[union-attr]
-    event.listen(sync_engine, "before_cursor_execute", count)
-    try:
-        await attach_transfer_counterpart_accounts(session, [tx])
-    finally:
-        event.remove(sync_engine, "before_cursor_execute", count)
-
-    assert statements == []
+    assert await _count_statements(session, [tx]) == 0
     assert tx.transfer_counterpart_account_id is None
 
 
@@ -174,6 +209,7 @@ async def test_a_leg_whose_partner_is_gone_gets_none(
     await attach_transfer_counterpart_accounts(session, [orphan])
 
     assert orphan.transfer_counterpart_account_id is None
+    assert orphan.transfer_counterpart_account is None
 
 
 @pytest.mark.asyncio
@@ -189,3 +225,5 @@ async def test_calendar_items_carry_the_counterpart_account(
     items = {str(i.id): i for d in calendar.days if d.date == day for i in d.items}
     assert items[pair["debit"]["id"]].transfer_counterpart_account_id == savings.id
     assert items[pair["credit"]["id"]].transfer_counterpart_account_id == test_account.id
+    counterpart = items[pair["debit"]["id"]].transfer_counterpart_account
+    assert counterpart is not None and counterpart.name == "Rainy Day"
