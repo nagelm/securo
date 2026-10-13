@@ -262,6 +262,24 @@ async def test_match_category_hint_travel_prefers_own_category_then_leisure(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("hint,own,default", [
+    ("takeaways", "Takeaways", "Food & Dining"),
+    ("public_transport", "Public transport & parking", "Transport"),
+    ("childcare", "Childcare", "Education"),
+    ("games", "Games", "Leisure"),
+    ("haircuts", "Personal Care", "Health"),
+])
+async def test_match_category_hint_split_prefers_own_category_then_default(
+    session: AsyncSession, test_user, test_workspace, hint, own, default
+):
+    """A finer Akahu code finds the user's own split category, else the default."""
+    fallback = await _make_category(session, test_user.id, default)
+    assert await _match_category_hint(session, test_workspace.id, hint) == fallback.id
+    split = await _make_category(session, test_user.id, own)
+    assert await _match_category_hint(session, test_workspace.id, hint) == split.id
+
+
+@pytest.mark.asyncio
 async def test_match_category_hint_misses(session: AsyncSession, test_user, test_workspace):
     await _make_category(session, test_user.id, "Groceries")
     assert await _match_category_hint(session, test_workspace.id, "unknown-key") is None
