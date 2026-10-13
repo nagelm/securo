@@ -24,6 +24,8 @@ class TransactionCalendarItem(BaseModel):
     status: Optional[str] = None
     source: Optional[str] = None
     transfer_pair_id: Optional[uuid.UUID] = None
+    #: The account the other leg of a linked transfer sits in.
+    transfer_counterpart_account_id: Optional[uuid.UUID] = None
     is_transfer: bool = False
     is_ignored: bool = False
     #: Kept out of the day's income/expense totals but still moving the

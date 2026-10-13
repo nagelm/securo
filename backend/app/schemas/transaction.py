@@ -179,6 +179,9 @@ class TransactionRead(TransactionBase):
     payee_icon: Optional[str] = None
     notes: Optional[str] = None
     transfer_pair_id: Optional[uuid.UUID] = None
+    #: The account the other leg of a linked transfer sits in, so a list
+    #: can show "From A → To B" without fetching the pair row by row.
+    transfer_counterpart_account_id: Optional[uuid.UUID] = None
     amount_primary: Optional[float] = None
     fx_rate_used: Optional[float] = None
     fx_fallback: bool = False

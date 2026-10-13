@@ -26,6 +26,7 @@ from app.services import reconciliation_service, split_service
 from app.services.credit_card_service import apply_effective_date
 from app.services.transfer_pair_category import categorise_pair_legs
 from app.services.payee_display import apply_payee_display
+from app.services.transfer_counterpart import attach_transfer_counterpart_accounts
 from app.services.rule_service import apply_rules_to_transaction
 from app.services.fx_rate_service import stamp_primary_amount, convert as fx_convert
 from app.services._query_filters import (
@@ -530,6 +531,11 @@ async def get_transactions(
         # by `group_id`, a linked member sees the owner's transactions
         # and the frontend needs `is_shared` to lock them from edits.
         await _tag_shared_view(session, transactions, user_id)
+        # Only rows the viewer owns: a shared row's other leg is in the
+        # owner's books, which the viewer cannot see.
+        await attach_transfer_counterpart_accounts(
+            session, [tx for tx in transactions if not tx.is_shared]
+        )
 
     return transactions, total or 0, summary
 
@@ -685,6 +691,7 @@ async def get_transaction(
         )
         transaction.attachment_count = count_result.scalar_one()
         apply_payee_display(transaction)
+        await attach_transfer_counterpart_accounts(session, [transaction])
     return transaction
 
 
