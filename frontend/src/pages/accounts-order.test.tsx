@@ -218,3 +218,22 @@ describe('Accounts page: account order', () => {
     ).not.toBeInTheDocument()
   })
 })
+
+describe('Accounts page: Manual Accounts section', () => {
+  it('is hidden when every account comes from a bank', async () => {
+    api.accounts.list.mockImplementation(async () => listed.filter((a) => a.connection_id !== null))
+    renderWithProviders(<AccountsPage />)
+    await screen.findByText('Everyday')
+
+    expect(screen.queryByText(t('accounts.manualAccounts'))).not.toBeInTheDocument()
+    expect(screen.queryByText(t('accounts.noManualAccounts'))).not.toBeInTheDocument()
+  })
+
+  it('still shows its empty state when there are no accounts at all', async () => {
+    api.accounts.list.mockResolvedValue([])
+    api.connections.list.mockResolvedValue([])
+    renderWithProviders(<AccountsPage />)
+
+    expect(await screen.findByText(t('accounts.noManualAccounts'))).toBeInTheDocument()
+  })
+})

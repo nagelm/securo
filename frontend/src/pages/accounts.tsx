@@ -265,6 +265,8 @@ export default function AccountsPage() {
   const isLoading = accountsLoading || connectionsLoading
   const manualAccounts = accountsList?.filter((a) => a.connection_id === null && inActiveCollection(a)) ?? []
   const bankAccounts = accountsList?.filter((a) => a.connection_id !== null && inActiveCollection(a)) ?? []
+  // With bank accounts and no manual ones, an empty Manual Accounts card is just noise.
+  const showManualSection = manualAccounts.length > 0 || bankAccounts.length === 0
 
   return (
     <div className="space-y-6">
@@ -288,6 +290,7 @@ export default function AccountsPage() {
       ) : (
         <div className="space-y-6">
           {/* Manual Accounts */}
+          {showManualSection && (
           <div className="bg-card rounded-xl border border-border shadow-sm">
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
               <h2 className="text-sm font-medium text-muted-foreground">{t('accounts.manualAccounts')}</h2>
@@ -357,6 +360,7 @@ export default function AccountsPage() {
               </div>
             )}
           </div>
+          )}
 
           {/* Bank Connections */}
           {connectionsList && connectionsList.length > 0 ? (
