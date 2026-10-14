@@ -161,7 +161,8 @@ const REPORT_TABS: ReportTab[] = [
   {
     key: 'net_worth', labelKey: 'reports.netWorth', enabled: true,
     rangeOptions: HISTORICAL_RANGE_OPTIONS, intervalOptions: HISTORICAL_INTERVAL_OPTIONS,
-    supportsCustomRange: true, fallbackRangeKey: '1y', fallbackInterval: 'monthly',
+    // Fork (owner 2026-10-15): net worth opens on ten years, monthly.
+    supportsCustomRange: true, fallbackRangeKey: '10y', fallbackInterval: 'monthly',
   },
   {
     key: 'income_expenses', labelKey: 'reports.incomeExpenses', enabled: true,
@@ -188,7 +189,7 @@ export default function ReportsPage() {
   const locale = useDisplayLocale()
 
   const customDefaults = defaultCustomRange()
-  const [rangeKey, setRangeKey] = useState('1y')
+  const [rangeKey, setRangeKey] = useState(REPORT_TABS[0].fallbackRangeKey)
   const [chosenInterval, setInterval] = useState('monthly')
   // Custom range endpoints (YYYY-MM-DD) — populated when the user opens the
   // Custom preset and confirms a date range. Preserved across tab switches

@@ -54,11 +54,14 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('Reports page — Custom range segment', () => {
-  it('loads the Net Worth tab with the 1Y preset by default', async () => {
+  it('loads the Net Worth tab with the 10Y monthly preset by default (fork)', async () => {
     renderWithProviders(<ReportsPage />)
 
     await waitFor(() => expect(api.reports.netWorth).toHaveBeenCalled())
-    const [, , , , , startDate, endDate] = api.reports.netWorth.mock.calls[0]
+    const [months, interval, , , , startDate, endDate] = api.reports.netWorth.mock.calls[0]
+    expect(months).toBe(120)
+    expect(interval).toBe('monthly')
+    expect(screen.getByRole('button', { name: t('reports.range10y') })).toHaveClass('bg-primary')
     expect(startDate).toBeUndefined()
     expect(endDate).toBeUndefined()
   })
@@ -70,7 +73,7 @@ describe('Reports page — Custom range segment', () => {
     await user.click(screen.getByRole('button', { name: t('reports.customRange') }))
 
     expect(api.reports.netWorth).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('button', { name: t('reports.range1y') })).toHaveClass('bg-primary')
+    expect(screen.getByRole('button', { name: t('reports.range10y') })).toHaveClass('bg-primary')
     await user.click(screen.getByRole('button', { name: t('transactions.filtersBar.apply') }))
     const year = 2026
     await waitFor(() => {
@@ -130,7 +133,7 @@ it.each(['Cancel', 'Escape', 'outside'] as const)(
 )
 
 it.each([
-  ['reports.netWorth', 'reports.range1y', 12],
+  ['reports.netWorth', 'reports.range10y', 120],
   ['reports.incomeExpenses', 'reports.range1y', 12],
   ['reports.moneyMap', 'reports.range3m', 3],
 ] as const)('Reset then Apply restores the fallback for %s', async (tab, fallback, months) => {
@@ -246,6 +249,9 @@ describe('Reports page — interval limits on long ranges', () => {
     const daily = () => screen.getByRole('button', { name: t('reports.intervalDaily') })
     const weekly = () => screen.getByRole('button', { name: t('reports.intervalWeekly') })
 
+    // Net worth opens on 10Y, where daily is off; start from 1Y.
+    expect(daily()).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: t('reports.range1y') }))
     await user.click(daily())
     await waitFor(() => expect(api.reports.netWorth.mock.calls.at(-1)![1]).toBe('daily'))
 
