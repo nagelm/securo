@@ -721,6 +721,7 @@ async def test_a_sync_keeps_the_connections_account_numbers(session, test_user, 
     conn = await akahu_connection(session, test_user, test_workspace)
     await run_sync(session, conn, test_workspace, test_user, bank_accounts())
     await session.refresh(conn)
+    assert conn.settings is not None
     assert conn.settings["account_numbers"]["own"] == ["010001000000100", "010001000000101"]
 
 
@@ -750,7 +751,7 @@ async def test_a_payment_to_an_account_on_the_partners_connection_is_a_transfer(
          patch("app.services.connection_service.stamp_primary_amount", new_callable=AsyncMock):
         await sync_connection(session, partner.id, test_workspace.id, test_user.id)
         assert "010001000000903" in provider.workspace_account_numbers[0]
-        rows = await provider.get_transactions(partner.credentials, "acc_p_chq")
+        rows = await provider.get_transactions(partner.credentials or {}, "acc_p_chq")
     assert [r.category_hint for r in rows] == ["transfers"]
 
 
