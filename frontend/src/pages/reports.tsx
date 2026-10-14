@@ -73,6 +73,8 @@ const HISTORICAL_RANGE_OPTIONS: readonly RangeOption[] = [
   { key: 'ytd', months: 12, period: 'ytd' },
   { key: '1y', months: 12 },
   { key: '2y', months: 24 },
+  { key: '5y', months: 60 },
+  { key: '10y', months: 120 },
 ]
 
 const FORWARD_RANGE_OPTIONS: readonly RangeOption[] = [
@@ -119,6 +121,8 @@ const RANGE_LABELS: Record<string, string> = {
   ytd: 'rangeYtd',
   '12m': 'range12m',
   '2y': 'range2y',
+  '5y': 'range5y',
+  '10y': 'range10y',
   custom: 'customRange',
 }
 
@@ -130,8 +134,8 @@ const CUSTOM_RANGE_KEY = 'custom'
 // Mirrors the backend's `_MAX_CUSTOM_RANGE_YEARS` (backend/app/api/reports.py)
 // so a too-wide pick is rejected in the picker instead of round-tripping to
 // the API for the same 422. A calendar-year anniversary, not a fixed day
-// count, so leap days inside the window can't push the cap past 10 years.
-const CUSTOM_RANGE_MAX_YEARS = 10
+// count, so leap days inside the window can't push the cap past 20 years.
+const CUSTOM_RANGE_MAX_YEARS = 20
 
 // Seed a historical draft from January 1 through today; Apply commits it.
 function defaultCustomRange(): { from: string; to: string } {

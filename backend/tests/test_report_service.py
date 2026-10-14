@@ -502,7 +502,7 @@ async def test_income_expenses_api_validation(client, auth_headers):
 
     resp = await client.get(
         "/api/reports/income-expenses",
-        params={"months": 25},
+        params={"months": 121},
         headers=auth_headers,
     )
     assert resp.status_code == 422
@@ -2655,11 +2655,11 @@ def test_add_years_clamps_leap_day():
     ('income-expenses', 'get_income_expenses_report'),
 ])
 @pytest.mark.parametrize('start_offset,end_offset,status', [
-    # FixedDate.today() is 2026-09-12; -3652 days is exactly 2016-09-12, the
-    # 10-calendar-year anniversary. One day further back crosses it, even
-    # though the day-count difference (3653 vs. 3652) understates the effect
-    # of the two leap days (2020, 2024) inside the window.
-    (-1, 1, 422), (0, 0, 200), (-3652, 0, 200), (-3653, 0, 422),
+    # FixedDate.today() is 2026-09-12; -7305 days is exactly 2006-09-12, the
+    # 20-calendar-year anniversary (fork cap; upstream is 10). One day further
+    # back crosses it; the five leap days (2008-2024) inside the window are why
+    # the count is 7305 rather than 7300.
+    (-1, 1, 422), (0, 0, 200), (-7305, 0, 200), (-7306, 0, 422),
     (None, 0, 422), (-1, None, 422), (0, -1, 422),
 ])
 async def test_historical_api_custom_range_boundaries(

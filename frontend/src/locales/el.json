@@ -2111,6 +2111,8 @@
     "rangeYtd": "YTD",
     "range12m": "12Μ",
     "range2y": "2Ε",
+    "range5y": "5Y",
+    "range10y": "10Y",
     "intervalDaily": "Η",
     "intervalWeekly": "Ε",
     "intervalMonthly": "Μ",

@@ -2057,6 +2057,8 @@
     "rangeYtd": "ВПР",
     "range12m": "12М",
     "range2y": "2Р",
+    "range5y": "5Y",
+    "range10y": "10Y",
     "intervalDaily": "Д",
     "intervalWeekly": "Т",
     "intervalMonthly": "М",

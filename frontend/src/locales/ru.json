@@ -2057,6 +2057,8 @@
     "rangeYtd": "СНГ",
     "range12m": "12М",
     "range2y": "2Г",
+    "range5y": "5Y",
+    "range10y": "10Y",
     "intervalDaily": "Д",
     "intervalWeekly": "Н",
     "intervalMonthly": "М",

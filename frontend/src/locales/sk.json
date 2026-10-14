@@ -2156,6 +2156,8 @@
     "rangeYtd": "YTD",
     "range12m": "12M",
     "range2y": "2R",
+    "range5y": "5Y",
+    "range10y": "10Y",
     "intervalDaily": "D",
     "intervalWeekly": "T",
     "intervalMonthly": "M",

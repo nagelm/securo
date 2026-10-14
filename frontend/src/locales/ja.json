@@ -2040,6 +2040,8 @@
     "rangeYtd": "年初から",
     "range12m": "12ヶ月",
     "range2y": "2年",
+    "range5y": "5Y",
+    "range10y": "10Y",
     "intervalDaily": "日",
     "intervalWeekly": "週",
     "intervalMonthly": "月",
