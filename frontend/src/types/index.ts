@@ -2139,7 +2139,15 @@ export interface InsightsBriefing {
   one_off_count: number
   one_off_total: number
   one_off_threshold: number
-  categories: { category_id: string | null; name: string; amount: number; usual: number; diff: number }[]
+  categories: {
+    category_id: string | null
+    name: string
+    amount: number
+    usual: number
+    diff: number
+    usual_since: string | null
+    drivers: { payee_id: string | null; payee: string; diff: number }[]
+  }[]
   excluded: { category_id: string | null; name: string; reason: 'one_off' | 'more_payments' | 'fewer_payments' }[]
   better: InsightCard[]
   worse: InsightCard[]

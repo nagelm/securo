@@ -229,3 +229,48 @@ async def test_briefing_api(client, session: AsyncSession, test_user, auth_heade
 
     assert (await client.get("/api/insights/briefing?month=2026-13", headers=auth_headers)).status_code == 400
     assert (await client.get("/api/insights/briefing?month=Sept", headers=auth_headers)).status_code == 422
+
+
+def test_usual_starts_at_a_step_change():
+    # A subscription that started halfway through the six months: the usual month
+    # is the new level, not a median that mixes in the months before it.
+    rows = steady_income()
+    for d in months_back(24)[:-1]:
+        rows.append(spend(d.replace(day=4), 40, "Software", payee="OldTool"))
+        if d >= date(2026, 6, 1):
+            rows.append(spend(d.replace(day=17), 400, "Software", payee="BigSub"))
+    rows.append(spend(MONTH.replace(day=4), 40, "Software", payee="OldTool"))
+    rows.append(spend(MONTH.replace(day=17), 400, "Software", payee="BigSub"))
+    b = analyse(rows, MONTH)
+    row = next(c for c in b["categories"] if c["name"] == "Software")
+    assert row["usual_since"] == "2026-06"  # a plain median of the six would be 240
+    assert (row["usual"], row["diff"]) == (440, 0)
+
+
+def test_no_step_for_a_category_that_merely_varies():
+    rows = steady_income()
+    for i, d in enumerate(months_back(24)):
+        rows.append(spend(d.replace(day=9), 150 if i % 2 else 250, "Food"))
+    b = analyse(rows, MONTH)
+    assert next(c for c in b["categories"] if c["name"] == "Food")["usual_since"] is None
+
+
+def test_drivers_name_the_payee_behind_a_change():
+    rows = steady_income()
+    for d in months_back(24):
+        rows.append(spend(d.replace(day=4), 300, "Software", payee="Steady"))
+    rows.append(spend(MONTH.replace(day=8), 250, "Software", payee="NewAI"))
+    b = analyse(rows, MONTH)
+    row = next(c for c in b["categories"] if c["name"] == "Software")
+    assert row["drivers"] == [{"payee_id": "NewAI", "payee": "NewAI", "diff": 250}]
+    card = next(c for c in b["worse"] if c["category_id"] == "Software")
+    assert card["kind"] in ("category_month", "payee_new")
+
+
+def test_no_driver_for_a_small_change():
+    rows = steady_income()
+    for d in months_back(24):
+        rows.append(spend(d.replace(day=4), 300, "Software", payee="Steady"))
+    rows.append(spend(MONTH.replace(day=8), 30, "Software", payee="Tiny"))
+    b = analyse(rows, MONTH)
+    assert next(c for c in b["categories"] if c["name"] == "Software")["drivers"] == []

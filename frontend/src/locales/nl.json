@@ -3390,6 +3390,8 @@
         "title_worse": "{{payee}} paying less",
         "detail": "{{before}} → {{after}} a payment ({{pct}}%)"
       }
-    }
+    },
+    "usualSince": "usual since {{month}}",
+    "mostly": "mostly {{list}}"
   }
 }

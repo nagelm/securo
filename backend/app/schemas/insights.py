@@ -4,12 +4,22 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel
 
 
+class InsightDriver(BaseModel):
+    payee_id: Optional[str] = None
+    payee: str
+    diff: float
+
+
 class InsightCategoryRow(BaseModel):
     category_id: Optional[str] = None
     name: str
     amount: float
     usual: float
     diff: float
+    # The first month of the usual when the category changed level inside
+    # the six months before; None when all six count.
+    usual_since: Optional[str] = None
+    drivers: list[InsightDriver] = []
 
 
 class InsightExcluded(BaseModel):

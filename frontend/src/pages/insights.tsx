@@ -241,10 +241,23 @@ function CategoryRow({
   const [y, m] = data.month.split('-').map(Number)
   const to = `${data.month}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`
   const href = c.category_id ? `/transactions?category_id=${c.category_id}&from=${from}&to=${to}` : undefined
-  const name = href ? <Link to={href} className="truncate hover:underline">{c.name}</Link> : <span className="truncate">{c.name}</span>
+  const { t } = useTranslation()
+  const locale = useDisplayLocale()
+  const label = href ? <Link to={href} className="truncate hover:underline">{c.name}</Link> : <span className="truncate">{c.name}</span>
+  const notes = [
+    c.usual_since ? t('insights.usualSince', { month: monthLabel(c.usual_since, locale) }) : '',
+    c.drivers.length
+      ? t('insights.mostly', {
+          list: c.drivers.map((d) => `${d.payee} ${d.diff < 0 ? '−' : '+'}${money(Math.abs(d.diff))}`).join(', '),
+        })
+      : '',
+  ].filter(Boolean)
   return (
     <>
-      {name}
+      <div className="flex min-w-0 flex-col">
+        {label}
+        {notes.length > 0 && <span className="truncate text-xs text-muted-foreground">{notes.join(' · ')}</span>}
+      </div>
       <div className="flex h-[18px] justify-end border-r border-border">
         {c.diff < 0 && (
           <div style={{ width }} className={cn('h-full rounded-l', strong ? 'bg-emerald-500' : 'bg-emerald-300 dark:bg-emerald-700')} />
@@ -324,7 +337,9 @@ function describe(card: InsightCard, t: T, money: (v: number) => string, locale:
         title,
         detail: t('insights.cards.category_month.detail', {
           amount: money(n('amount')), usual: money(n('usual')), count: n('visits'),
-        }),
+        }) + (p.driver
+          ? ` · ${t('insights.mostly', { list: `${p.driver} ${n('driver_diff') < 0 ? '−' : '+'}${money(Math.abs(n('driver_diff')))}` })}`
+          : ''),
       }
     }
     case 'trend_cooling':

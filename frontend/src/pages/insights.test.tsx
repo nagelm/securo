@@ -36,8 +36,11 @@ function briefing(overrides: Partial<InsightsBriefing> = {}): InsightsBriefing {
     one_off_total: 0,
     one_off_threshold: 1000,
     categories: [
-      { category_id: 'cat-food', name: 'Groceries', amount: 400, usual: 480, diff: -80 },
-      { category_id: 'cat-eat', name: 'Eating out', amount: 300, usual: 150, diff: 150 },
+      { category_id: 'cat-food', name: 'Groceries', amount: 400, usual: 480, diff: -80, usual_since: null, drivers: [] },
+      {
+        category_id: 'cat-soft', name: 'Software', amount: 300, usual: 150, diff: 150, usual_since: '2026-04',
+        drivers: [{ payee_id: 'pay-ai', payee: 'NewAI', diff: 150 }],
+      },
     ],
     excluded: [{ category_id: 'cat-int', name: 'Interest', reason: 'more_payments' }],
     better: [{
@@ -79,6 +82,8 @@ describe('InsightsPage', () => {
     const groceries = await screen.findByText('Groceries')
     expect(groceries.closest('a')?.getAttribute('href')).toBe('/transactions?category_id=cat-food&from=2026-09-01&to=2026-09-30')
     expect(screen.getByText(/Interest/)).toBeInTheDocument()
+    // A category that changed level says where its usual starts, and who moved it.
+    expect(screen.getByText(/usual since April 2026 · mostly NewAI \+\$170\.00/)).toBeInTheDocument()
   })
 
   it('without a savings-rate signal, the headline compares everyday spending with a usual month', async () => {

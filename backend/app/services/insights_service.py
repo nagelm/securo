@@ -227,6 +227,12 @@ def _regulars(rows: list[Row], end: date, debit: bool) -> list[_Regular]:
     return out
 
 
+def _driver_params(found: list[dict[str, Any]]) -> dict[str, Any]:
+    if not found:
+        return {}
+    return {"driver": found[0]["payee"], "driver_diff": found[0]["diff"]}
+
+
 def analyse(rows: list[Row], month: date) -> dict[str, Any]:
     m0 = _mi(month)
     first_m = m0 - HISTORY_MONTHS + 1
@@ -241,6 +247,11 @@ def analyse(rows: list[Row], month: date) -> dict[str, Any]:
     everyday_total: dict[int, float] = defaultdict(float)
     income: dict[int, float] = defaultdict(float)
     month_one_offs: list[Row] = []
+    # Everyday spending per category, payee and month, to say who moved a category.
+    by_payee: dict[Optional[str], dict[str, dict[int, float]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(float))
+    )
+    payee_names: dict[str, str] = {}
     for r in rows:
         mi = _mi(r.when)
         if mi < first_m or mi > m0:
@@ -258,12 +269,63 @@ def analyse(rows: list[Row], month: date) -> dict[str, Any]:
         spend[r.category_id][mi] += r.amount
         visits[r.category_id][mi] += 1
         everyday_total[mi] += r.amount
+        payee_key = r.payee_id or ""
+        by_payee[r.category_id][payee_key][mi] += r.amount
+        payee_names[payee_key] = r.payee or ""
 
     lumpy = {c for c, total in all_debits.items() if total > 0 and one_off[c] / total >= LUMPY_SHARE}
     usual_range = range(m0 - USUAL_MONTHS, m0)
 
+    def baseline(c: Optional[str]) -> list[int]:
+        """The months a category's usual month is measured over.
+
+        Normally the six before the briefing month. When the category clearly
+        changed level inside those six (every later month well above, or well
+        below, every earlier one), only the months since the change count: a
+        subscription that started in April makes April onwards the usual, not
+        a median that still mixes in the months before it.
+        """
+        months = list(usual_range)
+        values = [spend[c][m] for m in months]
+        # At least three months on the new level, and a real move: the new
+        # level is at least $100 a month and at least double (or half) the old.
+        for k in range(1, len(months) - 2):
+            before, after = values[:k], values[k:]
+            up = min(after) > 1.5 * max(before) and _median(after) >= max(100, 2 * _median(before))
+            down = max(after) * 1.5 < min(before) and _median(before) >= max(100, 2 * _median(after))
+            if up or down:
+                return months[k:]
+        return months
+
     def usual(c: Optional[str]) -> float:
-        return _median([spend[c][m] for m in usual_range])
+        return _median([spend[c][m] for m in baseline(c)])
+
+    def drivers(c: Optional[str], diff: float) -> list[dict[str, Any]]:
+        """The payees behind most of a category's difference, biggest first.
+
+        Only for a difference big enough to matter, only named payees, and
+        never one whose own move is far bigger than the category's (that is a
+        payee offset by others, not the story of the month).
+        """
+        if abs(diff) < max(50.0, 0.2 * usual(c)):
+            return []
+        months = baseline(c)
+        moves = []
+        for p, by_m in by_payee[c].items():
+            if not p:
+                continue
+            delta = by_m[m0] - _median([by_m[m] for m in months])
+            if delta * diff > 0 and abs(delta) >= 20 and abs(delta) <= 1.5 * abs(diff):
+                moves.append((p, delta))
+        moves.sort(key=lambda x: -abs(x[1]))
+        out = []
+        covered = 0.0
+        for p, delta in moves[:2]:
+            out.append({"payee_id": p or None, "payee": payee_names.get(p) or "", "diff": round(delta, 2)})
+            covered += delta
+            if abs(covered) >= 0.5 * abs(diff):
+                break
+        return out if abs(covered) >= 0.5 * abs(diff) else []
 
     # --- fixed-cycle categories: one more or one fewer payment is not a change
     regulars = _regulars(rows, month_end, debit=True)
@@ -305,10 +367,14 @@ def analyse(rows: list[Row], month: date) -> dict[str, Any]:
         if max(now, u) >= 50:
             compared.append((c, now, u))
     compared.sort(key=lambda x: x[1] - x[2])
-    categories = [
-        {"category_id": c, "name": names.get(c) or "", "amount": now, "usual": u, "diff": round(now - u, 2)}
-        for c, now, u in compared
-    ]
+    categories = []
+    for c, now, u in compared:
+        months = baseline(c)
+        categories.append({
+            "category_id": c, "name": names.get(c) or "", "amount": now, "usual": u, "diff": round(now - u, 2),
+            "usual_since": _ym(months[0]) if len(months) < USUAL_MONTHS else None,
+            "drivers": drivers(c, now - u),
+        })
     excluded = (
         [{"category_id": c, "name": names.get(c) or "", "reason": cadence_note[c]} for c in cadence_note]
         + [{"category_id": c, "name": names.get(c) or "", "reason": "one_off"}
@@ -334,6 +400,8 @@ def analyse(rows: list[Row], month: date) -> dict[str, Any]:
                 "category": names.get(c) or "", "amount": now, "usual": u, "diff": diff,
                 "visits": visits[c][m0], "usual_visits": _median([visits[c][m] for m in usual_range]),
                 "previous": round(spend[c][m0 - 1], 2), "streak": quiet,
+                "usual_since": _ym(baseline(c)[0]) if len(baseline(c)) < USUAL_MONTHS else "",
+                **_driver_params(drivers(c, diff)),
             },
             series=[spend[c][m] for m in series_range], category_id=c,
             link_from=month_start.isoformat(), link_to=month_end.isoformat(),
