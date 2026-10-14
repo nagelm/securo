@@ -1018,6 +1018,14 @@ def _sync_loan_fields(provider: str, account: Account, acc_data: AccountData) ->
             account.credit_limit = limit
 
 
+def _balance_includes_pending(provider) -> Optional[bool]:
+    """True, False, or None when it varies by bank (see
+    sync_opening_balance_for_connected_account). Anything else, such as a
+    mocked attribute, means the upstream behaviour: True."""
+    value = getattr(provider, "balance_includes_pending", True)
+    return value if value is None or isinstance(value, bool) else True
+
+
 ACCOUNT_NUMBERS_SETTING = "account_numbers"
 
 
@@ -1599,7 +1607,7 @@ async def handle_oauth_callback(
         await sync_opening_balance_for_connected_account(
             session,
             account,
-            include_pending=getattr(provider, "balance_includes_pending", None) is not False,
+            include_pending=_balance_includes_pending(provider),
         )
 
     # Detect transfer pairs among newly synced transactions
@@ -2315,7 +2323,7 @@ async def sync_connection(
         # Providers whose pending rows have no stable id (Akahu): every read
         # replaces them, and a settled row inherits the user's edits.
         rebuilds_pending = getattr(provider, "replaces_pending_rows", None) is True
-        balance_has_pending = getattr(provider, "balance_includes_pending", None) is not False
+        balance_has_pending = _balance_includes_pending(provider)
         for acc_data in accounts_data:
             institution = await _resolve_institution(
                 session, connection.id, institution_cache, acc_data

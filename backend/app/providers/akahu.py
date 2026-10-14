@@ -18,8 +18,9 @@ What is mapped, and why some things are not:
   have no id and their date and text still change, so Akahu says to rebuild
   them on every read: each gets an id derived from its content, and the sync
   layer replaces an account's pending rows wholesale (``replaces_pending_rows``),
-  handing any edit the user made to the settled row that follows. Account
-  balances exclude pending rows (``balance_includes_pending``).
+  handing any edit the user made to the settled row that follows. Whether an
+  account's balance already counts its pending rows varies by bank
+  (``balance_includes_pending``).
 * **Foreign purchases.** ``meta.conversion`` holds the amount and currency
   actually charged abroad; that becomes the transaction amount and currency,
   and the account-currency amount becomes ``amount_in_account_currency``.
@@ -754,11 +755,12 @@ class AkahuProvider(BankProvider):
         return True
 
     @property
-    def balance_includes_pending(self) -> bool:
-        # `balance.current` leaves pending rows out: on a card it equals the
-        # limit less `available` less the pending total (measured on live
-        # bank data, Oct 2026).
-        return False
+    def balance_includes_pending(self) -> Optional[bool]:
+        # Depends on the bank: some card balances leave pending
+        # rows out (limit + current - available = the pending total), while a
+        # cheque account's balance took a pending debit straight in
+        # (measured Oct 2026). Akahu's docs don't say.
+        return None
 
     # ----- credentials ------------------------------------------------------
 

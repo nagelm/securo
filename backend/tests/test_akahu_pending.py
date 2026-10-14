@@ -280,3 +280,19 @@ async def test_a_failed_pending_read_keeps_the_pending_rows(session, test_user, 
     await _sync(session, conn, test_workspace, test_user, bank)
 
     assert [r.status for r in await _rows(session)] == ["posted", "pending"]
+
+
+@pytest.mark.asyncio
+async def test_a_balance_that_takes_pending_in_keeps_the_opening_row(session, test_user, test_workspace):
+    """Some banks (some cheque accounts) take a pending debit straight
+    into the balance; the opening row must stay put then too."""
+    bank = Bank()
+    bank.pending = []
+    conn = await _connection(session, test_user, test_workspace)
+    await _sync(session, conn, test_workspace, test_user, bank)
+    before = await _opening(session)
+
+    bank.pending = [PENDING]
+    bank.balance = -100.0 - 99.9
+    await _sync(session, conn, test_workspace, test_user, bank)
+    assert await _opening(session) == before
