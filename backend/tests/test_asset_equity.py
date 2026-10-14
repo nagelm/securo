@@ -396,3 +396,43 @@ async def test_list_api_returns_equity_and_primary_fields(
     single = await client.get(f"/api/assets/{house.id}", headers=auth_headers)
     assert single.status_code == 200
     assert single.json()["equity"] == pytest.approx(200000.0)
+
+
+@pytest.mark.asyncio
+async def test_portfolio_trend_carries_secured_debt_per_date(session, test_user, test_workspace):
+    """Fork: each trend row says what the loans on an asset owed that day, so
+    the chart can show equity; the gross values are unchanged."""
+    from app.models.transaction import Transaction
+
+    house = await _asset(session, test_user, test_workspace)
+    loan = Account(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        name="Test mortgage", type="loan", balance=Decimal("0"), currency="BRL",
+        secured_asset_id=house.id,
+    )
+    session.add(loan)
+    await session.commit()
+    today = app_today()
+    for days_ago, kind, amount in ((5, "debit", "300000"), (1, "credit", "1000")):
+        session.add(Transaction(
+            id=uuid.uuid4(), user_id=test_user.id, account_id=loan.id,
+            description=kind, amount=Decimal(amount), currency="BRL",
+            date=today - timedelta(days=days_ago), type=kind, source="manual",
+            status="posted", created_at=datetime.now(timezone.utc),
+        ))
+    session.add(AssetValue(id=uuid.uuid4(), asset_id=house.id, amount=Decimal("510000"),
+                           date=today - timedelta(days=3)))
+    session.add(AssetValue(id=uuid.uuid4(), asset_id=house.id, amount=Decimal("520000"),
+                           date=today))
+    await session.commit()
+
+    result = await asset_service.get_portfolio_trend(session, test_workspace.id, test_user.id)
+    rows = {r["date"]: r for r in result["trend"]}
+    aid = str(house.id)
+    mid = rows[(today - timedelta(days=3)).isoformat()]
+    assert mid[f"debt:{aid}"] == pytest.approx(300000.0)
+    assert mid[aid] == pytest.approx(510000.0)
+    last = rows[today.isoformat()]
+    assert last[f"debt:{aid}"] == pytest.approx(299000.0)
+    assert result["debt_total"] == pytest.approx(299000.0)
+    assert result["total"] == pytest.approx(520000.0)

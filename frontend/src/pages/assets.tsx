@@ -1736,8 +1736,8 @@ export default function AssetsPage() {
 
 const PORTFOLIO_COLORS = ['#6366F1', '#F43F5E', '#F59E0B', '#10B981', '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16']
 
-function PortfolioChart({ data, wallets, currency, locale: loc, dateLocale: dateLoc, mask }: {
-  data: { assets: { id: string; name: string; type: string; group_id: string | null }[]; trend: Record<string, unknown>[]; total: number }
+function PortfolioChart({ data: grossData, wallets, currency, locale: loc, dateLocale: dateLoc, mask }: {
+  data: { assets: { id: string; name: string; type: string; group_id: string | null }[]; trend: Record<string, unknown>[]; total: number; debt_total?: number }
   wallets: AssetGroup[]
   currency: string
   locale: string
@@ -1753,6 +1753,23 @@ function PortfolioChart({ data, wallets, currency, locale: loc, dateLocale: date
   const [mode, setMode] = useState<'wallet' | 'asset'>('wallet')
   const [drawMode, setDrawMode] = useState<'stacked' | 'lines'>('stacked')
   const isStacked = drawMode === 'stacked'
+  // Fork: Equity charts each asset as its value minus what the loans secured
+  // on it owed that day ("debt:<id>" per trend row); Value is the gross view.
+  const [basis, setBasis] = useState<'equity' | 'value'>('equity')
+  const hasDebt = grossData.trend.some(row => ((row._debt_total as number) ?? 0) > 0)
+  const data = useMemo(() => {
+    if (basis === 'value' || !hasDebt) return grossData
+    const trend = grossData.trend.map(row => {
+      const out: Record<string, unknown> = { ...row }
+      for (const a of grossData.assets) {
+        const debt = (row[`debt:${a.id}`] as number) ?? 0
+        if (debt) out[a.id] = ((row[a.id] as number) ?? 0) - debt
+      }
+      out._total = ((row._total as number) ?? 0) - ((row._debt_total as number) ?? 0)
+      return out
+    })
+    return { ...grossData, trend, total: grossData.total - (grossData.debt_total ?? 0) }
+  }, [basis, hasDebt, grossData])
 
   const formatCompact = (v: number) => {
     const abs = Math.abs(v)
@@ -1868,6 +1885,22 @@ function PortfolioChart({ data, wallets, currency, locale: loc, dateLocale: date
                 {t('assets.chartByAsset')}
               </button>
             </div>
+            {hasDebt && (
+              <div role="group" aria-label={t('assets.chartBasis')} className="inline-flex items-center rounded-lg border border-border p-0.5 bg-muted/40">
+                {(['equity', 'value'] as const).map(b => (
+                  <button
+                    key={b}
+                    type="button"
+                    aria-pressed={basis === b}
+                    onClick={() => setBasis(b)}
+                    title={b === 'equity' ? t('assets.chartEquityHelp') : undefined}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${basis === b ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    {b === 'equity' ? t('assets.chartEquity') : t('assets.chartValue')}
+                  </button>
+                ))}
+              </div>
+            )}
             <div role="group" aria-label={t('assets.chartDrawMode')} className="inline-flex items-center rounded-lg border border-border p-0.5 bg-muted/40">
               <button
                 type="button"
