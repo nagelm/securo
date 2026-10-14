@@ -1358,10 +1358,165 @@ async def _get_baseline_projection(
     return projections, lookback_days
 
 
+def _make_to_primary(session: AsyncSession, primary_currency: str):
+    """An async converter into ``primary_currency`` with a per-call rate cache."""
+    from app.services.fx_rate_service import get_rate
+
+    rate_cache: dict[str, Decimal] = {primary_currency: Decimal("1")}
+
+    async def _to_primary(amount: Decimal, ccy: str) -> float:
+        if ccy == primary_currency:
+            return float(amount)
+        rate = rate_cache.get(ccy)
+        if rate is None:
+            rate = await get_rate(session, ccy, primary_currency)
+            rate_cache[ccy] = rate
+        return float((amount * rate).quantize(Decimal("0.01")))
+
+    return _to_primary
+
+
+_SPENDING_ESTIMATE_MONTHS = 12
+
+
+async def _get_category_spending_estimate(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    today: date,
+    to_primary,
+    account_ids: list[uuid.UUID],
+) -> list[dict]:
+    """Fork: average monthly net spending per category, for the forecast.
+
+    The per-category sibling of ``_get_baseline_projection``: where that one
+    averages all flows into one daily inflow and outflow, this one answers
+    "what does Eating out cost a month" so a forecast scenario can cut it.
+
+    Over the last ``_SPENDING_ESTIMATE_MONTHS`` full calendar months (fewer
+    when the history is shorter; none without a full month), per category:
+    debits less credits (a credit in a spending category is a refund and
+    nets against it). P&L rules as everywhere else (no transfers, ignored or
+    transfer-like categories). Left out so recurring payments are not
+    counted twice: rows linked to a recurring schedule, and every category
+    with an active recurring debit. Uncategorised spending has no category
+    to estimate and is left out too. Only categories with net spending
+    above zero are returned, largest first, as
+    ``{category_id, name, color, monthly_amount}`` in the primary currency.
+    """
+    from app.models.recurring_transaction import RecurringTransaction
+
+    if not account_ids:
+        return []
+    window_end = today.replace(day=1)
+    window_start = _add_months(window_end, -_SPENDING_ESTIMATE_MONTHS)
+    base_filters = [
+        Transaction.workspace_id == workspace_id,
+        Account.is_closed == False,
+        Transaction.date < window_end,
+        Transaction.source != "opening_balance",
+        Transaction.status == "posted",
+        Transaction.category_id.is_not(None),
+        Transaction.recurring_transaction_id.is_(None),
+        Transaction.account_id.in_(account_ids),
+        counts_as_pnl(),
+    ]
+    earliest = (
+        await session.execute(
+            select(func.min(Transaction.date))
+            .join(Account, Transaction.account_id == Account.id)
+            .where(*base_filters)
+        )
+    ).scalar_one_or_none()
+    if earliest is None:
+        return []
+    if earliest > window_start:
+        first_full = earliest if earliest.day == 1 else _add_months(earliest.replace(day=1), 1)
+        window_start = max(window_start, first_full)
+    months = (window_end.year - window_start.year) * 12 + window_end.month - window_start.month
+    if months < 1:
+        return []
+
+    covered = select(RecurringTransaction.category_id).where(
+        RecurringTransaction.workspace_id == workspace_id,
+        RecurringTransaction.is_active == True,
+        RecurringTransaction.type == "debit",
+        RecurringTransaction.category_id.is_not(None),
+    )
+    rows = await session.execute(
+        select(
+            Transaction.category_id,
+            Transaction.type,
+            Transaction.amount,
+            Transaction.amount_primary,
+            Transaction.currency,
+        )
+        .join(Account, Transaction.account_id == Account.id)
+        .where(
+            *base_filters,
+            Transaction.date >= window_start,
+            Transaction.category_id.not_in(covered),
+        )
+    )
+    net: dict[uuid.UUID, float] = {}
+    for cat_id, tx_type, amt, amt_primary, ccy in rows.all():
+        if amt_primary is not None:
+            amount = abs(float(amt_primary))
+        else:
+            amount = abs(await to_primary(Decimal(str(amt or 0)), ccy))
+        net[cat_id] = net.get(cat_id, 0.0) + (amount if tx_type == "debit" else -amount)
+
+    spending = {cat_id: total for cat_id, total in net.items() if total > 0}
+    if not spending:
+        return []
+    cats = await session.execute(
+        select(Category.id, Category.name, Category.color).where(Category.id.in_(list(spending)))
+    )
+    estimates = [
+        {
+            "category_id": cat_id,
+            "name": name,
+            "color": color,
+            "monthly_amount": round(spending[cat_id] / months, 2),
+        }
+        for cat_id, name, color in cats.all()
+    ]
+    estimates.sort(key=lambda e: e["monthly_amount"], reverse=True)
+    return estimates
+
+
+def _spread_monthly(monthly_amount: float, start: date, end: date) -> list[tuple[date, float]]:
+    """Spread a monthly amount over the days ``[start, end]``.
+
+    Each day gets ``monthly_amount / days in its month``, so every whole
+    month in the range carries exactly the monthly amount and weekly or
+    daily points get their share by day.
+    """
+    out: list[tuple[date, float]] = []
+    d = start
+    while d <= end:
+        days = calendar.monthrange(d.year, d.month)[1]
+        out.append((d, monthly_amount / days))
+        d += timedelta(days=1)
+    return out
+
+
 # Account types whose balance is not spendable money: kept in net worth, left
 # out of the cash-flow report. Fork: loans too (a mortgage balance isn't cash;
 # repayments show as cash going out of the account that pays them).
 CASH_FLOW_EXCLUDED_TYPES = frozenset({"investment", "loan"})
+
+
+async def cash_flow_account_ids(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    account_ids: Optional[list[uuid.UUID]] = None,
+) -> list[uuid.UUID]:
+    """The open accounts the cash-flow report counts (cash and cards)."""
+    return [
+        a.id
+        for a in await _get_open_accounts(session, workspace_id, account_ids)
+        if a.type not in CASH_FLOW_EXCLUDED_TYPES
+    ]
 
 
 async def get_cash_flow_report(
@@ -1373,6 +1528,7 @@ async def get_cash_flow_report(
     currency: str = "USD",
     baseline: bool = False,
     account_ids: Optional[list[uuid.UUID]] = None,
+    extra_projections: Optional[list[dict]] = None,
 ) -> ReportResponse:
     """Cash flow chart with a short past window plus a forward projection.
 
@@ -1395,18 +1551,20 @@ async def get_cash_flow_report(
     ``CASH_FLOW_EXCLUDED_TYPES`` (investment, loan) are left out of the opening and
     closing balances, and their transactions, pending rows and recurring
     rules out of the flows. They stay in net worth.
+
+    Fork: expected payments (the Forecast page's one-off items not yet
+    matched to a bank row) are projected on their dates, and
+    ``extra_projections`` (dicts shaped like a recurring projection) are
+    added to the forward flows; the Forecast page passes its everyday
+    spending estimate there.
     """
     from app.services.dashboard_service import _balance_at, _get_recurring_projections
-    from app.services.fx_rate_service import get_rate
+    from app.services.forecast_service import expected_payment_projections
 
     # Invoices have no account; they are left out only under a Collection
     # filter, so remember whether the caller narrowed the report.
     narrowed = account_ids is not None
-    account_ids = [
-        a.id
-        for a in await _get_open_accounts(session, workspace_id, account_ids)
-        if a.type not in CASH_FLOW_EXCLUDED_TYPES
-    ]
+    account_ids = await cash_flow_account_ids(session, workspace_id, account_ids)
     acct_filter = [Transaction.account_id.in_(account_ids)]
     today = app_today()
     end = _add_months(today, months)
@@ -1426,16 +1584,7 @@ async def get_cash_flow_report(
         account_ids=account_ids,
     )
 
-    rate_cache: dict[str, Decimal] = {primary_currency: Decimal("1")}
-
-    async def _to_primary(amount: Decimal, ccy: str) -> float:
-        if ccy == primary_currency:
-            return float(amount)
-        rate = rate_cache.get(ccy)
-        if rate is None:
-            rate = await get_rate(session, ccy, primary_currency)
-            rate_cache[ccy] = rate
-        return float((amount * rate).quantize(Decimal("0.01")))
+    _to_primary = _make_to_primary(session, primary_currency)
 
     flows: dict[date, dict[str, float]] = {}
 
@@ -1582,6 +1731,14 @@ async def get_cash_flow_report(
             session, workspace_id, today + timedelta(days=1), end + timedelta(days=1),
             account_ids,
         )
+    # Fork: expected payments feed every forecast; the extras only when given.
+    projections = [
+        *projections,
+        *await expected_payment_projections(
+            session, workspace_id, today, end, account_ids, narrowed=narrowed
+        ),
+        *(extra_projections or []),
+    ]
 
     for proj in projections:
         d = proj["date"]
