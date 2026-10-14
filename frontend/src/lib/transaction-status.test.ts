@@ -8,8 +8,8 @@ describe('shouldShowPendingBadge', () => {
     expect(shouldShowPendingBadge({ status: 'pending', source: 'recurring' })).toBe(true)
   })
 
-  it('hides pending for bank-synced transactions', () => {
-    expect(shouldShowPendingBadge({ status: 'pending', source: 'sync' })).toBe(false)
+  it('shows pending for bank-synced transactions the bank has not settled (fork)', () => {
+    expect(shouldShowPendingBadge({ status: 'pending', source: 'sync' })).toBe(true)
   })
 
   it('hides the badge for posted transactions', () => {

@@ -3,7 +3,12 @@ type PendingBadgeTransaction = {
   status: string | null
 }
 
-/** Bank-sync pending state already matches the provider and needs no UI badge. */
+/**
+ * Every pending row shows the pending badge. Fork (owner 2026-10-15): bank
+ * rows too. Upstream hid it for synced rows, so a row the bank hadn't
+ * settled looked settled, just without a payee (Akahu sends pending rows
+ * without a merchant).
+ */
 export function shouldShowPendingBadge(transaction: PendingBadgeTransaction): boolean {
-  return transaction.status === 'pending' && transaction.source !== 'sync'
+  return transaction.status === 'pending'
 }
