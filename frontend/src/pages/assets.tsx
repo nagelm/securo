@@ -186,6 +186,8 @@ function assetErrorMessage(e: unknown, fallback: string): string {
   return resp?.status ? `${fallback} (${resp.status})` : fallback
 }
 
+const VALUE_BASIS_KEY = 'securo.assets.valueBasis'
+
 export default function AssetsPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -196,6 +198,28 @@ export default function AssetsPage() {
   const { canWrite } = useWorkspace()
   const userCurrency = user?.preferences?.currency_display ?? 'USD'
   const queryClient = useQueryClient()
+  // Fork: assets with linked loans chart as equity unless switched to gross
+  // value on their own row; the choice is remembered per asset in this browser.
+  const [valueBasisIds, setValueBasisIds] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(VALUE_BASIS_KEY) ?? '[]') as string[])
+    } catch {
+      return new Set()
+    }
+  })
+  const toggleAssetBasis = (assetId: string) => {
+    setValueBasisIds(prev => {
+      const next = new Set(prev)
+      if (next.has(assetId)) next.delete(assetId)
+      else next.add(assetId)
+      try {
+        localStorage.setItem(VALUE_BASIS_KEY, JSON.stringify([...next]))
+      } catch {
+        // storage unavailable: the choice lasts for this visit only
+      }
+      return next
+    })
+  }
 
   const { data: supportedCurrencies } = useQuery({
     queryKey: ['currencies'],
@@ -853,7 +877,13 @@ export default function AssetsPage() {
 
         {hasLinkedLoans && (
           <div className="pr-3 pb-2 -mt-1.5 pl-[3.375rem]">
-            <AssetEquityLine asset={asset} locale={locale} mask={mask} />
+            <AssetEquityLine
+              asset={asset}
+              locale={locale}
+              mask={mask}
+              basis={valueBasisIds.has(asset.id) ? 'value' : 'equity'}
+              onBasisChange={() => toggleAssetBasis(asset.id)}
+            />
           </div>
         )}
 
@@ -1112,6 +1142,7 @@ export default function AssetsPage() {
       {portfolioData && portfolioData.trend.length > 0 && (
         <PortfolioChart
           data={portfolioData}
+          valueBasisIds={valueBasisIds}
           wallets={sortedWallets}
           currency={userCurrency}
           locale={locale}
@@ -1736,8 +1767,10 @@ export default function AssetsPage() {
 
 const PORTFOLIO_COLORS = ['#6366F1', '#F43F5E', '#F59E0B', '#10B981', '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16']
 
-function PortfolioChart({ data: grossData, wallets, currency, locale: loc, dateLocale: dateLoc, mask }: {
+function PortfolioChart({ data: grossData, valueBasisIds, wallets, currency, locale: loc, dateLocale: dateLoc, mask }: {
   data: { assets: { id: string; name: string; type: string; group_id: string | null }[]; trend: Record<string, unknown>[]; total: number; debt_total?: number }
+  /** Assets switched to gross value on their row; the rest with loans chart as equity. */
+  valueBasisIds: Set<string>
   wallets: AssetGroup[]
   currency: string
   locale: string
@@ -1753,23 +1786,28 @@ function PortfolioChart({ data: grossData, wallets, currency, locale: loc, dateL
   const [mode, setMode] = useState<'wallet' | 'asset'>('wallet')
   const [drawMode, setDrawMode] = useState<'stacked' | 'lines'>('stacked')
   const isStacked = drawMode === 'stacked'
-  // Fork: Equity charts each asset as its value minus what the loans secured
-  // on it owed that day ("debt:<id>" per trend row); Value is the gross view.
-  const [basis, setBasis] = useState<'equity' | 'value'>('equity')
-  const hasDebt = grossData.trend.some(row => ((row._debt_total as number) ?? 0) > 0)
+  // Fork: an asset with loans secured on it charts as its value minus what
+  // those loans owed that day ("debt:<id>" per trend row), unless its row is
+  // switched to gross Value.
   const data = useMemo(() => {
-    if (basis === 'value' || !hasDebt) return grossData
     const trend = grossData.trend.map(row => {
       const out: Record<string, unknown> = { ...row }
+      let netted = 0
       for (const a of grossData.assets) {
+        if (valueBasisIds.has(a.id)) continue
         const debt = (row[`debt:${a.id}`] as number) ?? 0
-        if (debt) out[a.id] = ((row[a.id] as number) ?? 0) - debt
+        if (debt) {
+          out[a.id] = ((row[a.id] as number) ?? 0) - debt
+          netted += debt
+        }
       }
-      out._total = ((row._total as number) ?? 0) - ((row._debt_total as number) ?? 0)
+      out._total = ((row._total as number) ?? 0) - netted
       return out
     })
-    return { ...grossData, trend, total: grossData.total - (grossData.debt_total ?? 0) }
-  }, [basis, hasDebt, grossData])
+    // The header total matches the last row's _total, as for the gross view.
+    const last = trend[trend.length - 1]
+    return { ...grossData, trend, total: last ? ((last._total as number) ?? 0) : grossData.total }
+  }, [valueBasisIds, grossData])
 
   const formatCompact = (v: number) => {
     const abs = Math.abs(v)
@@ -1885,22 +1923,6 @@ function PortfolioChart({ data: grossData, wallets, currency, locale: loc, dateL
                 {t('assets.chartByAsset')}
               </button>
             </div>
-            {hasDebt && (
-              <div role="group" aria-label={t('assets.chartBasis')} className="inline-flex items-center rounded-lg border border-border p-0.5 bg-muted/40">
-                {(['equity', 'value'] as const).map(b => (
-                  <button
-                    key={b}
-                    type="button"
-                    aria-pressed={basis === b}
-                    onClick={() => setBasis(b)}
-                    title={b === 'equity' ? t('assets.chartEquityHelp') : undefined}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${basis === b ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                  >
-                    {b === 'equity' ? t('assets.chartEquity') : t('assets.chartValue')}
-                  </button>
-                ))}
-              </div>
-            )}
             <div role="group" aria-label={t('assets.chartDrawMode')} className="inline-flex items-center rounded-lg border border-border p-0.5 bg-muted/40">
               <button
                 type="button"

@@ -860,6 +860,23 @@ async def get_income_expenses_report(
             if comp_map[comp_key]["value"] <= 0:
                 comp_map.pop(comp_key)
 
+    # Fork: a credit filed in a category that also has spending in the range is
+    # a refund (or a share paid back) of that spending, so it nets against the
+    # expense instead of appearing as income. Categories with credits only
+    # (salary, interest, sales) stay income.
+    for (cat_key, group) in [k for k in comp_map if k[1] == "income"]:
+        expense = comp_map.get((cat_key, "expenses"))
+        if expense is None:
+            continue
+        refund = comp_map.pop((cat_key, "income"))["value"]
+        remainder = expense["value"] - refund
+        if remainder > 0:
+            expense["value"] = remainder
+        else:
+            comp_map.pop((cat_key, "expenses"))
+            if remainder < 0:
+                comp_map[(cat_key, "income")] = {**expense, "value": -remainder}
+
     # Investment-style outflows: transactions in `treat_as_transfer` categories
     # are excluded from P&L by counts_as_user_pnl (an investment application's
     # counterpart is an Asset/Holding, not spending). But for the cashflow Sankey

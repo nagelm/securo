@@ -19,6 +19,12 @@ interface AssetEquityProps {
   mask?: (value: string) => string
 }
 
+interface AssetEquityLineProps extends AssetEquityProps {
+  /** Fork: how the portfolio chart shows this asset; omit to hide the switch. */
+  basis?: 'equity' | 'value'
+  onBasisChange?: () => void
+}
+
 const identity = (value: string) => value
 
 function hasLinkedLoans(asset: Asset): boolean {
@@ -30,7 +36,7 @@ function money(value: number | null | undefined, asset: Asset, locale: string, m
 }
 
 /** One line under an asset row: Value · Debt · Equity. */
-export function AssetEquityLine({ asset, locale, mask = identity }: AssetEquityProps) {
+export function AssetEquityLine({ asset, locale, mask = identity, basis, onBasisChange }: AssetEquityLineProps) {
   const { t } = useTranslation()
   if (!hasLinkedLoans(asset)) return null
 
@@ -44,6 +50,22 @@ export function AssetEquityLine({ asset, locale, mask = identity }: AssetEquityP
       <span className="text-rose-500">{t('assets.equity.debt')} {money(asset.linked_debt, asset, locale, mask)}</span>
       <span aria-hidden="true"> · </span>
       <span className="font-medium text-foreground">{t('assets.equity.equity')} {money(asset.equity, asset, locale, mask)}</span>
+      {basis && onBasisChange && (
+        <span role="group" aria-label={t('assets.chartBasis')} className="ml-2 inline-flex rounded border border-border align-middle">
+          {(['equity', 'value'] as const).map(b => (
+            <button
+              key={b}
+              type="button"
+              aria-pressed={basis === b}
+              title={t('assets.chartEquityHelp')}
+              onClick={(e) => { e.stopPropagation(); if (basis !== b) onBasisChange() }}
+              className={`px-1.5 py-px text-[10px] ${basis === b ? 'bg-muted text-foreground font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              {b === 'equity' ? t('assets.chartEquity') : t('assets.chartValue')}
+            </button>
+          ))}
+        </span>
+      )}
     </p>
   )
 }

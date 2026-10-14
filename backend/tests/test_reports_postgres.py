@@ -294,3 +294,29 @@ async def test_income_expenses_sets_aside_paired_loan_principal(
     lanes = {(c.group, c.label): c.value for c in report.composition}
     assert lanes[("investments", "Loan repayments")] == 900
     assert ("investments", "Transfers") not in lanes
+
+
+async def test_income_expenses_nets_refunds_against_spending(session, test_user, test_workspace):
+    """Fork: a credit in a category that has spending nets against it; a
+    credit-only category stays income."""
+    from app.models.category import Category
+    from app.services.report_service import get_income_expenses_report
+
+    cash = await _pg_account(session, test_user.id, "MM Refund Cash")
+    shop = Category(id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+                    name="Shopping", icon="shopping-bag", color="#222222")
+    pay = Category(id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+                   name="Salary", icon="briefcase", color="#333333")
+    session.add_all([shop, pay])
+    await session.commit()
+    day = date.today() - timedelta(days=3)
+    for amount, kind, cat in ((100, "debit", shop), (30, "credit", shop), (500, "credit", pay)):
+        t = await _pg_txn(session, test_user.id, cash.id, amount, kind, day)
+        t.category_id = cat.id
+    await session.commit()
+
+    report = await get_income_expenses_report(session, test_workspace.id, test_user.id, months=1)
+    lanes = {(c.group, c.label): c.value for c in report.composition}
+    assert lanes[("expenses", "Shopping")] == 70
+    assert ("income", "Shopping") not in lanes
+    assert lanes[("income", "Salary")] == 500
