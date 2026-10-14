@@ -339,7 +339,7 @@ async def test_rate_change_with_a_chosen_repayment(session, test_user, test_work
     assert line.payoff_change_days < 0
 
 
-def test_a_rate_change_repayment_must_be_positive():
+async def test_a_rate_change_repayment_must_be_positive():
     from app.services.forecast_service import _validate_item
 
     item = {
