@@ -3,6 +3,7 @@ import {
   BarChart3,
   Building2,
   Landmark,
+  LineChart,
   PiggyBank,
   Receipt,
   Repeat,
@@ -46,6 +47,8 @@ export const navItems: NavItem[] = [
   { type: 'link', key: 'budgets', path: '/budgets', icon: PiggyBank, module: 'budgets' },
   { type: 'link', key: 'goals', path: '/goals', icon: Target, module: 'goals' },
   { type: 'link', key: 'recurring', path: '/recurring', icon: Repeat, module: 'recurring' },
+  // Fork: the Forecast page reads recurring payments, so it follows that module.
+  { type: 'link', key: 'forecast', path: '/forecast', icon: LineChart, module: 'recurring' },
   { type: 'link', key: 'categories', path: '/categories', icon: Tag, module: 'categories' },
   { type: 'link', key: 'payees', path: '/payees', icon: Users, module: 'payees' },
   { type: 'link', key: 'splitGroups', path: '/groups', icon: Split, module: 'split_groups' },
