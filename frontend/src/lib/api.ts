@@ -49,6 +49,9 @@ import type {
   InvoiceSettings,
   InvoiceSummary,
   RecurringTransaction,
+  ForecastItem,
+  ForecastResponse,
+  ForecastScenario,
   ProjectedTransaction,
   TransactionCalendarResponse,
   Budget,
@@ -1279,6 +1282,54 @@ export const recurring = {
   generate: async (): Promise<{ generated: number }> => {
     const { data } = await api.post('/recurring-transactions/generate')
     return data
+  },
+}
+
+// Fork: the Forecast page.
+export const forecast = {
+  get: async (
+    months = 12,
+    interval = 'monthly',
+    includeSpending = true,
+  ): Promise<ForecastResponse> => {
+    const { data } = await api.get('/forecast', {
+      params: { months, interval, include_spending: includeSpending },
+    })
+    return data
+  },
+  items: {
+    list: async (): Promise<ForecastItem[]> => {
+      const { data } = await api.get('/forecast/items')
+      return data
+    },
+    create: async (item: Partial<ForecastItem>): Promise<ForecastItem> => {
+      const { data } = await api.post('/forecast/items', item)
+      return data
+    },
+    update: async (id: string, item: Partial<ForecastItem>): Promise<ForecastItem> => {
+      const { data } = await api.patch(`/forecast/items/${id}`, item)
+      return data
+    },
+    delete: async (id: string): Promise<void> => {
+      await api.delete(`/forecast/items/${id}`)
+    },
+  },
+  scenarios: {
+    list: async (): Promise<ForecastScenario[]> => {
+      const { data } = await api.get('/forecast/scenarios')
+      return data
+    },
+    create: async (scenario: Partial<ForecastScenario>): Promise<ForecastScenario> => {
+      const { data } = await api.post('/forecast/scenarios', scenario)
+      return data
+    },
+    update: async (id: string, scenario: Partial<ForecastScenario>): Promise<ForecastScenario> => {
+      const { data } = await api.patch(`/forecast/scenarios/${id}`, scenario)
+      return data
+    },
+    delete: async (id: string): Promise<void> => {
+      await api.delete(`/forecast/scenarios/${id}`)
+    },
   },
 }
 

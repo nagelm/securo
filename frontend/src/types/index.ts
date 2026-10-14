@@ -668,6 +668,80 @@ export interface RecurringTransaction {
   interest_category_id?: string | null
 }
 
+// Fork: the Forecast page.
+export type ForecastItemKind = 'one_off' | 'repeating' | 'recurring_change' | 'income_change' | 'spending_change'
+export type ForecastChangeMode = 'amount' | 'pause' | 'stop' | 'percent'
+
+export interface ForecastScenario {
+  id: string
+  name: string
+  color: string
+  is_enabled: boolean
+  position: number
+}
+
+/** An expected payment (`scenario_id` null) or one change inside a scenario. */
+export interface ForecastItem {
+  id: string
+  scenario_id: string | null
+  kind: ForecastItemKind
+  description: string
+  /** Decimal string. Signed for income_change and spending_change (negative = less). */
+  amount: string | number | null
+  currency: string
+  type: 'debit' | 'credit' | null
+  date: string | null
+  start_date: string | null
+  end_date: string | null
+  frequency: RecurringTransaction['frequency'] | null
+  account_id: string | null
+  category_id: string | null
+  recurring_transaction_id: string | null
+  change_mode: ForecastChangeMode | null
+  percent: string | number | null
+  matched_transaction_id: string | null
+}
+
+export interface ForecastPoint {
+  date: string
+  value: number
+}
+
+export interface ForecastLineSummary {
+  end_balance: number
+  lowest_balance: number
+  lowest_date: string
+}
+
+export interface ForecastScenarioSeries {
+  id: string
+  name: string
+  color: string
+  points: ForecastPoint[]
+  summary: ForecastLineSummary
+  difference: number
+}
+
+export interface SpendingEstimate {
+  category_id: string
+  name: string
+  color: string
+  monthly_amount: number
+}
+
+export interface ForecastResponse {
+  currency: string
+  interval: string
+  start_date: string
+  end_date: string
+  starting_balance: number
+  include_spending: boolean
+  base: ForecastPoint[]
+  summary: ForecastLineSummary
+  scenarios: ForecastScenarioSeries[]
+  spending_estimates: SpendingEstimate[]
+}
+
 export interface ProjectedTransaction {
   recurring_id: string
   account_id: string | null
