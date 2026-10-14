@@ -16,7 +16,8 @@ import { todayInTimezone, weekdayShortLabels } from '@/lib/date-utils'
 import { useEffectiveTimezone } from '@/hooks/use-timezone'
 import { cn } from '@/lib/utils'
 import { formatCurrency } from '@/lib/format'
-import { shouldShowPendingBadge } from '@/lib/transaction-status'
+import { isUnsettled, shouldShowPendingBadge } from '@/lib/transaction-status'
+import { UnsettledBadge } from '@/components/unsettled-badge'
 
 function parseLocalDate(value: string) {
   return new Date(`${value}T00:00:00`)
@@ -1280,6 +1281,7 @@ function CalendarItemRow({
               <Clock size={12} className="text-amber-500" role="img" aria-label={t('transactions.pending')} />
             </span>
           )}
+          {isUnsettled(item) && <UnsettledBadge />}
         </div>
         {transferAccounts ? (
           <p className="text-xs text-muted-foreground mt-0.5 truncate">{item.description}</p>

@@ -1210,7 +1210,9 @@
     "invoiceBadgeTooltip": "Táto transakcia vyrovnáva faktúru. Otvorte ju.",
     "suggestionBadge": "Otázka",
     "suggestionBadgeTooltip": "Platba môže uhradiť túto faktúru. Otvorte front a odpovedzte.",
-    "clearGroupFilter": "Zrušiť filter skupiny"
+    "clearGroupFilter": "Zrušiť filter skupiny",
+    "unsettled": "Unsettled",
+    "unsettledHint": "Not settled by the bank yet. Its payee arrives when it settles."
   },
   "accounts": {
     "title": "Účty",

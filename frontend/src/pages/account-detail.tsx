@@ -9,7 +9,8 @@ import { accounts, dashboard, transactions, categories as categoriesApi, categor
 import { localDateString } from '@/lib/date-utils'
 import { applyTransactionToBalance, excludeMaterializedProjections, transactionAmountForBalance } from '@/lib/account-detail-utils'
 import { invalidateFinancialQueries } from '@/lib/invalidate-queries'
-import { shouldShowPendingBadge } from '@/lib/transaction-status'
+import { isUnsettled, shouldShowPendingBadge } from '@/lib/transaction-status'
+import { UnsettledBadge } from '@/components/unsettled-badge'
 import { closeDateForBill, isOpenCycleWindow } from '@/lib/credit-card-cycle'
 import {
   TRANSACTION_PAGE_LIMIT,
@@ -1771,6 +1772,7 @@ export default function AccountDetailPage() {
                                 <Clock size={12} className="text-amber-500" role="img" aria-label={t('transactions.pending')} />
                               </span>
                             )}
+                            {isUnsettled(tx) && <UnsettledBadge />}
                             {tx.effective_bill_date && (
                               <span
                                 className="ml-2 inline-flex items-center gap-1 text-xs text-violet-600 dark:text-violet-400 font-normal bg-violet-50 dark:bg-violet-500/10 border border-violet-200 dark:border-violet-500/30 rounded px-1.5 py-0.5"

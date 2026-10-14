@@ -1160,7 +1160,9 @@
     "invoiceBadgeTooltip": "Esta transação quita uma cobrança. Abrir.",
     "suggestionBadge": "Pergunta",
     "suggestionBadgeTooltip": "Um pagamento pode quitar esta cobrança. Abra a fila para responder.",
-    "clearGroupFilter": "Limpar filtro de grupo"
+    "clearGroupFilter": "Limpar filtro de grupo",
+    "unsettled": "Unsettled",
+    "unsettledHint": "Not settled by the bank yet. Its payee arrives when it settles."
   },
   "accounts": {
     "title": "Contas",

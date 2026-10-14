@@ -1160,7 +1160,9 @@
     "invoiceBadgeTooltip": "Questa transazione salda una fattura. Aprila.",
     "suggestionBadge": "Domanda",
     "suggestionBadgeTooltip": "Un pagamento potrebbe saldare questa fattura. Apri la coda per rispondere.",
-    "clearGroupFilter": "Rimuovi filtro gruppo"
+    "clearGroupFilter": "Rimuovi filtro gruppo",
+    "unsettled": "Unsettled",
+    "unsettledHint": "Not settled by the bank yet. Its payee arrives when it settles."
   },
   "accounts": {
     "title": "Conti",

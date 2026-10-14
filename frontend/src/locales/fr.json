@@ -1160,7 +1160,9 @@
     "invoiceBadgeTooltip": "Cette transaction solde une facture. Ouvrir.",
     "suggestionBadge": "Question",
     "suggestionBadgeTooltip": "Un paiement peut solder cette facture. Ouvrez la file pour répondre.",
-    "clearGroupFilter": "Effacer le filtre de groupe"
+    "clearGroupFilter": "Effacer le filtre de groupe",
+    "unsettled": "Unsettled",
+    "unsettledHint": "Not settled by the bank yet. Its payee arrives when it settles."
   },
   "accounts": {
     "title": "Comptes",
