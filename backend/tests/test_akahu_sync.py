@@ -673,3 +673,94 @@ async def test_a_card_bill_sets_the_due_day_and_minimum_payment(session, test_us
     card = (await accounts_by_external_id(session, conn))["acc_card"]
     assert card.payment_due_day == due.day
     assert card.minimum_payment == Decimal("35.50")
+
+
+# ----- A household with one Akahu connection per partner ----------------------
+
+
+JOINT = "01-0001-0000009-03"
+
+
+def _partner_accounts() -> list[dict]:
+    """The second partner's own bank login: one account, no joint ones."""
+    return [_raw("acc_p_chq", "Partner Everyday", "CHECKING", BANK_A, 50.0,
+                 formatted_account="01-0002-0000002-00")]
+
+
+def _payment_to_joint() -> dict:
+    return {
+        "_id": "trans_p_1",
+        "_account": "acc_p_chq",
+        "date": "2026-03-04T11:00:00.000Z",
+        "description": "Joint Joint",
+        "amount": -100.0,
+        "type": "STANDING ORDER",
+        "meta": {"other_account": JOINT},
+    }
+
+
+def fake_partner_akahu():
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/accounts"):
+            return httpx.Response(200, json={"success": True, "items": _partner_accounts()})
+        if path.endswith("/acc_p_chq/transactions"):
+            return httpx.Response(200, json={"success": True, "items": [_payment_to_joint()], "cursor": {"next": None}})
+        return httpx.Response(404, json={"success": False})
+
+    transport = httpx.MockTransport(handler)
+
+    async def fake_client(self, credentials=None):  # noqa: ANN001
+        return httpx.AsyncClient(transport=transport, timeout=30)
+
+    return patch.object(AkahuProvider, "_client", fake_client)
+
+
+@pytest.mark.asyncio
+async def test_a_sync_keeps_the_connections_account_numbers(session, test_user, test_workspace):
+    conn = await akahu_connection(session, test_user, test_workspace)
+    await run_sync(session, conn, test_workspace, test_user, bank_accounts())
+    await session.refresh(conn)
+    assert conn.settings["account_numbers"]["own"] == ["010001000000100", "010001000000101"]
+
+
+@pytest.mark.asyncio
+async def test_a_payment_to_an_account_on_the_partners_connection_is_a_transfer(
+    session, test_user, test_workspace
+):
+    """The joint account sits on one partner's connection; the other partner's
+    payment into it is still the household paying itself."""
+    first = await akahu_connection(session, test_user, test_workspace)
+    await run_sync(session, first, test_workspace, test_user,
+                   bank_accounts() + [_raw("acc_joint", "Joint", "CHECKING", BANK_A, 900.0,
+                                           formatted_account=JOINT)])
+
+    partner = BankConnection(
+        user_id=test_user.id, workspace_id=test_workspace.id, provider="akahu",
+        external_id="akahu-user_2", institution_name="Akahu",
+        credentials={"user_token_enc": encrypt(USER), "app_token_enc": encrypt(APP)}, status="active",
+    )
+    session.add(partner)
+    await session.commit()
+
+    provider = AkahuProvider()
+    with fake_partner_akahu(), \
+         patch("app.services.connection_service.get_provider", return_value=provider), \
+         patch("app.services.connection_service.detect_transfer_pairs", new_callable=AsyncMock), \
+         patch("app.services.connection_service.stamp_primary_amount", new_callable=AsyncMock):
+        await sync_connection(session, partner.id, test_workspace.id, test_user.id)
+        assert "010001000000903" in provider.workspace_account_numbers[0]
+        rows = await provider.get_transactions(partner.credentials, "acc_p_chq")
+    assert [r.category_hint for r in rows] == ["transfers"]
+
+
+@pytest.mark.asyncio
+async def test_without_the_partners_connection_the_payment_is_not_a_transfer(
+    session, test_user, test_workspace
+):
+    provider = AkahuProvider()
+    with fake_partner_akahu():
+        rows = await provider.get_transactions(
+            {"user_token_enc": encrypt(USER), "app_token_enc": encrypt(APP)}, "acc_p_chq"
+        )
+    assert [r.category_hint for r in rows] != ["transfers"]

@@ -677,6 +677,17 @@ class AkahuProvider(BankProvider):
         # Accounts Akahu has lost access to, found by the last get_accounts
         # (inactive_account_warnings); read by the sync layer.
         self.action_required_warnings: list[dict] = []
+        # (own, investment payment) account numbers this connection reported
+        # on its last account read, kept by the sync layer on the connection
+        # so other connections in the workspace can recognise them.
+        self.account_numbers: Optional[tuple[frozenset[str], frozenset[str]]] = None
+        # The same sets from the workspace's other connections, set by the
+        # sync layer: a payment to a partner's account on another connection
+        # is still a transfer between the household's own accounts.
+        self.workspace_account_numbers: tuple[frozenset[str], frozenset[str]] = (
+            frozenset(),
+            frozenset(),
+        )
 
     @property
     def name(self) -> str:
@@ -792,6 +803,7 @@ class AkahuProvider(BankProvider):
 
         me = (await self._request(credentials, "GET", "/me")).get("item") or {}
         raw_accounts = await self._list_accounts(credentials)
+        self.account_numbers = account_number_sets(raw_accounts)
         connections = {
             str(name)
             for acc in raw_accounts
@@ -859,6 +871,7 @@ class AkahuProvider(BankProvider):
     async def get_accounts(self, credentials: dict) -> list[AccountData]:
         raw_accounts = await self._list_accounts(credentials)
         self.action_required_warnings = inactive_account_warnings(raw_accounts)
+        self.account_numbers = account_number_sets(raw_accounts)
         return self._parse_accounts(raw_accounts)
 
     async def get_institution_logo(self, credentials: dict) -> Optional[str]:
@@ -879,6 +892,11 @@ class AkahuProvider(BankProvider):
     ) -> list[TransactionData]:
         raw_accounts = await self._list_accounts(credentials)
         own_accounts, investment_accounts = account_number_sets(raw_accounts)
+        other_own, other_investment = getattr(
+            self, "workspace_account_numbers", (frozenset(), frozenset())
+        )
+        own_accounts |= other_own
+        investment_accounts |= other_investment
         accounts = {str(a["_id"]): a for a in raw_accounts}
         raw_acc = accounts.get(account_external_id)
         if raw_acc is None or not _has_transactions(raw_acc):

@@ -1017,6 +1017,53 @@ def _sync_loan_fields(provider: str, account: Account, acc_data: AccountData) ->
             account.credit_limit = limit
 
 
+ACCOUNT_NUMBERS_SETTING = "account_numbers"
+
+
+def _remember_account_numbers(connection: BankConnection, provider) -> None:
+    """Keep the account numbers the provider just read on the connection.
+
+    Providers that report them (Akahu) set ``account_numbers`` to (own,
+    investment payment) digit sets; others leave it absent and nothing is
+    stored.
+    """
+    numbers = getattr(provider, "account_numbers", None)
+    if not (isinstance(numbers, tuple) and len(numbers) == 2):
+        return
+    value = {"own": sorted(numbers[0]), "investment": sorted(numbers[1])}
+    current = connection.settings or {}
+    if current.get(ACCOUNT_NUMBERS_SETTING) != value:
+        connection.settings = {**current, ACCOUNT_NUMBERS_SETTING: value}
+
+
+async def _share_workspace_account_numbers(
+    session: AsyncSession, connection: BankConnection, provider
+) -> None:
+    """Tell the provider the account numbers of the workspace's other connections.
+
+    A household whose members each link their own bank app still pays itself:
+    without these, a payment from one member's account to a joint account on
+    the other member's connection looks like money leaving to a stranger.
+    """
+    if not isinstance(getattr(provider, "workspace_account_numbers", None), tuple):
+        return
+    rows = (
+        await session.execute(
+            select(BankConnection.settings).where(
+                BankConnection.workspace_id == connection.workspace_id,
+                BankConnection.id != connection.id,
+            )
+        )
+    ).scalars().all()
+    own: set[str] = set()
+    investment: set[str] = set()
+    for settings in rows:
+        numbers = (settings or {}).get(ACCOUNT_NUMBERS_SETTING) or {}
+        own.update(str(n) for n in numbers.get("own") or [])
+        investment.update(str(n) for n in numbers.get("investment") or [])
+    provider.workspace_account_numbers = (frozenset(own), frozenset(investment))
+
+
 async def _drop_closed_account_warnings(
     session: AsyncSession, connection_id: uuid.UUID, warnings: list
 ) -> list:
@@ -1379,6 +1426,9 @@ async def handle_oauth_callback(
     new_tx_ids: list[uuid.UUID] = []
 
     use_provider_cats = await admin_service.use_provider_categories(session)
+
+    _remember_account_numbers(connection, provider)
+    await _share_workspace_account_numbers(session, connection, provider)
 
     institution_cache: dict[str, Institution] = {}
     for acc_data in connection_data.accounts:
@@ -2248,6 +2298,8 @@ async def sync_connection(
         new_tx_ids: list[uuid.UUID] = []
         merged_count = 0
         accounts_data = await provider.get_accounts(credentials)
+        _remember_account_numbers(connection, provider)
+        await _share_workspace_account_numbers(session, connection, provider)
         incoming_external_ids = {acc.external_id for acc in accounts_data}
         institution_cache: dict[str, Institution] = {}
         # Providers that update a transaction in place when the bank edits it,
