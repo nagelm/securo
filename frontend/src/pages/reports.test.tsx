@@ -286,6 +286,17 @@ it('each tab opens on its own default range, monthly (fork)', async () => {
   await waitFor(() => expect(api.reports.netWorth.mock.calls.at(-1)?.slice(0, 2)).toEqual([120, 'monthly']))
 })
 
+it('cash flow offers 2Y, 5Y and 10Y ahead (fork)', async () => {
+  const { user } = renderWithProviders(<ReportsPage />)
+  await user.click(screen.getByRole('button', { name: t('reports.cashFlow') }))
+  await waitFor(() => expect(api.reports.cashFlow).toHaveBeenCalled())
+  for (const key of ['range2y', 'range5y'] as const) {
+    expect(screen.getByRole('button', { name: t(`reports.${key}`) })).toBeInTheDocument()
+  }
+  await user.click(screen.getByRole('button', { name: t('reports.range10y') }))
+  await waitFor(() => expect(api.reports.cashFlow.mock.calls.at(-1)?.slice(0, 2)).toEqual([120, 'monthly']))
+})
+
 describe('Reports page — Category Trends detail (fork)', () => {
   function trendReport(): ReportResponse {
     const cats = Array.from({ length: 14 }, (_, i) => ({

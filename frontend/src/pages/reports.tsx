@@ -82,6 +82,10 @@ const FORWARD_RANGE_OPTIONS: readonly RangeOption[] = [
   { key: '3m', months: 3 },
   { key: '6m', months: 6 },
   { key: '12m', months: 12 },
+  // Fork (owner 2026-10-15): longer forecasts.
+  { key: '2y', months: 24 },
+  { key: '5y', months: 60 },
+  { key: '10y', months: 120 },
 ]
 
 // The Money Map answers "where did my money go lately", so it leans on recent

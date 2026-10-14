@@ -143,7 +143,8 @@ async def get_income_expenses(
 
 @router.get("/cash-flow", response_model=ReportResponse)
 async def get_cash_flow(
-    months: int = Query(6, ge=1, le=12),
+    # Fork (owner 2026-10-15): up to ten years ahead.
+    months: int = Query(6, ge=1, le=120),
     interval: str = Query("daily", pattern="^(daily|weekly|monthly)$"),
     baseline: bool = Query(False),
     account_ids: Optional[list[uuid.UUID]] = Query(None),
