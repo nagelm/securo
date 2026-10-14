@@ -94,7 +94,10 @@ async def _resolve_rate(
     usd_to_target = await _get_exact_date_rate(session, to_currency, target)
 
     # Step 2: If missing, fetch from provider for exact date
-    if allow_fetch and (usd_to_source is None or usd_to_target is None):
+    fetch_allowed = allow_fetch and (
+        target == app_today() or get_settings().fx_fetch_history_on_demand
+    )
+    if fetch_allowed and (usd_to_source is None or usd_to_target is None):
         try:
             synced = await sync_rates(session, target)
             if synced > 0:

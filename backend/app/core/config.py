@@ -75,6 +75,11 @@ class Settings(BaseSettings):
     openexchangerates_app_id: str = ""
     supported_currencies: str = "USD,EUR,GBP,BRL,CAD,AUD,CHF,ARS,JPY,MXN,INR,SEK,DKK,NOK,PLN,CZK,HUF,RON,CRC,IDR,COP,CLP,DOP,KZT,RUB,GTQ,PHP,UAH,NZD,VND,SGD,AZN,TRY,PKR,MDL,AED,THB,EGP,MYR,CNY,SAR,QAR,JMD,RSD"  # comma-separated list
     fx_sync_mode: str = "on_demand"  # "on_demand" or "scheduled"
+    # Fork: False stops a conversion on a past date from calling the provider
+    # for that day (one API call per distinct date); it uses the closest stored
+    # rate instead. For plans with a small monthly quota, paired with a
+    # scheduled daily sync and a one-off backfill of past rates.
+    fx_fetch_history_on_demand: bool = True
 
     # Bank sync cadence. The hourly beat syncs a connection once its last sync
     # is this many minutes old, and asks the provider to re-read the bank (a
