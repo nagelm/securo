@@ -152,6 +152,7 @@ async def _net_worth_at(
         accounts = await _get_open_accounts(session, workspace_id, account_ids)
 
     accounts_total = 0.0
+    assets_total = 0.0
     liabilities_total = 0.0
     composition: list[ReportCompositionItem] = []
 
@@ -172,14 +173,20 @@ async def _net_worth_at(
                     group="liabilities",
                 ))
         else:
-            accounts_total += converted_val
+            # Fork: an investment account's value is its holdings, so it sits
+            # with the assets; Accounts is the cash in hand.
+            is_investment = account.type == "investment"
+            if is_investment:
+                assets_total += converted_val
+            else:
+                accounts_total += converted_val
             if converted_val > 0:
                 composition.append(ReportCompositionItem(
                     key=str(account.id),
                     label=get_account_name(account),
                     value=round(converted_val, 2),
                     color=_ACCOUNT_TYPE_COLORS.get(account.type, "#6B7280"),
-                    group="accounts",
+                    group="assets" if is_investment else "accounts",
                 ))
 
     # Per-asset composition at the cutoff date
@@ -194,7 +201,6 @@ async def _net_worth_at(
     # A holding an open account's balance already carries is counted there.
     asset_stmt = asset_stmt.where(counted_in_net_worth())
     asset_result = await session.execute(asset_stmt)
-    assets_total = 0.0
     for asset in asset_result.scalars().all():
         val_result = await session.execute(
             select(AssetValue.amount)

@@ -2771,3 +2771,7 @@ async def test_cash_flow_leaves_investment_accounts_out_and_net_worth_keeps_them
 
     net_worth = await get_net_worth_report(session, test_workspace.id, test_user.id, months=1)
     assert net_worth.summary.primary_value == 6300
+    # Fork: the investment account's value sits in the Assets band.
+    bands = {b.key: b.value for b in net_worth.summary.breakdowns}
+    assert bands["accounts"] == 1000
+    assert bands["assets"] == 5300
