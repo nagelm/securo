@@ -3492,9 +3492,9 @@
     "more": "more than usual",
     "excluded": "Not shown: {{list}}.",
     "reasons": {
-      "one_off": "mostly one-off purchases",
-      "more_payments": "an extra regular payment this month",
-      "fewer_payments": "one regular payment fewer this month"
+      "one_off": "one-offs",
+      "more_payments": "an extra regular payment",
+      "fewer_payments": "one regular payment fewer"
     },
     "better": "Better",
     "worse": "Worse",
@@ -3523,7 +3523,8 @@
         "title_leave": "Savings rate lower during leave",
         "income": "Income {{change}} ({{movers}}).",
         "spending": "Everyday spending {{change}} ({{movers}}).",
-        "leave": "Pay fell while {{payer}} payments started, which looks like leave."
+        "leave": "Pay fell while {{payer}} payments started, which looks like leave.",
+        "short": "{{rate}}% kept, from {{before}}% · income {{income}}"
       },
       "price_up": {
         "title": "{{payee}} costs more"

@@ -9,7 +9,6 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react'
 import { insights as insightsApi } from '@/lib/api'
 import { extractApiError } from '@/lib/api-errors'
-import { formatCurrency } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useDisplayLocale } from '@/hooks/use-display-locale'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
@@ -17,6 +16,10 @@ import { PageHeader } from '@/components/page-header'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { InsightCard, InsightsBriefing } from '@/types'
+
+function wholeCurrency(value: number, currency: string, locale: string): string {
+  return new Intl.NumberFormat(locale, { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
+}
 
 function shiftMonth(ym: string, by: number): string {
   const [y, m] = ym.split('-').map(Number)
@@ -67,7 +70,7 @@ export default function InsightsPage() {
   })
 
   const current = data?.month
-  const money = (v: number) => mask(formatCurrency(v, data?.currency ?? 'USD', locale))
+  const money = (v: number) => mask(wholeCurrency(v, data?.currency ?? 'USD', locale))
   const canBack = !!current && !!data?.first_month && current > data.first_month
   const canForward = !!current && !!data && current < data.last_month
 
@@ -204,7 +207,13 @@ function Briefing({ data, money }: { data: InsightsBriefing; money: (v: number) 
           {data.excluded.length > 0 && (
             <p className="text-xs text-muted-foreground">
               {t('insights.excluded', {
-                list: data.excluded.map((e) => `${e.name} (${t(`insights.reasons.${e.reason}`)})`).join(', '),
+                list: (['more_payments', 'fewer_payments', 'one_off'] as const)
+                  .map((reason) => {
+                    const names = data.excluded.filter((e) => e.reason === reason).map((e) => e.name)
+                    return names.length ? `${names.join(', ')} (${t(`insights.reasons.${reason}`)})` : ''
+                  })
+                  .filter(Boolean)
+                  .join('; '),
               })}
             </p>
           )}
@@ -246,7 +255,6 @@ function CategoryRow({
   const href = c.category_id ? `/transactions?category_id=${c.category_id}&from=${from}&to=${to}` : undefined
   const { t } = useTranslation()
   const locale = useDisplayLocale()
-  const label = href ? <Link to={href} className="truncate hover:underline">{c.name}</Link> : <span className="truncate">{c.name}</span>
   const notes = [
     c.usual_since ? t('insights.usualSince', { month: monthLabel(c.usual_since, locale) }) : '',
     c.drivers.length
@@ -255,12 +263,13 @@ function CategoryRow({
         })
       : '',
   ].filter(Boolean)
+  const hover = notes.join(' · ') || undefined
+  const label = href
+    ? <Link to={href} title={hover} className="truncate hover:underline">{c.name}</Link>
+    : <span title={hover} className="truncate">{c.name}</span>
   return (
     <>
-      <div className="flex min-w-0 flex-col">
-        {label}
-        {notes.length > 0 && <span className="truncate text-xs text-muted-foreground">{notes.join(' · ')}</span>}
-      </div>
+      {label}
       <div className="flex h-[18px] justify-end border-r border-border">
         {c.diff < 0 && (
           <div style={{ width }} className={cn('h-full rounded-l', strong ? 'bg-emerald-500' : 'bg-emerald-300 dark:bg-emerald-700')} />
@@ -312,22 +321,24 @@ function SignalCard({ card, money, locale }: { card: InsightCard; money: (v: num
     <>
       <div className="flex min-w-0 flex-col gap-1">
         <span className="font-semibold">{text.title}</span>
-        <span className="text-[13px] text-muted-foreground tabular-nums">{text.detail}</span>
+        <span className="truncate text-[13px] text-muted-foreground tabular-nums">{text.detail}</span>
       </div>
       <Sparkline values={card.series} direction={card.direction} label={text.title} />
     </>
   )
   const className = 'grid grid-cols-[1fr_auto] items-center gap-3.5 rounded-xl border border-border bg-card px-4 py-3.5'
   return href ? (
-    <Link to={href} className={cn(className, 'transition-colors hover:border-primary/40')}>{body}</Link>
+    <Link to={href} title={text.more} className={cn(className, 'transition-colors hover:border-primary/40')}>{body}</Link>
   ) : (
-    <div className={className}>{body}</div>
+    <div title={text.more} className={className}>{body}</div>
   )
 }
 
 type T = ReturnType<typeof useTranslation>['t']
 
-function describe(card: InsightCard, t: T, money: (v: number) => string, locale: string): { title: string; detail: string } {
+function describe(
+  card: InsightCard, t: T, money: (v: number) => string, locale: string,
+): { title: string; detail: string; more?: string } {
   const p = card.params as Record<string, string | number>
   const n = (k: string) => Number(p[k] ?? 0)
   switch (card.kind) {
@@ -340,9 +351,10 @@ function describe(card: InsightCard, t: T, money: (v: number) => string, locale:
         title,
         detail: t('insights.cards.category_month.detail', {
           amount: money(n('amount')), usual: money(n('usual')), count: n('visits'),
-        }) + (p.driver
-          ? ` · ${t('insights.mostly', { list: `${p.driver} ${n('driver_diff') < 0 ? '−' : '+'}${money(Math.abs(n('driver_diff')))}` })}`
-          : ''),
+        }),
+        more: p.driver
+          ? t('insights.mostly', { list: `${p.driver} ${n('driver_diff') < 0 ? '−' : '+'}${money(Math.abs(n('driver_diff')))}` })
+          : undefined,
       }
     }
     case 'trend_cooling':
@@ -363,17 +375,19 @@ function describe(card: InsightCard, t: T, money: (v: number) => string, locale:
         ((card.params[key] as unknown as { name: string; diff: number }[] | undefined) ?? [])
           .map((m) => `${m.name} ${signed(m.diff)}`)
           .join(', ')
-      const parts = [
-        t('insights.cards.savings_rate.detail', { rate: n('rate'), before: n('before') }),
+      const more = [
         t('insights.cards.savings_rate.income', { change: signed(n('income_change')), movers: movers('income_movers') }),
         t('insights.cards.savings_rate.spending', { change: signed(n('spend_change')), movers: movers('spend_movers') }),
-      ]
-      if (card.params.leave) parts.push(t('insights.cards.savings_rate.leave', { payer: p.leave_payer }))
+        card.params.leave ? t('insights.cards.savings_rate.leave', { payer: p.leave_payer }) : '',
+      ].filter(Boolean).join(' ')
       return {
         title: card.params.leave
           ? t('insights.cards.savings_rate.title_leave')
           : t(`insights.cards.savings_rate.title_${card.direction}`),
-        detail: parts.join(' '),
+        detail: t('insights.cards.savings_rate.short', {
+          rate: n('rate'), before: n('before'), income: signed(n('income_change')),
+        }),
+        more,
       }
     }
     case 'payee_switch':

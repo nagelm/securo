@@ -83,7 +83,8 @@ describe('InsightsPage', () => {
     expect(groceries.closest('a')?.getAttribute('href')).toBe('/transactions?category_id=cat-food&from=2026-09-01&to=2026-09-30')
     expect(screen.getByText(/Interest/)).toBeInTheDocument()
     // A category that changed level says where its usual starts, and who moved it.
-    expect(screen.getByText(/usual since April 2026 · mostly NewAI \+\$170\.00/)).toBeInTheDocument()
+    // Kept to one line; the detail is a hover note.
+    expect(screen.getByRole('link', { name: 'Software' })).toHaveAttribute('title', 'usual since April 2026 · mostly NewAI +$150')
   })
 
   it('without a savings-rate signal, the headline compares everyday spending with a usual month', async () => {
@@ -113,9 +114,11 @@ describe('InsightsPage', () => {
     renderWithProviders(<InsightsPage />)
     expect(await screen.findByText(t('insights.headline.leave', { before: 30, rate: 12 }))).toBeInTheDocument()
     expect(screen.getByText(t('insights.cards.savings_rate.title_leave'))).toBeInTheDocument()
-    expect(screen.getByText(/Income −\$20,000\.00 \(Employer −\$20,000\.00\)/)).toBeInTheDocument()
+    expect(screen.getByText('12% kept, from 30% · income −$20,000')).toBeInTheDocument()
+    const card = screen.getByText(t('insights.cards.savings_rate.title_leave')).closest('[title]')
+    expect(card?.getAttribute('title')).toContain('Income −$20,000 (Employer −$20,000)')
     expect(screen.getByText(t('insights.cards.payee_switch.title', { from: 'Council', to: 'Water' }))).toBeInTheDocument()
-    expect(screen.getByText(/Rates: \$491\.79 → \$535\.82 a month together \(\+9%\)/)).toBeInTheDocument()
+    expect(screen.getByText(/Rates: \$478 → \$521 a month together \(\+9%\)/)).toBeInTheDocument()
   })
 
   it('steps back a month', async () => {
