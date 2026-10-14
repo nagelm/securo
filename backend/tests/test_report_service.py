@@ -2791,3 +2791,4 @@ async def test_cash_flow_leaves_loan_accounts_out(session: AsyncSession, test_us
     )
     values = {b.key: b.value for b in report.summary.breakdowns}
     assert values["startingBalance"] == 1000
+

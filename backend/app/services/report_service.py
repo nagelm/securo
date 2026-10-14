@@ -4,7 +4,8 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import String, select, desc, func, case
+from sqlalchemy import String, and_, exists, or_, select, desc, func, case
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.app_clock import app_today
@@ -866,7 +867,21 @@ async def get_income_expenses_report(
     # from spending and from leftover surplus (mirrors how Sure shows an
     # "Investment Contributions" node). Paired account transfers stay excluded via
     # the transfer_pair_id filter, so only one-sided movements (contributions)
-    # appear here.
+    # appear here. Fork: a paired payment from a cash account into a loan or
+    # investment account (loan principal, a fund deposit) is set aside too, so
+    # it shows in this lane instead of swelling the surplus.
+    partner = aliased(Transaction)
+    partner_account = aliased(Account)
+    into_debt_or_investment = and_(
+        Transaction.transfer_pair_id.is_not(None),
+        Account.type.not_in(("loan", "investment")),
+        exists().where(
+            partner.transfer_pair_id == Transaction.transfer_pair_id,
+            partner.id != Transaction.id,
+            partner_account.id == partner.account_id,
+            partner_account.type.in_(("loan", "investment")),
+        ),
+    )
     inv_result = await session.execute(
         select(
             Category.id,
@@ -885,7 +900,7 @@ async def get_income_expenses_report(
             Transaction.source != "opening_balance",
             Transaction.type == "debit",
             Transaction.status == "posted",
-            Transaction.transfer_pair_id.is_(None),
+            or_(Transaction.transfer_pair_id.is_(None), into_debt_or_investment),
             Transaction.is_ignored.is_(False),
             Transaction.exclude_from_pnl.is_(False),
             Category.treat_as_transfer.is_(True),
