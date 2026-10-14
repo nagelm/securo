@@ -598,6 +598,7 @@ async def _settle(
 
     transaction = row.transaction
     transaction.recurring_transaction_id = bill.id
+    recurring_match_service.carry_payee(bill, transaction)
     recurring_match_service.advance_past(bill, transaction.date)
 
 

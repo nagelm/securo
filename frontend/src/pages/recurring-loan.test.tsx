@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   recurring: { list: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), generate: vi.fn() },
   accounts: { list: vi.fn() },
   currencies: { list: vi.fn() },
+  payees: { list: vi.fn(), create: vi.fn() },
 }))
 
 vi.mock('@/lib/api', () => api)
@@ -112,6 +113,7 @@ beforeEach(() => {
   api.categoryGroups.list.mockResolvedValue([])
   api.accounts.list.mockResolvedValue(accounts)
   api.currencies.list.mockResolvedValue([{ code: 'USD', symbol: '$', name: 'US Dollar', flag: '' }])
+  api.payees.list.mockResolvedValue([])
 })
 
 async function openLoanPaymentForm() {

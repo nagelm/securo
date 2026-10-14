@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.payee import Payee, PayeeMapping, PayeeTaxId
+from app.models.recurring_transaction import RecurringTransaction
 from app.models.transaction import Transaction
 from app.models.category import Category
 from app.fiscal.registry import TaxIdKind, normalise_and_validate
@@ -328,6 +329,12 @@ async def delete_payee(session: AsyncSession, payee_id: uuid.UUID, workspace_id:
         .where(Transaction.payee_id == payee_id)
         .values(payee_id=None)
     )
+    # Fork: and recurring items' (f012).
+    await session.execute(
+        update(RecurringTransaction)
+        .where(RecurringTransaction.payee_id == payee_id)
+        .values(payee_id=None)
+    )
 
     # Delete mappings pointing to this payee
     await session.execute(
@@ -357,6 +364,12 @@ async def bulk_delete_payees(session: AsyncSession, workspace_id: uuid.UUID, pay
     await session.execute(
         update(Transaction)
         .where(Transaction.payee_id.in_(valid_ids))
+        .values(payee_id=None)
+    )
+    # Fork: and recurring items' (f012).
+    await session.execute(
+        update(RecurringTransaction)
+        .where(RecurringTransaction.payee_id.in_(valid_ids))
         .values(payee_id=None)
     )
 
@@ -401,6 +414,12 @@ async def merge_payees(
         .values(payee_id=target_id)
     )
     reassigned = cast(CursorResult, result).rowcount
+    # Fork: recurring items follow their payee into the target (f012).
+    await session.execute(
+        update(RecurringTransaction)
+        .where(RecurringTransaction.payee_id.in_(source_ids))
+        .values(payee_id=target_id)
+    )
 
     # Invoices follow the merge for the same reason transactions do: the
     # two rows were one counterparty all along, and leaving the invoices

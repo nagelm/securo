@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.app_clock import app_today, get_workspace_timezone, today_in
 from app.models.account import Account
@@ -18,6 +19,7 @@ from app.schemas.recurring_transaction import RecurringTransactionCreate, Recurr
 from app.services import recurring_match_service
 from app.services.credit_card_service import apply_effective_date
 from app.services.fx_rate_service import stamp_primary_amount
+from app.services.payee_display import apply_payee_display
 
 logger = logging.getLogger(__name__)
 
@@ -158,15 +160,35 @@ async def _loan_payment_values(
     }
 
 
+async def _ensure_payee_in_workspace(
+    session: AsyncSession, workspace_id: uuid.UUID, payee_id: Optional[uuid.UUID]
+) -> None:
+    # Lazy: transaction_service imports this module.
+    from app.services.transaction_service import _ensure_payee_in_workspace as ensure
+
+    await ensure(session, workspace_id, payee_id)
+
+
+async def _load_payee_display(session: AsyncSession, recurring: RecurringTransaction) -> None:
+    """Fork: (re)load the item's payee and fill its display fields."""
+    await session.refresh(recurring, attribute_names=["payee_entity"])
+    apply_payee_display(recurring)
+
+
 async def get_recurring_transactions(
     session: AsyncSession, workspace_id: uuid.UUID
 ) -> list[RecurringTransaction]:
     result = await session.execute(
         select(RecurringTransaction)
         .where(RecurringTransaction.workspace_id == workspace_id)
+        .options(selectinload(RecurringTransaction.payee_entity))
         .order_by(RecurringTransaction.next_occurrence)
     )
-    return list(result.scalars().all())
+    items = list(result.scalars().all())
+    # Fork: each row is drawn with its payee's icon or logo.
+    for recurring in items:
+        apply_payee_display(recurring)
+    return items
 
 
 async def get_recurring_transaction(
@@ -186,6 +208,7 @@ async def create_recurring_transaction(
     data: RecurringTransactionCreate,
 ) -> RecurringTransaction:
     await _verify_account_in_workspace(session, workspace_id, data.account_id)
+    await _ensure_payee_in_workspace(session, workspace_id, data.payee_id)
     values = data.model_dump()
     if data.kind == LOAN_PAYMENT:
         values.update(await _loan_payment_values(session, workspace_id, values))
@@ -202,6 +225,7 @@ async def create_recurring_transaction(
         workspace_id=workspace_id,
         account_id=data.account_id,
         category_id=values["category_id"],
+        payee_id=data.payee_id,
         description=data.description,
         amount=values["amount"],
         currency=values["currency"],
@@ -226,6 +250,7 @@ async def create_recurring_transaction(
     )
     await session.commit()
     await session.refresh(recurring)
+    await _load_payee_display(session, recurring)
     return recurring
 
 
@@ -250,6 +275,9 @@ async def update_recurring_transaction(
             raise ValueError("account_id is required")
         if new_account_id != recurring.account_id:
             await _verify_account_in_workspace(session, workspace_id, new_account_id)
+
+    if "payee_id" in update_data:
+        await _ensure_payee_in_workspace(session, workspace_id, update_data["payee_id"])
 
     if recurring.kind == LOAN_PAYMENT:
         merged = {
@@ -282,6 +310,7 @@ async def update_recurring_transaction(
 
     await session.commit()
     await session.refresh(recurring)
+    await _load_payee_display(session, recurring)
     return recurring
 
 
@@ -493,6 +522,7 @@ async def generate_pending(
             )
             if existing_real is not None:
                 existing_real.recurring_transaction_id = recurring.id
+                recurring_match_service.carry_payee(recurring, existing_real)
             else:
                 account = await session.get(Account, recurring.account_id)
                 # Only occurrences that already came due reach this point, so
@@ -517,6 +547,7 @@ async def generate_pending(
                     user_id=user_id,
                     account_id=recurring.account_id,
                     category_id=recurring.category_id,
+                    payee_id=recurring.payee_id,  # Fork: the item's payee
                     description=recurring.description,
                     amount=recurring.amount,
                     currency=recurring.currency,

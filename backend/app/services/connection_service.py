@@ -2686,6 +2686,8 @@ async def sync_connection(
                 transaction.recurring_transaction_id = (
                     recurring_link.id if recurring_link else None
                 )
+                if recurring_link is not None:
+                    recurring_match_service.carry_payee(recurring_link, transaction)
                 session.add(transaction)
                 await session.flush()
                 if recurring_link is not None:

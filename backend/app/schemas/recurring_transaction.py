@@ -23,6 +23,7 @@ class RecurringTransactionCreate(BaseModel):
     end_date: Optional[_Date] = None
     account_id: uuid.UUID
     category_id: Optional[uuid.UUID] = None
+    payee_id: Optional[uuid.UUID] = None  # Fork: validated to the workspace
     skip_first: bool = False  # Set true when first occurrence already created as a transaction
     auto_generate: bool = True  # Materialize occurrences; when false, wait for the real charge
     # A loan payment: `account_id` pays the loan `transfer_account_id`;
@@ -46,6 +47,7 @@ class RecurringTransactionUpdate(BaseModel):
     end_date: Optional[_Date] = None
     account_id: Optional[uuid.UUID] = None
     category_id: Optional[uuid.UUID] = None
+    payee_id: Optional[uuid.UUID] = None  # Fork: null clears it
     is_active: Optional[bool] = None
     auto_generate: Optional[bool] = None
     # The kind of a schedule never changes; a loan payment's loan and
@@ -78,5 +80,11 @@ class RecurringTransactionRead(BaseModel):
     transfer_account_id: Optional[uuid.UUID] = None
     interest_amount: Optional[Decimal] = None
     interest_category_id: Optional[uuid.UUID] = None
+    # Fork: the payee and how it is drawn, as on a transaction
+    # (app.services.payee_display).
+    payee_id: Optional[uuid.UUID] = None
+    payee_name: Optional[str] = None
+    payee_logo_url: Optional[str] = None
+    payee_icon: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)

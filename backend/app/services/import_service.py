@@ -1032,6 +1032,8 @@ async def import_transactions(
         incoming.recurring_transaction_id = (
             recurring_link.id if recurring_link else None
         )
+        if recurring_link is not None:
+            recurring_match_service.carry_payee(recurring_link, incoming)
         if txn_data.fx_rate:
             incoming.fx_rate_used = txn_data.fx_rate
             incoming.amount_primary = txn_data.amount * txn_data.fx_rate

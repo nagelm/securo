@@ -331,6 +331,12 @@ async def find_bill_for_incoming(
     return _pick(answers, composed)
 
 
+def carry_payee(recurring: RecurringTransaction, transaction: Transaction) -> None:
+    """Fork: a row linked to a recurring item takes its payee if it has none."""
+    if transaction.payee_id is None and recurring.payee_id is not None:
+        transaction.payee_id = recurring.payee_id
+
+
 def advance_past(recurring: RecurringTransaction, fulfilled_date: date) -> None:
     """Advance a bill's next_occurrence past the occurrence a charge fulfilled.
 

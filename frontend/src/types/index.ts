@@ -666,6 +666,13 @@ export interface RecurringTransaction {
   transfer_account_id?: string | null
   interest_amount?: number | string | null
   interest_category_id?: string | null
+  /** Fork: the item's payee, drawn like a transaction's. */
+  payee_id?: string | null
+  payee_name?: string | null
+  /** The payee's logo (provider's, else its website favicon), or null. */
+  payee_logo_url?: string | null
+  /** The icon the user picked for the payee; wins over the logo. */
+  payee_icon?: string | null
 }
 
 // Fork: the Forecast page.
