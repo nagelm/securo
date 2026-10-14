@@ -79,6 +79,7 @@ async def _get_recurring_projections(
     account_ids: Optional[list[uuid.UUID]] = None,
     *,
     include_transfer_like: bool = False,
+    with_recurring_id: bool = False,
 ) -> list[dict]:
     """Compute virtual recurring transaction projections for a month.
     Pure read — no DB writes. Returns list of dicts with category_id, amount, type, currency.
@@ -96,7 +97,10 @@ async def _get_recurring_projections(
     leg by leg (design 4.2). P&L callers get only the interest, in its own
     category: principal is never an expense, projected or not. The balance
     projection gets every leg whose account is in scope, so with both
-    accounts in scope it nets to minus the interest, as net worth does."""
+    accounts in scope it nets to minus the interest, as net worth does.
+
+    Fork: ``with_recurring_id`` adds each row's ``recurring_transaction_id``,
+    so a forecast scenario can change one schedule's rows."""
     if account_ids is not None and len(account_ids) == 0:
         return []
     filters = [
@@ -173,6 +177,7 @@ async def _get_recurring_projections(
                         "type": leg.type,
                         "currency": rec.currency,
                         "date": occ_date,
+                        **({"recurring_transaction_id": rec.id} if with_recurring_id else {}),
                     })
                 continue
             projections.append({
@@ -181,6 +186,7 @@ async def _get_recurring_projections(
                 "type": rec.type,
                 "currency": rec.currency,
                 "date": occ_date,
+                **({"recurring_transaction_id": rec.id} if with_recurring_id else {}),
             })
     return projections
 

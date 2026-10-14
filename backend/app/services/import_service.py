@@ -20,7 +20,7 @@ from app.models.category import Category
 from app.models.rule import Rule
 from app.models.transaction import Transaction
 from app.schemas.transaction import TransactionImport, FailedRow
-from app.services import reconciliation_service, recurring_match_service
+from app.services import forecast_service, reconciliation_service, recurring_match_service
 from app.services.credit_card_service import apply_effective_date
 from app.services.category_service import get_assignable_category_ids
 from app.services.rule_engine import apply_rule_actions, evaluate_conditions, merge_notes
@@ -1066,6 +1066,8 @@ async def import_transactions(
     # row is written: settling an invoice creates an allocation pointing
     # at a transaction, which has to exist first.
     await reconciliation_service.match_incoming(session, workspace_id, landed)
+    # Fork: and the Forecast page's expected payments.
+    await forecast_service.match_expected_payments(session, workspace_id, landed)
 
     await session.commit()
     return imported, skipped, excluded_count, import_log.id
