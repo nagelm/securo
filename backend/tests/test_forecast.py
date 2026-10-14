@@ -540,8 +540,9 @@ async def test_a_row_linked_to_a_recurring_payment_does_not_match(session, test_
     today = app_today()
     account = await _account(session, test_user.id)
     rec = await _recurring(session, test_user.id, account.id, 100, "debit", today + timedelta(days=30))
-    item = await _expected(session, test_user.id, test_workspace.id, amount=Decimal("120"), type="debit",
-                           date=today + timedelta(days=2), account_id=account.id)
+    # Shares a word with the row, so only the recurring link keeps them apart.
+    item = await _expected(session, test_user.id, test_workspace.id, amount=Decimal("100.50"), type="debit",
+                           date=today + timedelta(days=2), account_id=account.id, description="debit")
     holiday_fund = await _tx(session, test_user.id, account.id, 100, "debit", today)
     holiday_fund.recurring_transaction_id = rec.id
     await _stored(session, holiday_fund, item, timedelta(hours=1))
