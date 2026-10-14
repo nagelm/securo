@@ -2113,6 +2113,7 @@
     "range2y": "2Ε",
     "range5y": "5Y",
     "range10y": "10Y",
+    "intervalTooFine": "Too fine for this range: daily is up to 1 year, weekly up to 5 years",
     "intervalDaily": "Η",
     "intervalWeekly": "Ε",
     "intervalMonthly": "Μ",

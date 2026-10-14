@@ -238,3 +238,31 @@ describe('Reports page — query failure', () => {
     expect(screen.getByRole('button', { name: t('reports.range6m') })).toHaveClass('bg-primary')
   })
 })
+
+describe('Reports page — interval limits on long ranges', () => {
+  it('disables daily above 1Y and weekly above 5Y, falling back to a coarser interval', async () => {
+    const { user } = renderWithProviders(<ReportsPage />)
+    await waitFor(() => expect(api.reports.netWorth).toHaveBeenCalled())
+    const daily = () => screen.getByRole('button', { name: t('reports.intervalDaily') })
+    const weekly = () => screen.getByRole('button', { name: t('reports.intervalWeekly') })
+
+    await user.click(daily())
+    await waitFor(() => expect(api.reports.netWorth.mock.calls.at(-1)![1]).toBe('daily'))
+
+    await user.click(screen.getByRole('button', { name: t('reports.range2y') }))
+    expect(daily()).toBeDisabled()
+    expect(weekly()).toBeEnabled()
+    await waitFor(() => expect(api.reports.netWorth.mock.calls.at(-1)![1]).toBe('weekly'))
+
+    await user.click(screen.getByRole('button', { name: t('reports.range5y') }))
+    expect(weekly()).toBeEnabled()
+
+    await user.click(screen.getByRole('button', { name: t('reports.range10y') }))
+    expect(weekly()).toBeDisabled()
+    await waitFor(() => expect(api.reports.netWorth.mock.calls.at(-1)![1]).toBe('monthly'))
+
+    await user.click(screen.getByRole('button', { name: t('reports.range1y') }))
+    expect(daily()).toBeEnabled()
+    await waitFor(() => expect(api.reports.netWorth.mock.calls.at(-1)![1]).toBe('daily'))
+  })
+})

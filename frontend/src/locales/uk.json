@@ -2059,6 +2059,7 @@
     "range2y": "2Р",
     "range5y": "5Y",
     "range10y": "10Y",
+    "intervalTooFine": "Too fine for this range: daily is up to 1 year, weekly up to 5 years",
     "intervalDaily": "Д",
     "intervalWeekly": "Т",
     "intervalMonthly": "М",

@@ -188,7 +188,7 @@ export default function ReportsPage() {
 
   const customDefaults = defaultCustomRange()
   const [rangeKey, setRangeKey] = useState('1y')
-  const [interval, setInterval] = useState('monthly')
+  const [chosenInterval, setInterval] = useState('monthly')
   // Custom range endpoints (YYYY-MM-DD) — populated when the user opens the
   // Custom preset and confirms a date range. Preserved across tab switches
   // that still support custom ranges so the picker doesn't forget its
@@ -247,6 +247,17 @@ export default function ReportsPage() {
   const days = isCustomRange ? undefined : selectedRange.days
   const apiStart = hasCustomRange ? customFrom : undefined
   const apiEnd = hasCustomRange ? customTo : undefined
+  // Fork: long ranges would draw thousands of points, so daily is offered up
+  // to 1 year and weekly up to 5 years; a disallowed choice falls back to the
+  // next coarser interval until the range is short enough again.
+  const spanDays = hasCustomRange
+    ? (new Date(customTo + 'T00:00:00').getTime() - new Date(customFrom + 'T00:00:00').getTime()) / 86_400_000
+    : months * 30.44
+  const intervalAllowed = (value: string) =>
+    (value !== 'daily' || spanDays <= 366) && (value !== 'weekly' || spanDays <= 1827)
+  const interval = intervalAllowed(chosenInterval)
+    ? chosenInterval
+    : intervalOptions.find((o) => o.value !== 'daily' && intervalAllowed(o.value))?.value ?? 'monthly'
 
   const handleSelectTab = (key: string) => {
     const nextTab = REPORT_TABS.find((tab) => tab.key === key) ?? REPORT_TABS[0]
@@ -610,7 +621,9 @@ export default function ReportsPage() {
                 <button
                   key={opt.key}
                   onClick={() => { setInterval(opt.value); setSelectedDate(null) }}
-                  className={`px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                  disabled={!intervalAllowed(opt.value)}
+                  title={intervalAllowed(opt.value) ? undefined : t('reports.intervalTooFine')}
+                  className={`px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                     interval === opt.value
                       ? 'bg-primary text-primary-foreground'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
