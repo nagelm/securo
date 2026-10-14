@@ -16,8 +16,8 @@ from app.core.app_clock import app_today
 from app.models.account import Account
 from app.models.recurring_transaction import RecurringTransaction
 from app.services.loan_projection import loan_terms, project_loan
-from app.services.report_service import _add_months
-from tests.test_forecast import MONTHS, _account, _forecast, _scenario, _tx
+from app.services.report_service import _add_months, get_cash_flow_report
+from tests.test_forecast import MONTHS, _account, _category, _forecast, _scenario, _tx
 
 pytestmark = pytest.mark.asyncio
 
@@ -89,8 +89,9 @@ async def test_each_loan_gets_its_base_projection(session, test_user, test_works
     assert points[-1].balance == pytest.approx(in_horizon[-1].closing)
     assert sum(p.interest for p in points) == pytest.approx(sum(p.interest for p in in_horizon), abs=0.01)
     assert sum(p.interest + p.principal for p in points) == pytest.approx(REPAYMENT * len(in_horizon), abs=0.01)
-    # The loan's own balance never enters the cash line.
-    assert result.summary.end_balance == pytest.approx(1000)
+    # The loan's own balance never enters the cash line; with no recurring
+    # schedule paying it, its repayments do (owner 2026-10-14).
+    assert result.summary.end_balance == pytest.approx(1000 - REPAYMENT * len(in_horizon), abs=0.01)
     assert forecast.scenarios == []
 
 
@@ -114,6 +115,77 @@ async def test_loans_without_enough_details_are_listed_without_a_projection(sess
     assert by_id[revolving.id].balance == pytest.approx(5_000)
     # A change on a loan that can't be projected changes nothing.
     assert result.scenarios[0].difference == 0
+
+
+# ---------------------------------------------------------------------------
+# repayments in the base cash line
+# ---------------------------------------------------------------------------
+
+
+async def test_a_loan_no_schedule_pays_takes_its_repayments_from_cash(session, test_user, test_workspace):
+    from app.services.category_service import find_default_category
+    from app.services.forecast_service import loan_repayment_projections
+
+    today = app_today()
+    checking = await _account(session, test_user.id)
+    await _loan(session, test_user.id)
+    repayments = await _category(session, test_user.id, "Loan repayments", default_key="loan_repayments",
+                                 treat_as_transfer=True)
+
+    report = await get_cash_flow_report(session, test_workspace.id, test_user.id, months=MONTHS, interval="daily")
+
+    _, base = _base_schedule()
+    dates = _in_horizon(p.date for p in base.periods)
+    assert report.summary.primary_value == pytest.approx(1000 - REPAYMENT * len(dates), abs=0.01)
+    rows = await loan_repayment_projections(session, test_workspace.id, today, _add_months(today, MONTHS))
+    assert [r["date"] for r in rows] == dates
+    assert {r["type"] for r in rows} == {"debit"}
+    assert await find_default_category(session, test_workspace.id, "loan_repayments") == repayments.id
+    assert {r["category_id"] for r in rows} == {repayments.id}
+    # A report narrowed to particular accounts leaves them out, like invoices.
+    narrowed = await get_cash_flow_report(
+        session, test_workspace.id, test_user.id, months=MONTHS, interval="daily", account_ids=[checking.id],
+    )
+    assert narrowed.summary.primary_value == pytest.approx(1000)
+
+
+async def test_a_plain_recurring_transfer_into_the_loan_counts_as_its_schedule(session, test_user, test_workspace):
+    today = app_today()
+    checking = await _account(session, test_user.id)
+    loan = await _loan(session, test_user.id)
+    first = today + timedelta(days=3)
+    session.add(RecurringTransaction(
+        id=uuid.uuid4(), user_id=test_user.id, account_id=checking.id, transfer_account_id=loan.id,
+        description="To mortgage", amount=Decimal("400"), currency="BRL", type="debit",
+        frequency="weekly", start_date=first, next_occurrence=first, is_active=True,
+    ))
+    await session.commit()
+    from app.services.forecast_service import loan_repayment_projections
+
+    assert await loan_repayment_projections(session, test_workspace.id, today, _add_months(today, MONTHS)) == []
+
+
+async def test_a_loan_without_details_adds_no_repayments(session, test_user, test_workspace):
+    await _account(session, test_user.id)
+    await _loan(session, test_user.id, details={"type": "REVOLVING"})
+    await _loan(session, test_user.id, details=_details(interest={}), name="No rate")
+
+    result = await _forecast(session, test_user, test_workspace)
+
+    assert result.summary.end_balance == pytest.approx(1000)
+
+
+async def test_repayments_stop_at_payoff(session, test_user, test_workspace):
+    await _account(session, test_user.id)
+    await _loan(session, test_user.id, debt=3_000)
+
+    result = await _forecast(session, test_user, test_workspace)
+
+    _, base = _base_schedule(debt=3_000)
+    assert base.payoff_date is not None and base.payoff_date <= _add_months(app_today(), MONTHS)
+    paid = sum(p.repayment for p in base.periods)
+    assert paid == pytest.approx(3_000 + base.total_interest, abs=0.01)
+    assert result.summary.end_balance == pytest.approx(1000 - paid, abs=0.01)
 
 
 # ---------------------------------------------------------------------------

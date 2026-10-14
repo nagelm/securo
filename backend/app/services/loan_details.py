@@ -19,8 +19,10 @@ it: the keys Akahu documents for ``meta.loan_details``
     repayment.next_date       date
     repayment.next_amount     amount
 
-Display only: nothing that totals money (balances, P&L, budgets, projections)
-reads it.
+Balances, P&L and budgets never read it. Fork: the Forecast page and the
+cash-flow projection do, through ``loan_projection``: a table loan's rate and
+repayment give its future repayments (cash leaving, never an expense) and the
+loan scenarios.
 
 A loan whose ``type`` is ``REVOLVING`` (``is_revolving``) may also carry a
 credit limit in ``Account.credit_limit``, the column a credit card uses; it is

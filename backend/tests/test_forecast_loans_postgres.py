@@ -11,7 +11,10 @@ from sqlalchemy import func, insert, select, text
 
 from app.models.forecast import ForecastItem, ForecastScenario
 from tests.test_forecast_loans import (  # noqa: F401  (collected here on PostgreSQL)
+    test_a_loan_no_schedule_pays_takes_its_repayments_from_cash,
+    test_a_loan_without_details_adds_no_repayments,
     test_a_lump_sum_that_clears_the_loan_frees_the_repayments,
+    test_a_plain_recurring_transfer_into_the_loan_counts_as_its_schedule,
     test_a_scheduled_loan_payment_is_not_counted_twice,
     test_api_loan_change_needs_a_scenario,
     test_api_loan_change_needs_an_open_loan_in_the_workspace,
@@ -23,6 +26,7 @@ from tests.test_forecast_loans import (  # noqa: F401  (collected here on Postgr
     test_lump_sum,
     test_paying_more_a_week_pays_off_earlier,
     test_rate_change,
+    test_repayments_stop_at_payoff,
 )
 from tests import test_forecast_postgres as _pg
 from tests.test_forecast_history import (  # noqa: F401  (collected here on PostgreSQL)

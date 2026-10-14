@@ -1553,13 +1553,15 @@ async def get_cash_flow_report(
     rules out of the flows. They stay in net worth.
 
     Fork: expected payments (the Forecast page's one-off items not yet
-    matched to a bank row) are projected on their dates, and
+    matched to a bank row) are projected on their dates, so are the
+    repayments of loans no recurring schedule pays (the loan's own
+    repayment schedule, from ``forecast_service``), and
     ``extra_projections`` (dicts shaped like a recurring projection) are
     added to the forward flows; the Forecast page passes its everyday
     spending estimate there.
     """
     from app.services.dashboard_service import _balance_at, _get_recurring_projections
-    from app.services.forecast_service import expected_payment_projections
+    from app.services.forecast_service import expected_payment_projections, loan_repayment_projections
 
     # Invoices have no account; they are left out only under a Collection
     # filter, so remember whether the caller narrowed the report.
@@ -1752,6 +1754,8 @@ async def get_cash_flow_report(
         *await expected_payment_projections(
             session, workspace_id, today, end, account_ids, narrowed=narrowed
         ),
+        # Fork: loans no recurring schedule pays still take their repayments.
+        *await loan_repayment_projections(session, workspace_id, today, end, narrowed=narrowed),
         *(extra_projections or []),
     ]
 

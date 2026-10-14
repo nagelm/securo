@@ -10,9 +10,10 @@ scenario only ever computes its own difference.
 A scenario can also change a table loan's rate or repayments
 (``loan_change``). Each open loan with enough ``loan_details`` gets a base
 repayment schedule and one per scenario that changes it (``loan_projection``);
-the cash line takes only the difference in repayments from the base, because
-the base repayments are already in it (a recurring loan payment) or not, as
-the user recorded them, and must not be counted twice.
+the cash line takes only the difference in repayments from the base. The
+base repayments are in the cash line once: from a recurring schedule paying
+into the loan when there is one, otherwise from the loan's base schedule
+(``loan_repayment_projections``, which the cash-flow report adds).
 
 Expected payments are one-off items with no scenario. When the real bank row
 arrives (same account and direction, amount within 5%, date within 10 days)
@@ -730,6 +731,61 @@ async def _open_loans(session: AsyncSession, workspace_id: uuid.UUID, today: dat
         terms = loan_terms(account.loan_details, debt, today)
         loans.append(_Loan(account, debt, terms, project_loan(terms) if terms else None))
     return loans
+
+
+async def loan_repayment_projections(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    today: date,
+    end: date,
+    *,
+    narrowed: bool = False,
+) -> list[dict]:
+    """Fork: repayments of loans no recurring schedule pays, as cash-flow
+    projection dicts (money leaving cash), until each loan is paid off.
+
+    A loan whose ``loan_details`` give a table loan's rate, repayment and
+    frequency, and that no active recurring payment (a loan payment schedule
+    or a plain recurring transfer) pays into, would otherwise be missing from
+    every forecast. The rows have no account, so a report narrowed to
+    particular accounts leaves them out, as it does invoices.
+    """
+    from app.services.category_service import find_default_category
+    from app.services.loan_repayment_category import LOAN_REPAYMENTS_KEY
+
+    if narrowed:
+        return []
+    loans = [loan for loan in await _open_loans(session, workspace_id, today) if loan.base is not None]
+    if not loans:
+        return []
+    scheduled = set(
+        (
+            await session.execute(
+                select(RecurringTransaction.transfer_account_id).where(
+                    RecurringTransaction.workspace_id == workspace_id,
+                    RecurringTransaction.is_active.is_(True),
+                    RecurringTransaction.transfer_account_id.in_([loan.account.id for loan in loans]),
+                )
+            )
+        ).scalars()
+    )
+    category_id = await find_default_category(session, workspace_id, LOAN_REPAYMENTS_KEY)
+    out: list[dict] = []
+    for loan in loans:
+        if loan.account.id in scheduled or loan.base is None:
+            continue
+        for period in loan.base.periods:
+            if period.date > end:
+                break
+            if period.date > today and period.repayment:
+                out.append({
+                    "date": period.date,
+                    "amount": period.repayment,
+                    "currency": loan.account.currency,
+                    "type": "debit",
+                    "category_id": category_id,
+                })
+    return out
 
 
 def _loan_changes(scenario: ForecastScenario, loan_id: uuid.UUID, today: date) -> list[LoanChange]:
