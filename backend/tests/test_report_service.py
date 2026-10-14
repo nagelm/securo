@@ -2775,3 +2775,19 @@ async def test_cash_flow_leaves_investment_accounts_out_and_net_worth_keeps_them
     bands = {b.key: b.value for b in net_worth.summary.breakdowns}
     assert bands["accounts"] == 1000
     assert bands["assets"] == 5300
+
+
+@pytest.mark.asyncio
+async def test_cash_flow_leaves_loan_accounts_out(session: AsyncSession, test_user, test_workspace: User):
+    """Fork: a loan's balance and rows stay out of cash flow, like investments."""
+    checking = await _make_manual_account(session, test_user.id, "CF Cash")
+    loan = await _make_manual_account(session, test_user.id, "CF Mortgage", acct_type="loan")
+    await _add_txn(session, test_user.id, checking.id, 1000, "credit",
+                   date.today() - timedelta(days=10), source="opening_balance")
+    await _add_txn(session, test_user.id, loan.id, 300000, "debit",
+                   date.today() - timedelta(days=10), source="opening_balance")
+    report = await get_cash_flow_report(
+        session, test_workspace.id, test_user.id, months=1, interval="daily",
+    )
+    values = {b.key: b.value for b in report.summary.breakdowns}
+    assert values["startingBalance"] == 1000

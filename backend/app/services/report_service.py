@@ -1327,8 +1327,9 @@ async def _get_baseline_projection(
 
 
 # Account types whose balance is not spendable money: kept in net worth, left
-# out of the cash-flow report.
-CASH_FLOW_EXCLUDED_TYPES = frozenset({"investment"})
+# out of the cash-flow report. Fork: loans too (a mortgage balance isn't cash;
+# repayments show as cash going out of the account that pays them).
+CASH_FLOW_EXCLUDED_TYPES = frozenset({"investment", "loan"})
 
 
 async def get_cash_flow_report(
@@ -1359,7 +1360,7 @@ async def get_cash_flow_report(
         avoiding double-counting against ``_balance_at``.
 
     Cash flow is spendable money: accounts of a type in
-    ``CASH_FLOW_EXCLUDED_TYPES`` (investment) are left out of the opening and
+    ``CASH_FLOW_EXCLUDED_TYPES`` (investment, loan) are left out of the opening and
     closing balances, and their transactions, pending rows and recurring
     rules out of the flows. They stay in net worth.
     """
