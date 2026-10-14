@@ -27,3 +27,12 @@ export function formatDateRange(
   if (from) return `≥ ${fmt(from)}`
   return `≤ ${fmt(to)}`
 }
+
+/**
+ * The range a custom pick applies. Fork: one picked end leaves the other open
+ * (from a date onwards, or up to a date) instead of narrowing to that one day;
+ * two ends picked in reverse are swapped.
+ */
+export function normalizeCustomRange(from: string, to: string): [string, string] {
+  return from && to && from > to ? [to, from] : [from, to]
+}

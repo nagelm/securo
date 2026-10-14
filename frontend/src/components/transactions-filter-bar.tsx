@@ -42,7 +42,7 @@ import { Calendar } from '@/components/ui/calendar'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { localDateString } from '@/lib/date-utils'
-import { formatDateRange } from '@/lib/date-range-format'
+import { formatDateRange, normalizeCustomRange } from '@/lib/date-range-format'
 import { resolveDateFnsLocale } from '@/lib/date-fns-locale'
 import { CategoryFilterContent } from '@/components/category-filter-content'
 import {
@@ -1188,14 +1188,8 @@ export function TransactionsFilterBar({
                 size="sm"
                 disabled={!draftFrom && !draftTo}
                 onClick={() => {
-                  // Normalize: if user only picked one of the two, mirror it.
-                  const from = draftFrom || draftTo
-                  const to = draftTo || draftFrom
-                  if (from && to && from > to) {
-                    onDateRangeChange(to, from)
-                  } else {
-                    onDateRangeChange(from, to)
-                  }
+                  const [from, to] = normalizeCustomRange(draftFrom, draftTo)
+                  onDateRangeChange(from, to)
                   setDateCustomOpen(false)
                 }}
               >
