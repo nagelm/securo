@@ -88,14 +88,17 @@ const FORWARD_RANGE_OPTIONS: readonly RangeOption[] = [
   { key: '10y', months: 120 },
 ]
 
-// The Money Map answers "where did my money go lately", so it leans on recent
-// windows (down to 30 days) and drops the 2Y trend view the other tabs keep.
+// The Money Map answers "where did my money go", from the last 30 days up to
+// ten years (fork, owner 2026-10-15: 2Y, 5Y and 10Y added).
 const MONEY_MAP_RANGE_OPTIONS: readonly RangeOption[] = [
   { key: '30d', months: 1, days: 30 },
   { key: '3m', months: 3 },
   { key: '6m', months: 6 },
   { key: 'ytd', months: 12, period: 'ytd' },
   { key: '1y', months: 12 },
+  { key: '2y', months: 24 },
+  { key: '5y', months: 60 },
+  { key: '10y', months: 120 },
 ]
 
 const HISTORICAL_INTERVAL_OPTIONS = [

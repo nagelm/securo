@@ -297,6 +297,16 @@ it('cash flow offers 2Y, 5Y and 10Y ahead (fork)', async () => {
   await waitFor(() => expect(api.reports.cashFlow.mock.calls.at(-1)?.slice(0, 2)).toEqual([120, 'monthly']))
 })
 
+it('the money map offers 2Y, 5Y and 10Y (fork)', async () => {
+  const { user } = renderWithProviders(<ReportsPage />)
+  await user.click(screen.getByRole('button', { name: t('reports.moneyMap') }))
+  for (const key of ['range2y', 'range5y'] as const) {
+    expect(screen.getByRole('button', { name: t(`reports.${key}`) })).toBeInTheDocument()
+  }
+  await user.click(screen.getByRole('button', { name: t('reports.range10y') }))
+  await waitFor(() => expect(api.reports.incomeExpenses.mock.calls.at(-1)?.[0]).toBe(120))
+})
+
 describe('Reports page — Category Trends detail (fork)', () => {
   function trendReport(): ReportResponse {
     const cats = Array.from({ length: 14 }, (_, i) => ({
