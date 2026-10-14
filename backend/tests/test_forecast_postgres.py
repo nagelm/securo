@@ -15,6 +15,8 @@ from alembic.operations import Operations
 from app.core.database import get_async_session
 from app.main import app
 from tests.test_forecast import (  # noqa: F401  (collected here on PostgreSQL)
+    test_a_row_linked_to_a_recurring_payment_does_not_match,
+    test_a_row_stored_before_the_payment_was_expected_does_not_match,
     test_api_crud_and_forecast,
     test_api_is_workspace_scoped,
     test_api_scenario_change_validation,
@@ -22,6 +24,7 @@ from tests.test_forecast import (  # noqa: F401  (collected here on PostgreSQL)
     test_api_viewer_can_read_but_not_write,
     test_base_line_counts_recurring_and_expected_payments,
     test_cash_flow_report_counts_expected_payments_but_not_scenarios,
+    test_creating_a_payment_does_not_match_a_row_already_stored,
     test_disabled_scenarios_are_left_out_unless_asked_for,
     test_expected_payment_on_a_loan_account_is_not_cash,
     test_income_change,
@@ -39,6 +42,7 @@ from tests.test_forecast import (  # noqa: F401  (collected here on PostgreSQL)
     test_spending_cut_cannot_go_below_nothing,
     test_spending_estimate_feeds_the_base_only_when_switched_on,
     test_spending_estimate_per_category,
+    test_the_most_similar_description_wins,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -73,7 +77,14 @@ async def client(postgres_sessions, monkeypatch):
         yield client
 
 
-async def _run(session: AsyncSession, step: str) -> None:
+_F011_PATH = _PATH.with_name("f011_forecast_loan_changes.py")
+_F011_SPEC = importlib.util.spec_from_file_location("f011_forecast_loan_changes", _F011_PATH)
+assert _F011_SPEC is not None and _F011_SPEC.loader is not None
+_F011 = importlib.util.module_from_spec(_F011_SPEC)
+_F011_SPEC.loader.exec_module(_F011)
+
+
+async def _run(session: AsyncSession, step: str, module=migration) -> None:
     def go(sync_session):
         connection = sync_session.connection()
         schema = (connection.get_execution_options().get("schema_translate_map") or {}).get(None)
@@ -81,7 +92,7 @@ async def _run(session: AsyncSession, step: str) -> None:
         connection.exec_driver_sql(f'SET LOCAL search_path TO "{schema}"')
         context = MigrationContext.configure(connection)
         with Operations.context(context):
-            getattr(migration, step)()
+            getattr(module, step)()
 
     await session.run_sync(go)
     await session.commit()
@@ -117,6 +128,7 @@ async def test_migrated_tables_take_the_app_rows(session, test_user, test_worksp
 
     await _run(session, "downgrade")
     await _run(session, "upgrade")
+    await _run(session, "upgrade", _F011)  # the ORM is at head, so the later columns too
     scenario = ForecastScenario(
         user_id=test_user.id, workspace_id=test_workspace.id, name="S", color="#000000",
     )

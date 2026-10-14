@@ -4,6 +4,7 @@ import { RecurringTab } from '@/pages/recurring'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
+  Bar,
   ComposedChart,
   Line,
   XAxis,
@@ -49,6 +50,7 @@ import type {
   ForecastItemKind,
   ForecastResponse,
   ForecastScenario,
+  LoanForecast,
   RecurringTransaction,
   SpendingEstimate,
 } from '@/types'
@@ -68,6 +70,12 @@ const INTERVAL_OPTIONS = [
 ] as const
 
 const BASE_COLOR = '#6366F1'
+// Fork: the real balance before today, neutral; projections after it are
+// dashed, as on Reports → Cash Flow.
+const ACTUAL_COLOR = '#64748B'
+const FORECAST_DASH = '6 3'
+// Loans section bars: what each repayment paid in interest and in principal.
+const INTEREST_COLOR = '#E11D48'
 // Offered to a new scenario in turn; the base line keeps indigo.
 const SCENARIO_COLORS = ['#F59E0B', '#10B981', '#EC4899', '#0EA5E9', '#8B5CF6', '#F97316', '#14B8A6', '#F43F5E']
 
@@ -159,6 +167,7 @@ function ForecastView({ tabBar }: { tabBar: React.ReactNode }) {
       }
       return r
     }
+    for (const p of data.actuals ?? []) row(p.date).actual = p.value
     for (const p of data.base) row(p.date).base = p.value
     row(data.summary.lowest_date).base = data.summary.lowest_balance
     for (const s of data.scenarios) {
@@ -168,6 +177,8 @@ function ForecastView({ tabBar }: { tabBar: React.ReactNode }) {
     return [...rows.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)))
   }, [data])
 
+  const hasActuals = (data?.actuals ?? []).length > 0
+  const actualSeries = { key: 'actual', name: t('forecast.actual'), color: ACTUAL_COLOR }
   const lines = useMemo(
     () => [
       { key: 'base', name: t('forecast.base'), color: BASE_COLOR, summary: data?.summary },
@@ -324,7 +335,7 @@ function ForecastView({ tabBar }: { tabBar: React.ReactNode }) {
         <div className="px-5 pt-5 pb-2 flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-semibold text-foreground">{t('forecast.chartTitle')}</p>
           <div className="flex flex-wrap items-center gap-3">
-            {lines.map((l) => (
+            {[...(hasActuals ? [actualSeries] : []), ...lines].map((l) => (
               <div key={l.key} className="flex items-center gap-1.5">
                 <div className="w-3 h-0.5 rounded-full" style={{ backgroundColor: l.color }} />
                 <span className="text-[11px] text-muted-foreground">{l.name}</span>
@@ -361,7 +372,7 @@ function ForecastView({ tabBar }: { tabBar: React.ReactNode }) {
                       <div style={tooltipStyle} className="px-3 py-2">
                         <p className="text-xs font-medium mb-1">{shortDate(String(label))}</p>
                         {payload.map((p) => {
-                          const line = lines.find((l) => l.key === p.dataKey)
+                          const line = [actualSeries, ...lines].find((l) => l.key === p.dataKey)
                           if (!line || p.value == null) return null
                           return (
                             <p key={line.key} className="text-xs" style={{ color: line.color }}>
@@ -374,6 +385,28 @@ function ForecastView({ tabBar }: { tabBar: React.ReactNode }) {
                   }}
                 />
                 <ReferenceLine y={0} stroke="var(--border)" strokeDasharray="3 3" />
+                {hasActuals && (
+                  <ReferenceLine
+                    x={data.start_date}
+                    stroke="var(--muted-foreground)"
+                    strokeDasharray="3 3"
+                    strokeOpacity={0.6}
+                    label={{ value: t('reports.today'), position: 'insideTopRight', fill: 'var(--muted-foreground)', fontSize: 10 }}
+                  />
+                )}
+                {hasActuals && (
+                  <Line
+                    type="monotone"
+                    dataKey="actual"
+                    name={actualSeries.name}
+                    stroke={ACTUAL_COLOR}
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 4, fill: ACTUAL_COLOR }}
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                )}
                 {lines.map((l) => (
                   <Line
                     key={l.key}
@@ -382,6 +415,7 @@ function ForecastView({ tabBar }: { tabBar: React.ReactNode }) {
                     name={l.name}
                     stroke={l.color}
                     strokeWidth={l.key === 'base' ? 2.5 : 2}
+                    strokeDasharray={FORECAST_DASH}
                     dot={false}
                     activeDot={{ r: 4, fill: l.color }}
                     connectNulls
@@ -426,70 +460,285 @@ function ForecastView({ tabBar }: { tabBar: React.ReactNode }) {
         <p className="px-5 pb-4 text-[11px] text-muted-foreground">{t('forecast.chartHint')}</p>
       </div>
 
-      <RecurringSection />
+      <LoansSection loans={data?.loans ?? []} />
+      <RecurringLine />
       <ExpectedPaymentsSection />
-      <ScenariosSection estimates={data?.spending_estimates ?? []} currency={currency} />
+      <ScenariosSection estimates={data?.spending_estimates ?? []} loans={data?.loans ?? []} currency={currency} />
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// 1. Recurring (read-only)
+// Loans (fork): each table loan's balance and repayments, base and scenarios
 // ---------------------------------------------------------------------------
 
-function RecurringSection() {
+function useFrequencyName() {
+  const { t } = useTranslation()
+  return (f: string | null) => (f ? t(`forecast.loans.frequencies.${f}`, { defaultValue: f.toLowerCase() }) : '')
+}
+
+/** "3 months" / "2 weeks" for a payoff shift given in days. */
+function usePayoffShift() {
+  const { t } = useTranslation()
+  return (days: number) => {
+    const abs = Math.abs(days)
+    const months = Math.round(abs / 30.44)
+    const period = months >= 1
+      ? t('forecast.loans.months', { count: months })
+      : t('forecast.loans.weeks', { count: Math.max(1, Math.round(abs / 7)) })
+    return days < 0 ? t('forecast.loans.earlier', { period }) : t('forecast.loans.later', { period })
+  }
+}
+
+function LoansSection({ loans }: { loans: LoanForecast[] }) {
+  const { t } = useTranslation()
+  if (loans.length === 0) return null
+  return (
+    <SectionCard>
+      <SectionHeader title={t('forecast.loans.title')} hint={t('forecast.loans.hint')} />
+      <div className="divide-y divide-border">
+        {loans.map((loan) => (
+          <LoanRow key={loan.account_id} loan={loan} />
+        ))}
+      </div>
+    </SectionCard>
+  )
+}
+
+function LoanRow({ loan }: { loan: LoanForecast }) {
   const { t } = useTranslation()
   const locale = useDisplayLocale()
   const dateLocale = useDateLocale()
-  const { mask } = usePrivacyMode()
-  const frequencyLabel = useFrequencyLabel()
-  const { data: recurringList } = useQuery({ queryKey: ['recurring'], queryFn: recurringApi.list })
-  const active = (recurringList ?? []).filter((r) => r.is_active)
+  const { mask, privacyMode, MASK } = usePrivacyMode()
+  const frequencyName = useFrequencyName()
+  const payoffShift = usePayoffShift()
+  const money = (v: number) => mask(formatCurrency(v, loan.currency, locale))
+  const shortDate = (iso: string) =>
+    new Date(iso + 'T00:00:00').toLocaleDateString(dateLocale, { day: 'numeric', month: 'short', year: '2-digit' })
+  const monthYear = (iso: string | null) =>
+    iso ? new Date(iso + 'T00:00:00').toLocaleDateString(dateLocale, { month: 'short', year: 'numeric' }) : t('forecast.loans.never')
+  const base = loan.base
+
+  const rows = useMemo(() => {
+    if (!base) return []
+    const byDate = new Map<string, Record<string, number | string>>()
+    for (const p of loan.actuals ?? []) byDate.set(p.date, { date: p.date, actual: p.value })
+    for (const p of base.points) {
+      byDate.set(p.date, { ...byDate.get(p.date), date: p.date, base: p.balance, interest: p.interest, principal: p.principal })
+    }
+    for (const s of loan.scenarios) {
+      for (const p of s.points) {
+        const row = byDate.get(p.date) ?? { date: p.date }
+        row[s.scenario_id] = p.balance
+        byDate.set(p.date, row)
+      }
+    }
+    return [...byDate.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)))
+  }, [base, loan.actuals, loan.scenarios])
+  const startIso = base?.points[0]?.date ?? ''
+  // Bars are what each future repayment pays, so they start after today.
+  const splitRows = rows.filter((r) => typeof r.interest === 'number' && String(r.date) > startIso)
+  const hasHistory = (loan.actuals ?? []).length > 0
+  const lines = [
+    { key: 'base', name: t('forecast.base'), color: BASE_COLOR },
+    ...loan.scenarios.map((s) => ({ key: s.scenario_id, name: s.name, color: s.color })),
+  ]
+  const axisTick = { fontSize: 10, fill: 'var(--muted-foreground)' }
+  const yTick = (v: number) => (privacyMode ? '' : v === 0 ? '0' : formatCompact(v, loan.currency, locale))
 
   return (
-    <SectionCard>
-      <SectionHeader
-        title={t('forecast.recurringTitle')}
-        hint={t('forecast.recurringHint')}
-        action={
-          <Link to="/forecast?tab=recurring" className="text-xs font-semibold text-primary hover:underline">
-            {t('forecast.editRecurring')}
+    <div className="px-4 sm:px-5 py-4" data-testid="loan-row">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <Link to={`/accounts/${loan.account_id}`} className="text-sm font-semibold text-foreground hover:underline">
+          {loan.name}
+        </Link>
+        <p className="text-xs text-muted-foreground tabular-nums">
+          {t('forecast.loans.owed', { amount: money(loan.balance) })}
+          {loan.rate != null && <> · {t('forecast.loans.rateValue', { rate: loan.rate })}</>}
+          {base && <> · {t('forecast.loans.repaymentValue', { amount: money(base.repayment), frequency: frequencyName(loan.frequency) })}</>}
+        </p>
+      </div>
+
+      {!base ? (
+        <p className="text-xs text-muted-foreground mt-2" data-testid="loan-missing-details">
+          {t('forecast.loans.missingDetails')}{' '}
+          <Link to={`/accounts/${loan.account_id}`} className="font-semibold text-primary hover:underline">
+            {t('forecast.loans.addDetails')}
           </Link>
-        }
-      />
-      {active.length > 0 ? (
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-border">
-              <th className={`${TH} pl-4 sm:pl-5 text-left`}>{t('recurring.description')}</th>
-              <th className={`${TH} text-left w-36`}>{t('recurring.amount')}</th>
-              <th className={`${TH} text-left w-32 hidden md:table-cell`}>{t('recurring.frequency')}</th>
-              <th className={`${TH} pr-4 sm:pr-5 text-left w-32 hidden sm:table-cell`}>{t('recurring.nextOccurrence')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {active.map((rt) => (
-              <tr key={rt.id} className="border-b border-border last:border-0">
-                <td className="py-2.5 pl-4 sm:pl-5 text-sm text-foreground">{rt.description}</td>
-                <td className={`py-2.5 text-xs sm:text-sm font-semibold tabular-nums ${rt.type === 'credit' ? 'text-emerald-600' : 'text-rose-500'}`}>
-                  {mask(`${rt.type === 'credit' ? '+' : '−'}${formatCurrency(rt.amount, rt.currency, locale)}`)}
-                </td>
-                <td className="py-2.5 hidden md:table-cell">
-                  <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-medium">
-                    {frequencyLabel(rt.frequency)}
-                  </span>
-                </td>
-                <td className="py-2.5 pr-4 sm:pr-5 text-xs text-muted-foreground tabular-nums hidden sm:table-cell">
-                  {new Date(rt.next_occurrence + 'T00:00:00').toLocaleDateString(dateLocale)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        </p>
       ) : (
-        <p className="text-sm text-muted-foreground text-center py-8">{t('recurring.empty')}</p>
+        <>
+          <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2">
+            <div>
+              <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">{t('forecast.loans.payoff')}</p>
+              <p className="text-sm font-semibold text-foreground tabular-nums">{monthYear(base.payoff_date)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">{t('forecast.loans.totalInterest')}</p>
+              <p className="text-sm font-semibold text-foreground tabular-nums">{money(base.total_interest)}</p>
+            </div>
+          </div>
+          {loan.scenarios.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {loan.scenarios.map((s) => {
+                const saved = s.interest_saved
+                return (
+                  <li key={s.scenario_id} className="flex items-center gap-1.5 text-xs" data-testid="loan-scenario">
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+                    <span className="font-medium text-foreground">{s.name}:</span>
+                    <span className="text-muted-foreground">
+                      {s.payoff_date == null
+                        ? t('forecast.loans.neverPaidOff')
+                        : s.payoff_change_days == null || s.payoff_change_days === 0
+                          ? t('forecast.loans.samePayoff', { date: monthYear(s.payoff_date) })
+                          : `${payoffShift(s.payoff_change_days)} (${monthYear(s.payoff_date)})`}
+                      {saved != null && saved !== 0 && (
+                        <>
+                          {', '}
+                          <span className={cn('font-semibold', saved > 0 ? 'text-emerald-600' : 'text-rose-500')}>
+                            {saved > 0
+                              ? t('forecast.loans.saves', { amount: money(saved) })
+                              : t('forecast.loans.costs', { amount: money(-saved) })}
+                          </span>
+                        </>
+                      )}
+                      {s.repayment !== base.repayment && (
+                        <>{', '}{t('forecast.loans.newRepayment', { amount: money(s.repayment) })}</>
+                      )}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <p className="text-[11px] font-medium text-muted-foreground mb-1">{t('forecast.loans.balanceChart')}</p>
+              <div style={{ height: 180 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                    <XAxis dataKey="date" tickFormatter={shortDate} tick={axisTick} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis tickFormatter={yTick} tick={axisTick} axisLine={false} tickLine={false} width={56} tickCount={4} />
+                    <Tooltip
+                      content={({ active, payload, label }) => {
+                        if (!active || !payload || payload.length === 0) return null
+                        return (
+                          <div style={tooltipStyle} className="px-3 py-2">
+                            <p className="text-xs font-medium mb-1">{shortDate(String(label))}</p>
+                            {payload.map((p) => {
+                              const line = [{ key: 'actual', name: t('forecast.actual'), color: ACTUAL_COLOR }, ...lines].find((l) => l.key === p.dataKey)
+                              if (!line || p.value == null) return null
+                              return (
+                                <p key={line.key} className="text-xs" style={{ color: line.color }}>
+                                  {line.name}: {privacyMode ? MASK : formatCurrency(Number(p.value), loan.currency, locale)}
+                                </p>
+                              )
+                            })}
+                          </div>
+                        )
+                      }}
+                    />
+                    {hasHistory && (
+                      <ReferenceLine x={startIso} stroke="var(--muted-foreground)" strokeDasharray="3 3" strokeOpacity={0.6} />
+                    )}
+                    {hasHistory && (
+                      <Line
+                        type="monotone"
+                        dataKey="actual"
+                        name={t('forecast.actual')}
+                        stroke={ACTUAL_COLOR}
+                        strokeWidth={2}
+                        dot={false}
+                        connectNulls
+                        isAnimationActive={false}
+                      />
+                    )}
+                    {lines.map((l) => (
+                      <Line
+                        key={l.key}
+                        type="monotone"
+                        dataKey={l.key}
+                        name={l.name}
+                        stroke={l.color}
+                        strokeWidth={l.key === 'base' ? 2.5 : 2}
+                        strokeDasharray={FORECAST_DASH}
+                        dot={false}
+                        connectNulls
+                        isAnimationActive={false}
+                      />
+                    ))}
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-3 mb-1">
+                <p className="text-[11px] font-medium text-muted-foreground">{t('forecast.loans.splitChart')}</p>
+                <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: INTEREST_COLOR }} />{t('forecast.loans.interest')}
+                </span>
+                <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: BASE_COLOR }} />{t('forecast.loans.principal')}
+                </span>
+              </div>
+              <div style={{ height: 180 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={splitRows} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                    <XAxis dataKey="date" tickFormatter={shortDate} tick={axisTick} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis tickFormatter={yTick} tick={axisTick} axisLine={false} tickLine={false} width={56} tickCount={4} />
+                    <Tooltip
+                      cursor={{ fill: 'var(--muted)', opacity: 0.4 }}
+                      content={({ active, payload, label }) => {
+                        if (!active || !payload || payload.length === 0) return null
+                        return (
+                          <div style={tooltipStyle} className="px-3 py-2">
+                            <p className="text-xs font-medium mb-1">{shortDate(String(label))}</p>
+                            {payload.map((p) => (
+                              <p key={String(p.dataKey)} className="text-xs" style={{ color: p.color }}>
+                                {p.dataKey === 'interest' ? t('forecast.loans.interest') : t('forecast.loans.principal')}:{' '}
+                                {privacyMode ? MASK : formatCurrency(Number(p.value), loan.currency, locale)}
+                              </p>
+                            ))}
+                          </div>
+                        )
+                      }}
+                    />
+                    <Bar dataKey="interest" stackId="split" fill={INTEREST_COLOR} isAnimationActive={false} />
+                    <Bar dataKey="principal" stackId="split" fill={BASE_COLOR} radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+        </>
       )}
-    </SectionCard>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 1. Recurring: one line; the list itself lives on the Recurring tab
+// ---------------------------------------------------------------------------
+
+function RecurringLine() {
+  const { t } = useTranslation()
+  const [, setSearchParams] = useSearchParams()
+  const { data: recurringList } = useQuery({ queryKey: ['recurring'], queryFn: recurringApi.list })
+  const count = (recurringList ?? []).filter((r) => r.is_active).length
+
+  return (
+    <p className="text-xs text-muted-foreground mb-5 px-1" data-testid="recurring-line">
+      {t('forecast.recurringLine', { count })}
+      {' · '}
+      <button
+        type="button"
+        onClick={() => setSearchParams({ tab: 'recurring' }, { replace: true })}
+        className="font-semibold text-primary hover:underline"
+      >
+        {t('forecast.manageRecurring')}
+      </button>
+    </p>
   )
 }
 
@@ -753,7 +1002,15 @@ function ExpectedPaymentForm({
 // 3. Scenarios
 // ---------------------------------------------------------------------------
 
-function ScenariosSection({ estimates, currency }: { estimates: SpendingEstimate[]; currency: string }) {
+function ScenariosSection({
+  estimates,
+  loans,
+  currency,
+}: {
+  estimates: SpendingEstimate[]
+  loans: LoanForecast[]
+  currency: string
+}) {
   const { t } = useTranslation()
   const { canWrite } = useWorkspace()
   const queryClient = useQueryClient()
@@ -911,6 +1168,7 @@ function ScenariosSection({ estimates, currency }: { estimates: SpendingEstimate
                           recurring={recurringList ?? []}
                           estimates={estimates}
                           categories={lookups.categories}
+                          accounts={lookups.accounts}
                           currency={currency}
                         />
                         {canWrite && (
@@ -971,6 +1229,7 @@ function ScenariosSection({ estimates, currency }: { estimates: SpendingEstimate
               item={changeDialog.item}
               recurring={recurringList ?? []}
               estimates={estimates}
+              loans={loans}
               categories={lookups.categories}
               categoryGroups={lookups.categoryGroups}
               currency={currency}
@@ -1051,12 +1310,14 @@ function ChangeSummary({
   recurring,
   estimates,
   categories,
+  accounts,
   currency,
 }: {
   item: ForecastItem
   recurring: RecurringTransaction[]
   estimates: SpendingEstimate[]
   categories: Category[]
+  accounts: Account[]
   currency: string
 }) {
   const { t } = useTranslation()
@@ -1103,6 +1364,18 @@ function ChangeSummary({
         range,
       })
       break
+    case 'loan_change': {
+      const loan = accounts.find((a) => a.id === item.account_id)
+      const name = loan ? getAccountName(loan) : '—'
+      text = item.change_mode === 'rate'
+        ? t(item.recalculate_repayment === false ? 'forecast.summary.loanRateKeep' : 'forecast.summary.loanRateRecalc', {
+          name, rate: percent, from: fmtDate(item.start_date),
+        })
+        : item.change_mode === 'lump_sum'
+          ? t('forecast.summary.loanLumpSum', { name, amount: money(amount), date: fmtDate(item.start_date) })
+          : t('forecast.summary.loanRepayment', { name, amount: money(amount), from: fmtDate(item.start_date) })
+      break
+    }
     case 'spending_change':
       text = t('forecast.summary.spending', {
         name: categoryName,
@@ -1121,13 +1394,14 @@ function ChangeSummary({
   )
 }
 
-const KINDS: ForecastItemKind[] = ['one_off', 'repeating', 'recurring_change', 'income_change', 'spending_change']
+const KINDS: ForecastItemKind[] = ['one_off', 'repeating', 'recurring_change', 'income_change', 'spending_change', 'loan_change']
 
 function ChangeForm({
   scenarioId,
   item,
   recurring,
   estimates,
+  loans,
   categories,
   categoryGroups,
   currency,
@@ -1139,6 +1413,7 @@ function ChangeForm({
   item: ForecastItem | null
   recurring: RecurringTransaction[]
   estimates: SpendingEstimate[]
+  loans: LoanForecast[]
   categories: Category[]
   categoryGroups: CategoryGroup[]
   currency: string
@@ -1172,10 +1447,18 @@ function ChangeForm({
     item?.change_mode ?? (kind === 'recurring_change' ? 'amount' : 'percent'),
   )
   const [categoryId, setCategoryId] = useState(item?.category_id ?? estimates[0]?.category_id ?? '')
+  // Fork: loan changes pick a loan the forecast can project.
+  const projectable = loans.filter((l) => !l.missing_details)
+  const [loanId, setLoanId] = useState(
+    (item?.kind === 'loan_change' ? item.account_id : null) ?? projectable[0]?.account_id ?? '',
+  )
+  const [recalculate, setRecalculate] = useState(item?.recalculate_repayment !== false)
 
   const isRecurringChange = kind === 'recurring_change'
+  const isLoanChange = kind === 'loan_change'
   const isSigned = kind === 'income_change' || kind === 'spending_change'
-  const modes = isRecurringChange ? ['amount', 'pause', 'stop'] : ['percent', 'amount']
+  const modes = isRecurringChange ? ['amount', 'pause', 'stop'] : isLoanChange ? ['rate', 'amount', 'lump_sum'] : ['percent', 'amount']
+  const loan = loans.find((l) => l.account_id === loanId)
   const mode = modes.includes(changeMode) ? changeMode : modes[0]
   const estimate = estimates.find((e) => e.category_id === categoryId)
   const signedValue = (direction === 'down' ? -1 : 1) * Number(amount || 0)
@@ -1199,6 +1482,17 @@ function ChangeForm({
         start_date: startDate,
         end_date: mode === 'pause' ? endDate || null : null,
         amount: mode === 'amount' ? amount : null,
+      })
+    }
+    if (isLoanChange) {
+      Object.assign(payload, {
+        account_id: loanId || null,
+        change_mode: mode,
+        start_date: startDate,
+        end_date: null,
+        percent: mode === 'rate' ? amount : null,
+        amount: mode === 'rate' ? null : amount,
+        recalculate_repayment: mode === 'rate' ? recalculate : null,
       })
     }
     if (isSigned) {
@@ -1311,14 +1605,85 @@ function ChangeForm({
         </div>
       )}
 
-      {(isRecurringChange || isSigned) && (
+      {isLoanChange && (
+        <div className="space-y-2">
+          <Label htmlFor="change-loan">{t('forecast.loans.loan')}</Label>
+          {loans.length > 0 ? (
+            <select id="change-loan" className={selectClass} value={loanId} onChange={(e) => setLoanId(e.target.value)} required>
+              <option value="" disabled>{t('forecast.loans.pickLoan')}</option>
+              {loans.map((l) => (
+                <option key={l.account_id} value={l.account_id} disabled={l.missing_details}>
+                  {l.missing_details ? t('forecast.loans.needsDetails', { name: l.name }) : l.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p className="text-xs text-muted-foreground">{t('forecast.loans.noLoans')}</p>
+          )}
+          {loan?.base && (
+            <p className="text-xs text-muted-foreground" data-testid="loan-current">
+              {t('forecast.loans.current', {
+                rate: loan.rate,
+                amount: mask(formatCurrency(loan.base.repayment, loan.currency, locale)),
+                frequency: t(`forecast.loans.frequencies.${loan.frequency}`, { defaultValue: (loan.frequency ?? '').toLowerCase() }),
+              })}
+            </p>
+          )}
+        </div>
+      )}
+
+      {(isRecurringChange || isSigned || isLoanChange) && (
         <div className="space-y-2">
           <Label htmlFor="change-mode">{t('forecast.changeMode')}</Label>
           <select id="change-mode" className={selectClass} value={mode} onChange={(e) => setChangeMode(e.target.value)}>
             {modes.map((m) => (
-              <option key={m} value={m}>{t(`forecast.modes.${isRecurringChange ? m : `${m}Change`}`)}</option>
+              <option key={m} value={m}>
+                {t(isLoanChange ? `forecast.loans.modes.${m}` : `forecast.modes.${isRecurringChange ? m : `${m}Change`}`)}
+              </option>
             ))}
           </select>
+        </div>
+      )}
+      {isLoanChange && (
+        <div className="space-y-2">
+          <Label htmlFor="change-loan-value">
+            {mode === 'rate' ? t('forecast.loans.newRate') : mode === 'lump_sum' ? t('forecast.loans.extraAmount') : t('forecast.loans.newRepaymentAmount')}
+          </Label>
+          <Input
+            id="change-loan-value"
+            type="number"
+            step="0.01"
+            min={mode === 'rate' ? '0' : '0.01'}
+            max={mode === 'rate' ? '100' : undefined}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            required
+          />
+        </div>
+      )}
+      {isLoanChange && mode === 'rate' && (
+        <div className="space-y-2">
+          <Label>{t('forecast.loans.repaymentAfter')}</Label>
+          <div className="flex items-center rounded-lg border border-border bg-card overflow-hidden w-fit" role="group">
+            {[true, false].map((value) => (
+              <button
+                key={String(value)}
+                type="button"
+                onClick={() => setRecalculate(value)}
+                aria-pressed={recalculate === value}
+                className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  recalculate === value
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                }`}
+              >
+                {value ? t('forecast.loans.recalculate') : t('forecast.loans.keep')}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {recalculate ? t('forecast.loans.recalculateHint') : t('forecast.loans.keepHint')}
+          </p>
         </div>
       )}
       {isSigned && (
@@ -1356,10 +1721,10 @@ function ChangeForm({
       {kind !== 'one_off' && (
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label>{t('recurring.startDate')}</Label>
+            <Label>{isLoanChange && mode === 'lump_sum' ? t('forecast.date') : t('recurring.startDate')}</Label>
             <DatePickerInput value={startDate} onChange={setStartDate} className="w-full justify-start" />
           </div>
-          {(!isRecurringChange || mode === 'pause') && (
+          {((!isRecurringChange && !isLoanChange) || mode === 'pause') && (
             <div className="space-y-2">
               <Label>{t('recurring.endDate')}</Label>
               <DatePickerInput value={endDate} onChange={setEndDate} placeholder={t('forecast.optional')} className="w-full justify-start" />

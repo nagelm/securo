@@ -669,8 +669,14 @@ export interface RecurringTransaction {
 }
 
 // Fork: the Forecast page.
-export type ForecastItemKind = 'one_off' | 'repeating' | 'recurring_change' | 'income_change' | 'spending_change'
-export type ForecastChangeMode = 'amount' | 'pause' | 'stop' | 'percent'
+export type ForecastItemKind =
+  | 'one_off'
+  | 'repeating'
+  | 'recurring_change'
+  | 'income_change'
+  | 'spending_change'
+  | 'loan_change'
+export type ForecastChangeMode = 'amount' | 'pause' | 'stop' | 'percent' | 'rate' | 'lump_sum'
 
 export interface ForecastScenario {
   id: string
@@ -698,7 +704,10 @@ export interface ForecastItem {
   category_id: string | null
   recurring_transaction_id: string | null
   change_mode: ForecastChangeMode | null
+  /** The new interest rate for a loan_change in mode 'rate'. */
   percent: string | number | null
+  /** loan_change 'rate': recalculate the repayment over the remaining term (true) or keep it. */
+  recalculate_repayment?: boolean | null
   matched_transaction_id: string | null
 }
 
@@ -729,6 +738,45 @@ export interface SpendingEstimate {
   monthly_amount: number
 }
 
+/** A loan's balance at `date`, and what repayments since the previous point paid. */
+export interface LoanPoint {
+  date: string
+  balance: number
+  interest: number
+  principal: number
+}
+
+export interface LoanLine {
+  points: LoanPoint[]
+  /** null: never paid off at this repayment. */
+  payoff_date: string | null
+  /** From today until payoff. */
+  total_interest: number
+  repayment: number
+}
+
+export interface LoanScenarioLine extends LoanLine {
+  scenario_id: string
+  name: string
+  color: string
+  interest_saved: number | null
+  payoff_change_days: number | null
+}
+
+export interface LoanForecast {
+  account_id: string
+  name: string
+  currency: string
+  balance: number
+  rate: number | null
+  frequency: string | null
+  missing_details: boolean
+  /** Owed at each history point, as far back as the forecast looks ahead, ending today. */
+  actuals?: ForecastPoint[]
+  base: LoanLine | null
+  scenarios: LoanScenarioLine[]
+}
+
 export interface ForecastResponse {
   currency: string
   interval: string
@@ -736,10 +784,13 @@ export interface ForecastResponse {
   end_date: string
   starting_balance: number
   include_spending: boolean
+  /** The real balance from (today − horizon) to today; the last point is today's starting balance. */
+  actuals?: ForecastPoint[]
   base: ForecastPoint[]
   summary: ForecastLineSummary
   scenarios: ForecastScenarioSeries[]
   spending_estimates: SpendingEstimate[]
+  loans?: LoanForecast[]
 }
 
 export interface ProjectedTransaction {

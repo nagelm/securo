@@ -472,6 +472,82 @@ async def test_one_bank_row_settles_one_payment(session, test_user, test_workspa
     assert await forecast_service.match_expected_payments(session, test_workspace.id) == 1
 
 
+async def _stored(session: AsyncSession, tx: Transaction, item: ForecastItem, offset: timedelta) -> None:
+    """Date the row's storing ``offset`` from when the item was created."""
+    await session.refresh(item)
+    created = item.created_at if item.created_at.tzinfo else item.created_at.replace(tzinfo=timezone.utc)
+    tx.created_at = created + offset
+    await session.commit()
+
+
+async def test_a_row_stored_before_the_payment_was_expected_does_not_match(session, test_user, test_workspace):
+    """Owner 2026-10-14: an expected payment is for money still to come. A
+    row already in the bank when it was created (the previous occurrence, an
+    unrelated payment of about the same amount) is not it."""
+    today = app_today()
+    account = await _account(session, test_user.id)
+    item = await _expected(session, test_user.id, test_workspace.id, amount=Decimal("1500.00"), type="debit",
+                           date=today + timedelta(days=6), account_id=account.id)
+    old = await _tx(session, test_user.id, account.id, 1500.00, "debit", today)
+    await _stored(session, old, item, -timedelta(hours=1))
+
+    assert await forecast_service.match_expected_payments(session, test_workspace.id) == 0
+    assert await forecast_service.pending_expected_matches(session, test_workspace.id) == set()
+
+    new = await _tx(session, test_user.id, account.id, 1500.00, "debit", today)
+    await _stored(session, new, item, timedelta(hours=1))
+    assert await forecast_service.match_expected_payments(session, test_workspace.id) == 1
+    await session.refresh(item)
+    assert item.matched_transaction_id == new.id
+
+
+async def test_creating_a_payment_does_not_match_a_row_already_stored(session, test_user, test_workspace):
+    from app.schemas.forecast import ForecastItemCreate
+
+    today = app_today()
+    account = await _account(session, test_user.id)
+    old = await _tx(session, test_user.id, account.id, 200, "debit", today - timedelta(days=1))
+    old.created_at = datetime.now(timezone.utc) - timedelta(days=1)
+    await session.commit()
+    item = await forecast_service.create_item(
+        session, test_workspace.id, test_user.id,
+        ForecastItemCreate(kind="one_off", amount=Decimal("200"), type="debit",
+                           date=today, account_id=account.id, description="Rates"),
+    )
+    assert item.matched_transaction_id is None
+
+
+async def test_a_row_linked_to_a_recurring_payment_does_not_match(session, test_user, test_workspace):
+    today = app_today()
+    account = await _account(session, test_user.id)
+    rec = await _recurring(session, test_user.id, account.id, 100, "debit", today + timedelta(days=30))
+    item = await _expected(session, test_user.id, test_workspace.id, amount=Decimal("100.50"), type="debit",
+                           date=today + timedelta(days=2), account_id=account.id)
+    holiday_fund = await _tx(session, test_user.id, account.id, 100, "debit", today)
+    holiday_fund.recurring_transaction_id = rec.id
+    await _stored(session, holiday_fund, item, timedelta(hours=1))
+
+    assert await forecast_service.match_expected_payments(session, test_workspace.id) == 0
+
+
+async def test_the_most_similar_description_wins(session, test_user, test_workspace):
+    today = app_today()
+    account = await _account(session, test_user.id)
+    item = await _expected(session, test_user.id, test_workspace.id, amount=Decimal("300"), type="debit",
+                           date=today, account_id=account.id, description="Plumber invoice")
+    # The closer date has nothing in common with the description.
+    other = await _tx(session, test_user.id, account.id, 300, "debit", today)
+    other.description = "Supermarket"
+    await _stored(session, other, item, timedelta(hours=1))
+    plumber = await _tx(session, test_user.id, account.id, 300, "debit", today - timedelta(days=3))
+    plumber.description = "Plumber invoice 1234"
+    await _stored(session, plumber, item, timedelta(hours=1))
+
+    assert await forecast_service.match_expected_payments(session, test_workspace.id) == 1
+    await session.refresh(item)
+    assert item.matched_transaction_id == plumber.id
+
+
 # ---------------------------------------------------------------------------
 # API: CRUD, validation, workspace scope, write gate
 # ---------------------------------------------------------------------------
@@ -600,18 +676,3 @@ async def test_api_viewer_can_read_but_not_write(client, viewer_auth_headers):
     resp = await client.post("/api/forecast/scenarios", json={"name": "S", "color": "#000000"},
                              headers=viewer_auth_headers)
     assert resp.status_code == 403
-
-
-
-async def test_creating_a_payment_whose_bank_row_has_landed_matches_it(session, test_user, test_workspace):
-    from app.schemas.forecast import ForecastItemCreate
-
-    today = app_today()
-    account = await _account(session, test_user.id)
-    real = await _tx(session, test_user.id, account.id, 200, "debit", today - timedelta(days=1))
-    item = await forecast_service.create_item(
-        session, test_workspace.id, test_user.id,
-        ForecastItemCreate(kind="one_off", amount=Decimal("200"), type="debit",
-                           date=today, account_id=account.id, description="Rates"),
-    )
-    assert item.matched_transaction_id == real.id

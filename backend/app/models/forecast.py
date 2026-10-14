@@ -2,7 +2,8 @@
 
 `ForecastScenario` is a named "what if" set; `ForecastItem` is either an
 expected payment (``scenario_id`` NULL, kind ``one_off``: real money that is
-not in the bank yet) or one change inside a scenario. Both are read by
+not in the bank yet) or one change inside a scenario (including a change to
+a loan's rate or repayments, ``loan_change``). Both are read by
 `forecast_service`, which lays them over the cash-flow projection.
 """
 import uuid
@@ -17,8 +18,10 @@ from sqlalchemy.sql import func
 
 from app.core.database import Base
 
-FORECAST_ITEM_KINDS = ("one_off", "repeating", "recurring_change", "income_change", "spending_change")
-FORECAST_CHANGE_MODES = ("amount", "pause", "stop", "percent")
+FORECAST_ITEM_KINDS = (
+    "one_off", "repeating", "recurring_change", "income_change", "spending_change", "loan_change",
+)
+FORECAST_CHANGE_MODES = ("amount", "pause", "stop", "percent", "rate", "lump_sum")
 
 
 class ForecastScenario(Base):
@@ -47,7 +50,8 @@ class ForecastItem(Base):
     __tablename__ = "forecast_items"
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('one_off', 'repeating', 'recurring_change', 'income_change', 'spending_change')",
+            "kind IN ('one_off', 'repeating', 'recurring_change', 'income_change', 'spending_change',"
+            " 'loan_change')",
             name="ck_forecast_items_kind",
         ),
         CheckConstraint(
@@ -55,7 +59,7 @@ class ForecastItem(Base):
             name="ck_forecast_items_type",
         ),
         CheckConstraint(
-            "change_mode IS NULL OR change_mode IN ('amount', 'pause', 'stop', 'percent')",
+            "change_mode IS NULL OR change_mode IN ('amount', 'pause', 'stop', 'percent', 'rate', 'lump_sum')",
             name="ck_forecast_items_change_mode",
         ),
     )
@@ -91,9 +95,14 @@ class ForecastItem(Base):
     recurring_transaction_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("recurring_transactions.id", ondelete="CASCADE"), nullable=True
     )
-    # recurring_change: amount | pause | stop; income/spending_change: amount | percent.
+    # recurring_change: amount | pause | stop; income/spending_change: amount | percent;
+    # loan_change (account_id = the loan): rate (new rate in `percent`) | amount (new
+    # repayment) | lump_sum (one extra repayment of `amount` on start_date).
     change_mode: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(precision=7, scale=2), nullable=True)
+    # loan_change rate: True recalculates the repayment over the remaining term
+    # (a refix), False keeps it so the term changes. NULL elsewhere.
+    recalculate_repayment: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     # Expected payments: the bank row that turned out to be this payment.
     matched_transaction_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True

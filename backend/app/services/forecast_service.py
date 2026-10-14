@@ -7,6 +7,13 @@ scenario is the base line plus the changes it holds, so the projection
 engine stays in one place (`report_service.get_cash_flow_report`) and a
 scenario only ever computes its own difference.
 
+A scenario can also change a table loan's rate or repayments
+(``loan_change``). Each open loan with enough ``loan_details`` gets a base
+repayment schedule and one per scenario that changes it (``loan_projection``);
+the cash line takes only the difference in repayments from the base, because
+the base repayments are already in it (a recurring loan payment) or not, as
+the user recorded them, and must not be counted twice.
+
 Expected payments are one-off items with no scenario. When the real bank row
 arrives (same account and direction, amount within 5%, date within 10 days)
 the item is matched to it and drops out: from the sync and import paths
@@ -14,7 +21,8 @@ after new rows land, and again whenever a forecast is computed, so a missed
 hook only delays the match.
 """
 import uuid
-from datetime import date, timedelta
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Iterable, Optional, cast
 
@@ -40,8 +48,21 @@ from app.schemas.forecast import (
     ForecastScenarioCreate,
     ForecastScenarioSeries,
     ForecastScenarioUpdate,
+    LoanForecast,
+    LoanLine,
+    LoanPoint,
+    LoanScenarioLine,
     SpendingEstimate,
 )
+from app.services.loan_projection import (
+    LoanChange,
+    LoanSchedule,
+    LoanTerms,
+    cash_difference,
+    loan_terms,
+    project_loan,
+)
+from app.services.text_similarity import token_overlap
 
 MATCH_AMOUNT_TOLERANCE = Decimal("0.05")
 MATCH_WINDOW_DAYS = 10
@@ -53,8 +74,24 @@ _NOT_REAL_SOURCES = ("opening_balance", "recurring")
 # ---------------------------------------------------------------------------
 
 
+def _utc(value: Optional[datetime]) -> Optional[datetime]:
+    """SQLite hands back naive UTC timestamps; compare everything aware."""
+    if value is None:
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
 def _is_match(item: ForecastItem, tx: Transaction, today: date) -> bool:
     if tx.account_id != item.account_id or tx.type != item.type:
+        return False
+    # An expectation is for a payment still to come: a row stored before the
+    # item was created belongs to something else (an earlier occurrence, an
+    # unrelated payment of a similar amount). A row with no created_at is old.
+    stored, expected_since = _utc(tx.created_at), _utc(item.created_at)
+    if stored is None or (expected_since is not None and stored < expected_since):
+        return False
+    # A row a recurring schedule already claims is that schedule's payment.
+    if tx.recurring_transaction_id is not None:
         return False
     if (tx.currency or "") != item.currency:
         return False
@@ -75,8 +112,10 @@ async def match_expected_payments(
 
     With ``transactions`` (the rows a sync or import just stored) only those
     are candidates; without, the workspace's rows around each payment are.
-    One bank row settles at most one expected payment; the closest date
-    wins, then the closest amount. Flushes, never commits. Called by sync
+    One bank row settles at most one expected payment. Only rows stored
+    after the payment was created, and not linked to a recurring payment,
+    are candidates; the most similar description wins, then the closest
+    date, then the closest amount. Flushes, never commits. Called by sync
     and import only; reads use ``pending_expected_matches``.
     """
     found = await _find_expected_matches(session, workspace_id, transactions)
@@ -155,7 +194,11 @@ async def _find_expected_matches(
         expected = abs(Decimal(item.amount or 0))
         best = min(
             fits,
-            key=lambda tx: (abs((tx.date - cast(date, item.date)).days), abs(abs(Decimal(tx.amount)) - expected)),
+            key=lambda tx: (
+                -token_overlap(item.description, tx.description),
+                abs((tx.date - cast(date, item.date)).days),
+                abs(abs(Decimal(tx.amount)) - expected),
+            ),
         )
         found.append((item, best.id))
         taken.add(best.id)
@@ -388,6 +431,19 @@ def _validate_item(values: dict) -> None:
         if mode == "pause" and end is None:
             raise ValueError("A pause needs an end date")
         return
+    if kind == "loan_change":
+        if values.get("account_id") is None:
+            raise ValueError("Loan is required")
+        if mode == "rate":
+            rate = values.get("percent")
+            if rate is None or not 0 <= rate <= 100:
+                raise ValueError("Interest rate must be between 0 and 100")
+        elif mode in ("amount", "lump_sum"):
+            if amount is None or amount <= 0:
+                raise ValueError("Amount must be greater than zero")
+        else:
+            raise ValueError("Change must be rate, amount or lump_sum")
+        return
     # income_change, spending_change: a signed change, by amount or percent.
     if kind == "spending_change" and values.get("category_id") is None:
         raise ValueError("Category is required")
@@ -401,6 +457,14 @@ def _validate_item(values: dict) -> None:
         raise ValueError("Change must be amount or percent")
 
 
+def _require_loan(account: Optional[Account]) -> None:
+    """A loan change must point at an open loan account."""
+    if account is None or account.type != "loan":
+        raise ValueError("The account is not a loan")
+    if account.is_closed:
+        raise ValueError("Loan account is closed")
+
+
 async def _primary_currency(session: AsyncSession, user_id: uuid.UUID) -> str:
     user = await session.get(User, user_id)
     return user.primary_currency if user else get_settings().default_currency
@@ -412,6 +476,10 @@ async def create_item(
     values = data.model_dump()
     account = await _check_refs(session, workspace_id, values)
     _validate_item(values)
+    if values["kind"] == "loan_change":
+        _require_loan(account)
+        if values["change_mode"] == "rate" and values.get("recalculate_repayment") is None:
+            values["recalculate_repayment"] = True  # a refix recalculates by default
     if not values.get("currency"):
         values["currency"] = account.currency if account else await _primary_currency(session, user_id)
     item = ForecastItem(user_id=user_id, workspace_id=workspace_id, **values)
@@ -438,10 +506,13 @@ async def update_item(
         for column in (
             "scenario_id", "kind", "amount", "type", "date", "start_date", "end_date", "frequency",
             "account_id", "category_id", "recurring_transaction_id", "change_mode", "percent",
+            "recalculate_repayment",
         )
     }
     merged.update(changes)
     _validate_item(merged)
+    if merged["kind"] == "loan_change":
+        _require_loan(await _check_refs(session, workspace_id, {"account_id": merged["account_id"]}))
     for field, value in changes.items():
         if field == "currency" and value is None:
             continue
@@ -521,6 +592,8 @@ async def _scenario_deltas(
         return max(cast(date, item.start_date), first), min(item.end_date or end, end)
 
     for item in scenario.items:
+        if item.kind == "loan_change":
+            continue  # projected per loan in compute_forecast
         if item.account_id is not None and item.account_id not in account_ids:
             continue  # a loan, an investment, a closed account: not cash
         if item.kind == "one_off":
@@ -584,6 +657,129 @@ async def _scenario_deltas(
             for d, daily in _spread_monthly(change, start, stop):
                 add(d, -daily)
     return deltas
+
+
+def _history_dates(start: date, today: date, interval: str) -> list[date]:
+    from app.services.report_service import _date_points
+
+    dates = [d for d in _date_points(start, today, interval) if d <= today]
+    if not dates or dates[0] != start:
+        dates.insert(0, start)
+    if dates[-1] != today:
+        dates.append(today)
+    return dates
+
+
+async def _balance_history(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    account_ids: list[uuid.UUID],
+    dates: list[date],
+    currency: str,
+) -> dict[date, float]:
+    """The real balance of ``account_ids`` at the end of each of ``dates``.
+
+    Built the way Balance Evolution builds its line: the dashboard's balance
+    the day before the first date, plus each day's posted movements.
+    """
+    from app.services.dashboard_service import _balance_at, _daily_balance_deltas_by_date
+
+    start, last = dates[0], dates[-1]
+    running = await _balance_at(
+        session, workspace_id, start - timedelta(days=1),
+        primary_currency_hint=currency, account_ids=account_ids,
+    )
+    deltas = await _daily_balance_deltas_by_date(
+        session, workspace_id, start, last + timedelta(days=1),
+        primary_currency_hint=currency, account_ids=account_ids,
+    )
+    out: dict[date, float] = {}
+    day, i = start, 0
+    ordered = sorted(dates)
+    while day <= last:
+        running += deltas.get(day, 0.0)
+        if day == ordered[i]:
+            out[day] = round(running, 2)
+            i += 1
+        day += timedelta(days=1)
+    return out
+
+
+@dataclass
+class _Loan:
+    account: Account
+    debt: float  # owed today, positive
+    terms: Optional[LoanTerms]
+    base: Optional[LoanSchedule]
+
+
+async def _open_loans(session: AsyncSession, workspace_id: uuid.UUID, today: date) -> list[_Loan]:
+    """Open loans that still owe money, with their base schedule when the
+    details allow one. The balance is the one the rest of the app shows."""
+    from app.services.dashboard_service import _account_balance_at, _get_open_accounts
+
+    loans: list[_Loan] = []
+    accounts = sorted(
+        (a for a in await _get_open_accounts(session, workspace_id) if a.type == "loan"),
+        key=lambda a: (a.position, a.display_name or a.name),
+    )
+    for account in accounts:
+        debt = round(-await _account_balance_at(session, account, today), 2)
+        if debt <= 0:
+            continue
+        terms = loan_terms(account.loan_details, debt, today)
+        loans.append(_Loan(account, debt, terms, project_loan(terms) if terms else None))
+    return loans
+
+
+def _loan_changes(scenario: ForecastScenario, loan_id: uuid.UUID, today: date) -> list[LoanChange]:
+    changes: list[LoanChange] = []
+    for item in scenario.items:
+        if item.kind != "loan_change" or item.account_id != loan_id or item.start_date is None:
+            continue
+        if item.change_mode == "rate" and item.percent is not None:
+            changes.append(LoanChange(
+                start=item.start_date, rate=float(item.percent),
+                recalculate=item.recalculate_repayment is not False,
+            ))
+        elif item.change_mode == "amount" and item.amount:
+            changes.append(LoanChange(start=item.start_date, repayment=float(item.amount)))
+        elif item.change_mode == "lump_sum" and item.amount:
+            # Like an overdue expected payment, a lump sum dated today or
+            # earlier is still to come: it leaves cash tomorrow.
+            changes.append(LoanChange(
+                start=max(item.start_date, today + timedelta(days=1)), lump_sum=float(item.amount),
+            ))
+    return changes
+
+
+def _loan_line(schedule: LoanSchedule, loan: _Loan, today: date, end: date, interval: str) -> LoanLine:
+    from app.services.report_service import _date_points
+
+    dates = _date_points(today, end, "weekly" if interval == "daily" else interval)
+    if not dates or dates[0] != today:
+        dates.insert(0, today)
+    periods = schedule.periods
+    points: list[LoanPoint] = []
+    balance, i = loan.debt, 0
+    for p in dates:
+        interest = principal = 0.0
+        while i < len(periods) and periods[i].date <= p:
+            interest += periods[i].interest
+            principal += periods[i].principal
+            balance = periods[i].closing
+            i += 1
+        points.append(LoanPoint(
+            date=p, balance=round(balance, 2), interest=round(interest, 2), principal=round(principal, 2),
+        ))
+    in_horizon = [p for p in periods if p.date <= end]
+    last = in_horizon[-1] if in_horizon else (periods[0] if periods else None)
+    return LoanLine(
+        points=points,
+        payoff_date=schedule.payoff_date,
+        total_interest=schedule.total_interest,
+        repayment=last.payment if last else (loan.terms.repayment if loan.terms else 0.0),
+    )
 
 
 async def compute_forecast(
@@ -676,9 +872,35 @@ async def compute_forecast(
                 ).scalars()
             }
 
+    # Fork (owner 2026-10-14): as much history as the forecast looks ahead,
+    # same accounts. Its last point is today, at the projection's start.
+    history = _history_dates(_add_months(today, -months), today, interval)
+    actual = await _balance_history(session, workspace_id, account_ids, history, primary_currency)
+    actual[today] = round(starting, 2)
+
     base_summary = _summary(daily)
     estimate_by_cat = {e["category_id"]: e["monthly_amount"] for e in estimates}
     account_set = set(account_ids)
+    loans = await _open_loans(session, workspace_id, today)
+    loan_forecasts = [
+        LoanForecast(
+            account_id=loan.account.id,
+            name=loan.account.display_name or loan.account.name,
+            currency=loan.account.currency,
+            balance=loan.debt,
+            rate=loan.terms.rate if loan.terms else None,
+            frequency=loan.terms.frequency if loan.terms else None,
+            missing_details=loan.base is None,
+            base=_loan_line(loan.base, loan, today, end, interval) if loan.base else None,
+            actuals=[
+                ForecastPoint(date=d, value=round(-v, 2))
+                for d, v in (await _balance_history(
+                    session, workspace_id, [loan.account.id], history, loan.account.currency
+                )).items()
+            ][:-1] + [ForecastPoint(date=today, value=loan.debt)],
+        )
+        for loan in loans
+    ]
     series: list[ForecastScenarioSeries] = []
     for scenario in scenarios:
         deltas = await _scenario_deltas(
@@ -693,6 +915,31 @@ async def compute_forecast(
             estimates=estimate_by_cat,
             include_spending=include_spending,
         )
+        for loan, forecast in zip(loans, loan_forecasts):
+            changes = _loan_changes(scenario, loan.account.id, today)
+            if not changes or loan.terms is None or loan.base is None or forecast.base is None:
+                continue
+            schedule = project_loan(loan.terms, changes)
+            for d, value in cash_difference(loan.base, schedule).items():
+                if today < d <= end:
+                    deltas[d] = deltas.get(d, 0.0) + await to_primary(
+                        Decimal(str(value)), loan.account.currency
+                    )
+            loan_line = _loan_line(schedule, loan, today, end, interval)
+            both_pay_off = schedule.payoff_date is not None and loan.base.payoff_date is not None
+            forecast.scenarios.append(LoanScenarioLine(
+                **loan_line.model_dump(),
+                scenario_id=scenario.id,
+                name=scenario.name,
+                color=scenario.color,
+                interest_saved=(
+                    round(forecast.base.total_interest - loan_line.total_interest, 2) if both_pay_off else None
+                ),
+                payoff_change_days=(
+                    (schedule.payoff_date - loan.base.payoff_date).days
+                    if both_pay_off else None
+                ),
+            ))
         line: dict[date, float] = {}
         running = 0.0
         for d in sorted(daily):
@@ -716,7 +963,9 @@ async def compute_forecast(
         starting_balance=round(starting, 2),
         include_spending=include_spending,
         base=_points(daily, today, end, interval),
+        actuals=[ForecastPoint(date=d, value=actual[d]) for d in history],
         summary=base_summary,
         scenarios=series,
         spending_estimates=[SpendingEstimate(**e) for e in estimates],
+        loans=loan_forecasts,
     )

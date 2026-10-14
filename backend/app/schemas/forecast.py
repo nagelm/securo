@@ -6,8 +6,10 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ForecastItemKind = Literal["one_off", "repeating", "recurring_change", "income_change", "spending_change"]
-ForecastChangeMode = Literal["amount", "pause", "stop", "percent"]
+ForecastItemKind = Literal[
+    "one_off", "repeating", "recurring_change", "income_change", "spending_change", "loan_change"
+]
+ForecastChangeMode = Literal["amount", "pause", "stop", "percent", "rate", "lump_sum"]
 ForecastFrequency = Literal["weekly", "biweekly", "monthly", "quarterly", "semiannual", "yearly"]
 TxType = Literal["debit", "credit"]
 HexColor = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
@@ -53,6 +55,7 @@ class ForecastItemCreate(BaseModel):
     recurring_transaction_id: Optional[uuid.UUID] = None
     change_mode: Optional[ForecastChangeMode] = None
     percent: Optional[Decimal] = None
+    recalculate_repayment: Optional[bool] = None
 
 
 class ForecastItemUpdate(BaseModel):
@@ -69,6 +72,7 @@ class ForecastItemUpdate(BaseModel):
     recurring_transaction_id: Optional[uuid.UUID] = None
     change_mode: Optional[ForecastChangeMode] = None
     percent: Optional[Decimal] = None
+    recalculate_repayment: Optional[bool] = None
 
 
 class ForecastItemRead(BaseModel):
@@ -88,6 +92,7 @@ class ForecastItemRead(BaseModel):
     recurring_transaction_id: Optional[uuid.UUID] = None
     change_mode: Optional[str] = None
     percent: Optional[Decimal] = None
+    recalculate_repayment: Optional[bool] = None
     matched_transaction_id: Optional[uuid.UUID] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -123,6 +128,53 @@ class SpendingEstimate(BaseModel):
     monthly_amount: float
 
 
+class LoanPoint(BaseModel):
+    """A loan's balance owed at ``date`` and what the repayments since the
+    previous point paid in interest and in principal (lump sums included)."""
+
+    date: _Date
+    balance: float
+    interest: float
+    principal: float
+
+
+class LoanLine(BaseModel):
+    points: list[LoanPoint]
+    # None: not paid off within 100 years (the repayment doesn't cover the interest).
+    payoff_date: Optional[_Date] = None
+    # From today until payoff, beyond the forecast horizon.
+    total_interest: float
+    # The regular repayment at the end of the horizon (after any change).
+    repayment: float
+
+
+class LoanScenarioLine(LoanLine):
+    scenario_id: uuid.UUID
+    name: str
+    color: str
+    # Base total interest less this line's; positive = saved. None when
+    # either line never pays off.
+    interest_saved: Optional[float] = None
+    # Payoff date less the base's, in days; negative = earlier.
+    payoff_change_days: Optional[int] = None
+
+
+class LoanForecast(BaseModel):
+    account_id: uuid.UUID
+    name: str
+    currency: str
+    balance: float  # owed today, positive
+    rate: Optional[float] = None
+    frequency: Optional[str] = None
+    # True: loan_details lack a table loan's rate, repayment and frequency
+    # (e.g. a revolving loan), so there is no projection.
+    missing_details: bool
+    # Owed at each history point (as far back as the forecast looks ahead), ending today.
+    actuals: list[ForecastPoint] = []
+    base: Optional[LoanLine] = None
+    scenarios: list[LoanScenarioLine] = []
+
+
 class ForecastResponse(BaseModel):
     currency: str
     interval: str
@@ -130,7 +182,11 @@ class ForecastResponse(BaseModel):
     end_date: _Date
     starting_balance: float
     include_spending: bool
+    # The real cash-and-cards balance from (today − horizon) to today, at the
+    # same interval; its last point is today at ``starting_balance``.
+    actuals: list[ForecastPoint] = []
     base: list[ForecastPoint]
     summary: ForecastLineSummary
     scenarios: list[ForecastScenarioSeries]
     spending_estimates: list[SpendingEstimate]
+    loans: list[LoanForecast] = []
