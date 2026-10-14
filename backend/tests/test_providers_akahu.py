@@ -248,6 +248,8 @@ async def test_transactions_paginate_and_map():
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/accounts"):
             return httpx.Response(200, json={"success": True, "items": [_account()]})
+        if request.url.path.endswith("/transactions/pending"):
+            return httpx.Response(200, json={"success": True, "items": []})
         calls.append(dict(request.url.params))
         if "cursor" not in request.url.params:
             return httpx.Response(200, json={
@@ -301,6 +303,8 @@ async def test_follow_up_sync_rereads_the_lookback_window():
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/accounts"):
             return httpx.Response(200, json={"success": True, "items": [_account()]})
+        if request.url.path.endswith("/transactions/pending"):
+            return httpx.Response(200, json={"success": True, "items": []})
         windows.append(request.url.params["start"])
         return httpx.Response(200, json={"success": True, "items": [], "cursor": {}})
 
@@ -335,6 +339,8 @@ async def test_malformed_rows_are_skipped():
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/accounts"):
             return httpx.Response(200, json={"success": True, "items": [_account()]})
+        if request.url.path.endswith("/transactions/pending"):
+            return httpx.Response(200, json={"success": True, "items": []})
         return httpx.Response(200, json={"success": True, "items": [
             _txn(_id=None), _txn(_id="t2", amount="nope"), _txn(_id="t3", date=None), _txn(_id="ok"),
         ], "cursor": {}})

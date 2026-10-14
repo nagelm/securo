@@ -56,6 +56,7 @@ from app.services.transfer_detection_service import detect_transfer_pairs
 from app.services.fx_rate_service import stamp_primary_amount
 from app.services.loan_details import is_revolving, merge_provider_details
 from app.services.payee_service import get_or_create_payee
+from app.services.pending_rows import remember_pending_defaults, retire_stale_pending
 from app.services.provider_transaction_changes import (
     apply_provider_edit,
     clear_removed_flag,
@@ -1595,7 +1596,11 @@ async def handle_oauth_callback(
         # that SUM(all transactions) matches the provider-reported balance. Any
         # history that falls outside the provider's lookback window gets
         # absorbed into this synthetic transaction.
-        await sync_opening_balance_for_connected_account(session, account)
+        await sync_opening_balance_for_connected_account(
+            session,
+            account,
+            include_pending=getattr(provider, "balance_includes_pending", None) is not False,
+        )
 
     # Detect transfer pairs among newly synced transactions
     await detect_transfer_pairs(session, workspace_id, candidate_ids=new_tx_ids)
@@ -2307,6 +2312,10 @@ async def sync_connection(
         # provider's attribute must not switch these on.
         edits_in_place = provider.edits_transactions_in_place is True
         reports_removals = provider.reports_removed_transactions is True
+        # Providers whose pending rows have no stable id (Akahu): every read
+        # replaces them, and a settled row inherits the user's edits.
+        rebuilds_pending = getattr(provider, "replaces_pending_rows", None) is True
+        balance_has_pending = getattr(provider, "balance_includes_pending", None) is not False
         for acc_data in accounts_data:
             institution = await _resolve_institution(
                 session, connection.id, institution_cache, acc_data
@@ -2489,7 +2498,14 @@ async def sync_connection(
                 transactions_data = [t for t in transactions_data if t.status != "pending"]
 
             incoming_txn_external_ids = {txn.external_id for txn in transactions_data}
+            incoming_pending_ids = {
+                txn.external_id for txn in transactions_data if txn.status == "pending"
+            }
             for txn_data in transactions_data:
+                # A rebuilt pending row is only ever itself: it never merges
+                # into a manual row, a posted twin or a recurring placeholder,
+                # because it is deleted when it settles.
+                plain_pending = rebuilds_pending and txn_data.status == "pending"
                 existing = await session.execute(
                     select(Transaction)
                     .where(
@@ -2563,7 +2579,11 @@ async def sync_connection(
                     continue
 
                 # Pass 2: Fuzzy match against manual transactions
-                fuzzy_match = await _fuzzy_match_manual(session, account.id, txn_data)
+                fuzzy_match = (
+                    None
+                    if plain_pending
+                    else await _fuzzy_match_manual(session, account.id, txn_data)
+                )
                 if fuzzy_match:
                     if fuzzy_match.is_ignored:
                         continue
@@ -2577,8 +2597,12 @@ async def sync_connection(
                 # comes back under a new external id with a different
                 # status, fingerprint match collapses it instead of letting
                 # both rows land.
-                synced_dup = await _find_synced_duplicate(
-                    session, account.id, txn_data, incoming_txn_external_ids
+                synced_dup = (
+                    None
+                    if plain_pending
+                    else await _find_synced_duplicate(
+                        session, account.id, txn_data, incoming_txn_external_ids
+                    )
                 )
                 if synced_dup:
                     if synced_dup.original_description is None:
@@ -2678,7 +2702,9 @@ async def sync_connection(
                 # candidate may fulfill an active definition, which advances so
                 # later generation cannot duplicate the occurrence.
                 placeholder = (
-                    await recurring_match_service.find_placeholder_for_incoming(
+                    None
+                    if plain_pending
+                    else await recurring_match_service.find_placeholder_for_incoming(
                         session,
                         account.id,
                         txn_data.amount,
@@ -2724,7 +2750,9 @@ async def sync_connection(
                     continue
 
                 recurring_link = (
-                    await recurring_match_service.find_bill_for_incoming(
+                    None
+                    if plain_pending
+                    else await recurring_match_service.find_bill_for_incoming(
                         session,
                         user_id,
                         account.id,
@@ -2751,6 +2779,8 @@ async def sync_connection(
                 await apply_rules_to_transaction(session, user_id, transaction)
                 if transaction.category_id is None:
                     transaction.category_id = category_id
+                if plain_pending:
+                    remember_pending_defaults(transaction)
 
                 # Prefer bank-provided conversion for international transactions
                 acct_currency = acc_data.currency or user_currency
@@ -2764,6 +2794,18 @@ async def sync_connection(
                     transaction.fx_rate_used = txn_data.amount_in_account_currency / txn_data.amount
                 else:
                     await stamp_primary_amount(session, user_id, transaction)
+
+            # Pending rows the provider no longer lists have settled or been
+            # dropped: the settled row takes over the user's edits.
+            if rebuilds_pending and acc_data.external_id not in (
+                getattr(provider, "pending_read_failed", None) or set()
+            ):
+                await retire_stale_pending(
+                    session,
+                    account=account,
+                    still_pending=incoming_pending_ids,
+                    new_tx_ids=new_tx_ids,
+                )
 
             # Rows the provider no longer returns from a window it read
             # completely were removed at the bank (or re-issued under a new
@@ -2779,7 +2821,9 @@ async def sync_connection(
 
             # Reconcile the opening balance after any new transactions land so
             # SUM(all txs) keeps matching account.balance from the provider.
-            await sync_opening_balance_for_connected_account(session, account)
+            await sync_opening_balance_for_connected_account(
+                session, account, include_pending=balance_has_pending
+            )
 
         # Detect transfer pairs among newly synced transactions
         if new_tx_ids:
@@ -2826,7 +2870,9 @@ async def sync_connection(
                 )
             )
             for touched_account in touched_accounts.scalars():
-                await sync_opening_balance_for_connected_account(session, touched_account)
+                await sync_opening_balance_for_connected_account(
+                    session, touched_account, include_pending=balance_has_pending
+                )
 
         # Refresh investment holdings (brokerage, fixed income, funds,
         # etc.) when enabled for this connection. Errors here are logged but

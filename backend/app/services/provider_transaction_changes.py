@@ -489,6 +489,9 @@ async def reconcile_removed_transactions(
                     Transaction.source == "sync",
                     Transaction.external_id.is_not(None),
                     ~Transaction.external_id.startswith("bill_charge:"),
+                    # Fork: rebuilt pending rows come and go by design
+                    # (pending_rows.retire_stale_pending).
+                    ~Transaction.external_id.startswith("pending:"),
                     Transaction.date >= lo,
                     Transaction.date < last,
                 )

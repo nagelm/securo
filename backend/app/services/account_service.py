@@ -589,7 +589,7 @@ async def _recompute_effective_dates(session: AsyncSession, account: Account) ->
 
 
 async def sync_opening_balance_for_connected_account(
-    session: AsyncSession, account: Account
+    session: AsyncSession, account: Account, include_pending: bool = True
 ) -> None:
     """Reconcile the opening_balance transaction so SUM(all txs) = account.balance.
 
@@ -632,6 +632,9 @@ async def sync_opening_balance_for_connected_account(
         select(func.coalesce(func.sum(signed_amount), 0)).where(
             Transaction.account_id == account.id,
             Transaction.source != "opening_balance",
+            # Fork: a provider whose balance leaves pending rows out (Akahu)
+            # must not have them absorbed into the opening balance.
+            *([] if include_pending else [Transaction.status != "pending"]),
             Transaction.date <= balance_cutoff,
             Transaction.is_ignored == False,
             or_(

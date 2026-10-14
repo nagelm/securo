@@ -14,10 +14,12 @@ Personal App.
 
 What is mapped, and why some things are not:
 
-* **Settled transactions only.** Akahu's pending transactions have no stable
-  id, and their date and text still change; Securo's pending/posted twin
-  match needs the same date, so an imported pending row would usually
-  linger next to its settled version. Settled rows arrive within a day or two.
+* **Pending transactions** come from Akahu's separate pending endpoint. They
+  have no id and their date and text still change, so Akahu says to rebuild
+  them on every read: each gets an id derived from its content, and the sync
+  layer replaces an account's pending rows wholesale (``replaces_pending_rows``),
+  handing any edit the user made to the settled row that follows. Account
+  balances exclude pending rows (``balance_includes_pending``).
 * **Foreign purchases.** ``meta.conversion`` holds the amount and currency
   actually charged abroad; that becomes the transaction amount and currency,
   and the account-currency amount becomes ``amount_in_account_currency``.
@@ -64,6 +66,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections import Counter
 import logging
 import re
 from datetime import date, datetime, timedelta, timezone
@@ -416,6 +419,22 @@ def merchant_logo_for(raw: dict) -> Optional[str]:
     return logo[:500]
 
 
+PENDING_ID_PREFIX = "pending:"
+
+
+def pending_key(account_external_id: str, raw: dict) -> str:
+    """An id for a pending row, from what identifies it while it is pending.
+
+    Two identical rows (same time, amount and text) share the key; the caller
+    numbers them in order.
+    """
+    parts = "|".join(
+        str(v)
+        for v in (account_external_id, raw.get("date"), raw.get("amount"), raw.get("description"), raw.get("type"))
+    )
+    return PENDING_ID_PREFIX + hashlib.sha256(parts.encode()).hexdigest()[:20]
+
+
 def account_number_sets(raw_accounts: list[dict]) -> tuple[frozenset[str], frozenset[str]]:
     """(own account numbers, investment payment account numbers) as digit strings."""
     own = {account_digits(a.get("formatted_account")) for a in raw_accounts}
@@ -688,6 +707,9 @@ class AkahuProvider(BankProvider):
             frozenset(),
             frozenset(),
         )
+        # Accounts whose pending list could not be read this time: their
+        # stored pending rows must not be taken as settled or dropped.
+        self.pending_read_failed: set[str] = set()
 
     @property
     def name(self) -> str:
@@ -723,6 +745,20 @@ class AkahuProvider(BankProvider):
         # recognition comes back under a new _id. get_transactions records
         # each window it read completely.
         return True
+
+    @property
+    def replaces_pending_rows(self) -> bool:
+        # Pending rows have no stable id ("delete then re-create each time",
+        # developers.akahu.nz, Accessing transactional data); the sync layer
+        # rebuilds them from every read.
+        return True
+
+    @property
+    def balance_includes_pending(self) -> bool:
+        # `balance.current` leaves pending rows out: on a card it equals the
+        # limit less `available` less the pending total (measured on live
+        # bank data, Oct 2026).
+        return False
 
     # ----- credentials ------------------------------------------------------
 
@@ -948,9 +984,66 @@ class AkahuProvider(BankProvider):
                     self.record_complete_transaction_window(
                         account_external_id, start_date, today
                     )
+                transactions.extend(
+                    await self._pending_transactions(
+                        credentials, account_external_id, currency, payee_source,
+                        own_accounts, investment_accounts, akahu_account_type,
+                    )
+                )
                 return transactions
             params = {**params, "cursor": cursor}
         raise RuntimeError(f"Akahu returned more than {AKAHU_MAX_PAGES} pages")
+
+    def _pending_unread(self, account_external_id: str) -> None:
+        failed = getattr(self, "pending_read_failed", None)
+        if failed is None:
+            failed = self.pending_read_failed = set()
+        failed.add(account_external_id)
+
+    async def _pending_transactions(
+        self,
+        credentials: dict,
+        account_external_id: str,
+        currency: Optional[str],
+        payee_source: str,
+        own_accounts: frozenset[str],
+        investment_accounts: frozenset[str],
+        akahu_account_type: str,
+    ) -> list[TransactionData]:
+        """The account's pending rows, each with an id made from its content.
+
+        The endpoint returns the whole current set every time, so a row that
+        is no longer here has settled or been dropped by the bank.
+        """
+        try:
+            body = await self._request(
+                credentials, "GET", f"/accounts/{account_external_id}/transactions/pending"
+            )
+        except (RuntimeError, httpx.HTTPError):
+            # The settled rows still count; the pending ones already stored
+            # stay as they are until a read succeeds (pending_read_failed).
+            logger.warning("Akahu pending read failed for an account; keeping its pending rows")
+            self._pending_unread(account_external_id)
+            return []
+        items = body.get("items")
+        if not isinstance(items, list):
+            self._pending_unread(account_external_id)
+            return []
+        seen: Counter[str] = Counter()
+        rows: list[TransactionData] = []
+        for raw in items:
+            if not isinstance(raw, dict):
+                continue
+            key = pending_key(account_external_id, raw)
+            seen[key] += 1
+            parsed = self._build_transaction(
+                {**raw, "_securo_pending_id": f"{key}:{seen[key]}"},
+                currency, payee_source, own_accounts, investment_accounts,
+                akahu_account_type,
+            )
+            if parsed:
+                rows.append(parsed)
+        return rows
 
     @staticmethod
     def _build_transaction(
@@ -961,7 +1054,10 @@ class AkahuProvider(BankProvider):
         investment_accounts: frozenset[str] = frozenset(),
         account_type: Optional[str] = None,
     ) -> Optional[TransactionData]:
-        if not isinstance(raw, dict) or not raw.get("_id"):
+        if not isinstance(raw, dict):
+            return None
+        pending_id = raw.get("_securo_pending_id")
+        if not raw.get("_id") and not pending_id:
             return None
         amount = _to_decimal(raw.get("amount"))
         txn_date = _local_date(raw.get("date"))
@@ -995,14 +1091,14 @@ class AkahuProvider(BankProvider):
             in_account_currency = amount.copy_abs()
 
         return TransactionData(
-            external_id=str(raw["_id"]),
+            external_id=str(raw.get("_id") or pending_id),
             description=str(description)[:500],
             amount=txn_amount,
             date=txn_date,
             type="debit" if amount < 0 else "credit",
             currency=txn_currency,
             amount_in_account_currency=in_account_currency,
-            status="posted",
+            status="pending" if pending_id and not raw.get("_id") else "posted",
             payee=payee,
             raw_data=raw,
             category_hint=category_hint_for(
