@@ -1158,9 +1158,7 @@
     "invoiceBadgeTooltip": "This transaction settles an invoice. Open it.",
     "suggestionBadge": "Question",
     "suggestionBadgeTooltip": "A payment may settle this. Open the queue to answer.",
-    "clearGroupFilter": "Clear group filter",
-    "unsettled": "Unsettled",
-    "unsettledHint": "Not settled by the bank yet. Its payee arrives when it settles."
+    "clearGroupFilter": "Clear group filter"
   },
   "accounts": {
     "title": "Accounts",

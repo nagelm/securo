@@ -73,8 +73,7 @@ import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { useCollectionFilter } from '@/contexts/collection-filter-context'
 import { formatCurrency } from '@/lib/format'
-import { isUnsettled, shouldShowPendingBadge } from '@/lib/transaction-status'
-import { UnsettledBadge } from '@/components/unsettled-badge'
+import { shouldShowPendingBadge } from '@/lib/transaction-status'
 
 type TransactionUpdatePayload = TransactionEditPayload & {
   apply_to_transfer_pair?: boolean
@@ -1103,7 +1102,6 @@ export default function TransactionsPage() {
       .flatMap(leg => leg.invoice_links ?? [])
       .filter((link, i, all) => all.findIndex(l => l.invoice_id === link.invoice_id) === i)
     const showPending = legs.some(leg => shouldShowPendingBadge(leg))
-    const unsettled = legs.some(leg => isUnsettled(leg))
     const hasAttachments = legs.some(leg => (leg.attachment_count ?? 0) > 0)
     return (
       <div className="flex items-center gap-2 md:gap-3">
@@ -1231,7 +1229,6 @@ export default function TransactionsPage() {
                 <Clock size={12} className="text-amber-500" role="img" aria-label={t('transactions.pending')} />
               </span>
             )}
-            {unsettled && <UnsettledBadge />}
             {hasAttachments && (
               <Paperclip size={12} className="text-muted-foreground shrink-0" />
             )}

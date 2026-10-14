@@ -1158,9 +1158,7 @@
     "invoiceBadgeTooltip": "この取引は請求書を決済しています。開く。",
     "suggestionBadge": "要確認",
     "suggestionBadgeTooltip": "これが何かを消し込む可能性があります。キューを開いて回答してください。",
-    "clearGroupFilter": "グループフィルターを解除",
-    "unsettled": "Unsettled",
-    "unsettledHint": "Not settled by the bank yet. Its payee arrives when it settles."
+    "clearGroupFilter": "グループフィルターを解除"
   },
   "accounts": {
     "title": "口座",

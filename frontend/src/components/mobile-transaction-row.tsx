@@ -8,8 +8,7 @@ import { AlertTriangle, ArrowLeftRight, CalendarClock, ChartNoAxesColumn, Clock,
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useTranslation } from 'react-i18next'
 import { formatCurrency } from '@/lib/format'
-import { isUnsettled, shouldShowPendingBadge } from '@/lib/transaction-status'
-import { UnsettledBadge } from '@/components/unsettled-badge'
+import { shouldShowPendingBadge } from '@/lib/transaction-status'
 
 /** Keep long merchant references on one line when there are no word breaks. */
 function hasWordBreaks(text: string): boolean {
@@ -173,7 +172,6 @@ export function MobileTransactionRow({
               <Clock size={12} className="text-amber-500" role="img" aria-label={t('transactions.pending')} />
             </span>
           )}
-          {isUnsettled(tx) && <UnsettledBadge />}
           {(tx.attachment_count ?? 0) > 0 && (
             <Paperclip size={11} className="text-muted-foreground shrink-0" />
           )}

@@ -1172,9 +1172,7 @@
     "invoiceBadgeTooltip": "Ця операція закриває рахунок. Відкрити.",
     "suggestionBadge": "Питання",
     "suggestionBadgeTooltip": "Платіж може закрити цей рахунок. Відкрийте чергу, щоб відповісти.",
-    "clearGroupFilter": "Скинути фільтр групи",
-    "unsettled": "Unsettled",
-    "unsettledHint": "Not settled by the bank yet. Its payee arrives when it settles."
+    "clearGroupFilter": "Скинути фільтр групи"
   },
   "accounts": {
     "title": "Рахунки",

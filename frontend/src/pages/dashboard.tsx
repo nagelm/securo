@@ -59,8 +59,7 @@ import { useCollectionFilter } from '@/contexts/collection-filter-context'
 import { resolveDateFnsLocale } from '@/lib/date-fns-locale'
 import type { Rule, Transaction } from '@/types'
 import { formatCurrency } from '@/lib/format'
-import { isUnsettled, shouldShowPendingBadge } from '@/lib/transaction-status'
-import { UnsettledBadge } from '@/components/unsettled-badge'
+import { shouldShowPendingBadge } from '@/lib/transaction-status'
 
 function formatDate(dateStr: string, locale = 'pt-BR') {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString(locale)
@@ -524,7 +523,6 @@ export default function DashboardPage() {
     installmentNumber: number | null
     totalInstallments: number | null
     showPendingBadge: boolean
-    unsettled: boolean
   }
 
   const [txPerPage, setTxPerPage] = useState<number>(() => {
@@ -577,7 +575,6 @@ export default function DashboardPage() {
         installmentNumber: tx.installment_number,
         totalInstallments: tx.total_installments,
         showPendingBadge: shouldShowPendingBadge(tx),
-        unsettled: isUnsettled(tx),
       })
     }
     for (const pt of projectedTxs ?? []) {
@@ -607,7 +604,6 @@ export default function DashboardPage() {
         installmentNumber: null,
         totalInstallments: null,
         showPendingBadge: false,
-        unsettled: false,
       })
     }
     rows.sort((a, b) => txSortDesc ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date))
@@ -1369,7 +1365,6 @@ export default function DashboardPage() {
                               <Clock size={12} className="text-amber-500" role="img" aria-label={t('transactions.pending')} />
                             </span>
                           )}
-                          {row.unsettled && <UnsettledBadge />}
                           {row.isIgnored && (
                             <EyeClosed className="h-3 w-3 text-gray-500 shrink-0" />
                           )}
@@ -1485,7 +1480,6 @@ export default function DashboardPage() {
                                   <Clock size={12} className="text-amber-500" role="img" aria-label={t('transactions.pending')} />
                                 </span>
                               )}
-                              {row.unsettled && <UnsettledBadge />}
                               {row.isIgnored && (
                                 <span className="ml-2 inline-flex items-center gap-1 text-xs text-gray-600 font-normal bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5">
                                 <EyeClosed className="h-3 w-3" />

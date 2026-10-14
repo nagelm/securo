@@ -1199,9 +1199,7 @@
     "invoiceBadgeTooltip": "Ta transakcja rozlicza fakturę. Otwórz ją.",
     "suggestionBadge": "Pytanie",
     "suggestionBadgeTooltip": "Płatność może opłacić tę fakturę. Otwórz kolejkę, aby odpowiedzieć.",
-    "clearGroupFilter": "Wyczyść filtr grupy",
-    "unsettled": "Unsettled",
-    "unsettledHint": "Not settled by the bank yet. Its payee arrives when it settles."
+    "clearGroupFilter": "Wyczyść filtr grupy"
   },
   "accounts": {
     "title": "Konta",

@@ -1158,9 +1158,7 @@
     "invoiceBadgeTooltip": "Diese Transaktion begleicht eine Rechnung. Öffnen.",
     "suggestionBadge": "Frage",
     "suggestionBadgeTooltip": "Eine Zahlung könnte diese Rechnung begleichen. Öffnen Sie die Warteschlange.",
-    "clearGroupFilter": "Gruppenfilter entfernen",
-    "unsettled": "Unsettled",
-    "unsettledHint": "Not settled by the bank yet. Its payee arrives when it settles."
+    "clearGroupFilter": "Gruppenfilter entfernen"
   },
   "accounts": {
     "title": "Konten",
