@@ -2116,9 +2116,9 @@ export interface ReconciliationHistoryEvent {
 export interface InsightCard {
   kind:
     | 'category_month' | 'trend_cooling' | 'trend_rising' | 'savings_rate' | 'price_up' | 'price_down'
-    | 'payee_new' | 'payee_stopped' | 'small_burst' | 'income_change'
+    | 'payee_new' | 'payee_stopped' | 'small_burst' | 'income_change' | 'payee_switch' | 'habit_ended'
   direction: 'better' | 'worse'
-  params: Record<string, string | number>
+  params: Record<string, string | number | boolean | { name: string; diff: number }[]>
   series: number[]
   category_id: string | null
   payee_id: string | null

@@ -93,6 +93,31 @@ describe('InsightsPage', () => {
     expect(screen.getByText(t('insights.noneWorse'))).toBeInTheDocument()
   })
 
+  it('tells leave and a split as one story each', async () => {
+    api.insights.briefing.mockResolvedValue(briefing({
+      worse: [
+        {
+          kind: 'savings_rate', direction: 'worse', series: [30, 12], category_id: null, payee_id: null, link_from: null, link_to: null,
+          params: {
+            rate: 12, before: 30, change: -18, income_change: -20000, spend_change: 5000, leave: true, leave_payer: 'IRD',
+            income_movers: [{ name: 'Employer', diff: -20000 }], spend_movers: [{ name: 'Groceries', diff: 3000 }],
+          },
+        },
+        {
+          kind: 'payee_switch', direction: 'worse', series: [1, 2], category_id: 'cat-rates', payee_id: null,
+          link_from: '2026-07-01', link_to: '2026-09-30',
+          params: { from_payee: 'Council', to_payee: 'Water', category: 'Rates', before: 478.00, after: 521.00, change_pct: 9, since: '2026-08-21' },
+        },
+      ],
+    }))
+    renderWithProviders(<InsightsPage />)
+    expect(await screen.findByText(t('insights.headline.leave', { before: 30, rate: 12 }))).toBeInTheDocument()
+    expect(screen.getByText(t('insights.cards.savings_rate.title_leave'))).toBeInTheDocument()
+    expect(screen.getByText(/Income −\$20,000\.00 \(Employer −\$20,000\.00\)/)).toBeInTheDocument()
+    expect(screen.getByText(t('insights.cards.payee_switch.title', { from: 'Council', to: 'Water' }))).toBeInTheDocument()
+    expect(screen.getByText(/Rates: \$491\.79 → \$535\.82 a month together \(\+9%\)/)).toBeInTheDocument()
+  })
+
   it('steps back a month', async () => {
     renderWithProviders(<InsightsPage />)
     await screen.findByText('Groceries')

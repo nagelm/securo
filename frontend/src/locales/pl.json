@@ -3427,7 +3427,8 @@
       "rise": "Your savings rate has been climbing: {{before}}% a year ago, {{rate}}% now.",
       "under": "Everyday spending came in {{pct}}% under a usual month.",
       "over": "Everyday spending ran {{pct}}% over a usual month.",
-      "steady": "Everyday spending was close to a usual month."
+      "steady": "Everyday spending was close to a usual month.",
+      "leave": "Saving less while pay was reduced: {{before}}% of income a year ago, {{rate}}% now."
     },
     "summary": "Everyday spending was {{spent}} against a usual {{usual}}. {{lower}} categories came in under their usual month and {{higher}} over.",
     "everydaySpend": "Everyday spend",
@@ -3472,7 +3473,11 @@
       "savings_rate": {
         "title_worse": "Savings rate sliding",
         "title_better": "Savings rate climbing",
-        "detail": "{{rate}}% of income kept over 12 months, from {{before}}%"
+        "detail": "{{rate}}% of income kept over 12 months, from {{before}}%.",
+        "title_leave": "Savings rate lower during leave",
+        "income": "Income {{change}} ({{movers}}).",
+        "spending": "Everyday spending {{change}} ({{movers}}).",
+        "leave": "Pay fell while {{payer}} payments started, which looks like leave."
       },
       "price_up": {
         "title": "{{payee}} costs more"
@@ -3481,7 +3486,8 @@
         "title": "{{payee}} costs less"
       },
       "price": {
-        "detail": "{{before}} → {{after}} a payment since {{since}}"
+        "detail": "{{before}} → {{after}} a payment since {{since}}",
+        "yearly": "yearly change"
       },
       "payee_new": {
         "title": "New cost: {{payee}}",
@@ -3499,6 +3505,14 @@
         "title_better": "{{payee}} paying more",
         "title_worse": "{{payee}} paying less",
         "detail": "{{before}} → {{after}} a payment ({{pct}}%)"
+      },
+      "payee_switch": {
+        "title": "{{from}} → {{to}}",
+        "detail": "{{category}}: {{before}} → {{after}} a month together ({{pct}}%), since {{since}}"
+      },
+      "habit_ended": {
+        "title": "{{payee}} has stopped",
+        "detail": "About {{monthly}} a month in {{category}}; last on {{last}}"
       }
     },
     "usualSince": "usual since {{month}}",

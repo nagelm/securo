@@ -125,9 +125,12 @@ function Briefing({ data, money }: { data: InsightsBriefing; money: (v: number) 
   const pct = data.usual_spend > 0 ? Math.round((100 * (data.everyday_spend - data.usual_spend)) / data.usual_spend) : 0
   const rateCard = data.worse.concat(data.better).find((c) => c.kind === 'savings_rate')
   const headline = rateCard
-    ? t(rateCard.direction === 'worse' ? 'insights.headline.slide' : 'insights.headline.rise', {
-        before: rateCard.params.before, rate: rateCard.params.rate,
-      })
+    ? t(
+        rateCard.params.leave
+          ? 'insights.headline.leave'
+          : rateCard.direction === 'worse' ? 'insights.headline.slide' : 'insights.headline.rise',
+        { before: rateCard.params.before, rate: rateCard.params.rate },
+      )
     : Math.abs(pct) < 3
       ? t('insights.headline.steady')
       : t(pct < 0 ? 'insights.headline.under' : 'insights.headline.over', { pct: Math.abs(pct) })
@@ -354,10 +357,39 @@ function describe(card: InsightCard, t: T, money: (v: number) => string, locale:
         title: t('insights.cards.trend_rising.title', { category: p.category }),
         detail: t('insights.cards.trend_rising.detail', { total: money(n('total')), before: money(n('before')), pct: n('change_pct') }),
       }
-    case 'savings_rate':
+    case 'savings_rate': {
+      const signed = (v: number) => `${v < 0 ? '−' : '+'}${money(Math.abs(v))}`
+      const movers = (key: string) =>
+        ((card.params[key] as unknown as { name: string; diff: number }[] | undefined) ?? [])
+          .map((m) => `${m.name} ${signed(m.diff)}`)
+          .join(', ')
+      const parts = [
+        t('insights.cards.savings_rate.detail', { rate: n('rate'), before: n('before') }),
+        t('insights.cards.savings_rate.income', { change: signed(n('income_change')), movers: movers('income_movers') }),
+        t('insights.cards.savings_rate.spending', { change: signed(n('spend_change')), movers: movers('spend_movers') }),
+      ]
+      if (card.params.leave) parts.push(t('insights.cards.savings_rate.leave', { payer: p.leave_payer }))
       return {
-        title: t(`insights.cards.savings_rate.title_${card.direction}`),
-        detail: t('insights.cards.savings_rate.detail', { rate: n('rate'), before: n('before') }),
+        title: card.params.leave
+          ? t('insights.cards.savings_rate.title_leave')
+          : t(`insights.cards.savings_rate.title_${card.direction}`),
+        detail: parts.join(' '),
+      }
+    }
+    case 'payee_switch':
+      return {
+        title: t('insights.cards.payee_switch.title', { from: p.from_payee, to: p.to_payee }),
+        detail: t('insights.cards.payee_switch.detail', {
+          category: p.category, before: money(n('before')), after: money(n('after')),
+          pct: `${n('change_pct') >= 0 ? '+' : '−'}${Math.abs(n('change_pct'))}`, since: dayLabel(String(p.since), locale),
+        }),
+      }
+    case 'habit_ended':
+      return {
+        title: t('insights.cards.habit_ended.title', { payee: p.payee }),
+        detail: t('insights.cards.habit_ended.detail', {
+          monthly: money(n('monthly')), category: p.category, last: dayLabel(String(p.last), locale),
+        }),
       }
     case 'price_up':
     case 'price_down':
@@ -365,7 +397,7 @@ function describe(card: InsightCard, t: T, money: (v: number) => string, locale:
         title: t(`insights.cards.${card.kind}.title`, { payee: p.payee }),
         detail: t('insights.cards.price.detail', {
           before: money(n('before')), after: money(n('after')), since: dayLabel(String(p.since), locale),
-        }),
+        }) + (card.params.yearly ? ` · ${t('insights.cards.price.yearly')}` : ''),
       }
     case 'payee_new':
       return {
