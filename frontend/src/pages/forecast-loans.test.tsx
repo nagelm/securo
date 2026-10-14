@@ -199,6 +199,38 @@ describe('Forecast page: loans', () => {
     })))
   })
 
+  it('a rate change can set the repayment by hand (fork)', async () => {
+    const { user } = renderWithProviders(<ForecastPage />)
+    await screen.findAllByTestId('loan-row')
+    await user.click(await screen.findByRole('button', { name: t('forecast.addChange') }))
+    const dialog = await screen.findByRole('dialog')
+
+    await user.selectOptions(within(dialog).getByLabelText(t('forecast.changeKind')), 'loan_change')
+    await user.type(within(dialog).getByLabelText(t('forecast.loans.newRate')), '4.9')
+    expect(within(dialog).queryByLabelText(t('forecast.loans.newRepaymentAmount'))).not.toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: t('forecast.loans.set') }))
+    expect(within(dialog).getByText(t('forecast.loans.setHint'))).toBeInTheDocument()
+    await user.type(within(dialog).getByLabelText(t('forecast.loans.newRepaymentAmount')), '600')
+    await user.click(within(dialog).getByRole('button', { name: t('common.save') }))
+
+    await waitFor(() => expect(api.forecast.items.create).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'loan_change', account_id: 'loan-1', change_mode: 'rate', percent: '4.9',
+      amount: '600', recalculate_repayment: false,
+    })))
+  })
+
+  it('a rate change with a set repayment reads as one line', async () => {
+    api.forecast.items.list.mockResolvedValue([{
+      id: 'it-2', scenario_id: 'sc-1', kind: 'loan_change', description: '', amount: '600', currency: 'USD',
+      type: null, date: null, start_date: '2027-02-01', end_date: null, frequency: null, account_id: 'loan-1',
+      category_id: null, recurring_transaction_id: null, change_mode: 'rate', percent: '4.9',
+      recalculate_repayment: false, matched_transaction_id: null,
+    }])
+    renderWithProviders(<ForecastPage />)
+
+    expect(await screen.findByText(/Home loan rate 4\.9% and repayment \$600\.00 from 2\/1\/2027/)).toBeInTheDocument()
+  })
+
   it('a lump sum sends the amount and its date', async () => {
     const { user } = renderWithProviders(<ForecastPage />)
     await screen.findAllByTestId('loan-row')

@@ -1659,7 +1659,8 @@
       "loanRateRecalc": "{{name}} rate {{rate}}% from {{from}}, repayment recalculated",
       "loanRateKeep": "{{name}} rate {{rate}}% from {{from}}, repayment kept",
       "loanRepayment": "{{name}} repayment {{amount}} from {{from}}",
-      "loanLumpSum": "{{name}} extra repayment of {{amount}} on {{date}}"
+      "loanLumpSum": "{{name}} extra repayment of {{amount}} on {{date}}",
+      "loanRateSet": "{{name}} rate {{rate}}% and repayment {{amount}} from {{from}}"
     },
     "loans": {
       "title": "Loans",
@@ -1712,7 +1713,9 @@
       "recalculate": "Recalculate repayment",
       "keep": "Keep repayment",
       "recalculateHint": "The repayment changes so the loan is still paid off on time, as at a refix.",
-      "keepHint": "The repayment stays the same, so the loan is paid off earlier or later."
+      "keepHint": "The repayment stays the same, so the loan is paid off earlier or later.",
+      "set": "Set repayment",
+      "setHint": "The repayment becomes the amount you enter, from the same date as the new rate."
     }
   },
   "rules": {

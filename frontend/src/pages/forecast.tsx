@@ -1360,7 +1360,9 @@ function ChangeSummary({
     case 'loan_change': {
       const loan = accounts.find((a) => a.id === item.account_id)
       const name = loan ? getAccountName(loan) : '—'
-      text = item.change_mode === 'rate'
+      text = item.change_mode === 'rate' && amount
+        ? t('forecast.summary.loanRateSet', { name, rate: percent, amount: money(amount), from: fmtDate(item.start_date) })
+        : item.change_mode === 'rate'
         ? t(item.recalculate_repayment === false ? 'forecast.summary.loanRateKeep' : 'forecast.summary.loanRateRecalc', {
           name, rate: percent, from: fmtDate(item.start_date),
         })
@@ -1445,7 +1447,13 @@ function ChangeForm({
   const [loanId, setLoanId] = useState(
     (item?.kind === 'loan_change' ? item.account_id : null) ?? projectable[0]?.account_id ?? '',
   )
-  const [recalculate, setRecalculate] = useState(item?.recalculate_repayment !== false)
+  // Fork: after a rate change the repayment is recalculated, kept, or set by hand.
+  const [repaymentChoice, setRepaymentChoice] = useState<'recalculate' | 'keep' | 'set'>(
+    item?.change_mode === 'rate' && item.amount ? 'set' : item?.recalculate_repayment === false ? 'keep' : 'recalculate',
+  )
+  const [rateRepayment, setRateRepayment] = useState(
+    item?.change_mode === 'rate' && item.amount ? String(item.amount) : '',
+  )
 
   const isRecurringChange = kind === 'recurring_change'
   const isLoanChange = kind === 'loan_change'
@@ -1484,8 +1492,8 @@ function ChangeForm({
         start_date: startDate,
         end_date: null,
         percent: mode === 'rate' ? amount : null,
-        amount: mode === 'rate' ? null : amount,
-        recalculate_repayment: mode === 'rate' ? recalculate : null,
+        amount: mode === 'rate' ? (repaymentChoice === 'set' ? rateRepayment : null) : amount,
+        recalculate_repayment: mode === 'rate' ? repaymentChoice === 'recalculate' : null,
       })
     }
     if (isSigned) {
@@ -1658,25 +1666,39 @@ function ChangeForm({
         <div className="space-y-2">
           <Label>{t('forecast.loans.repaymentAfter')}</Label>
           <div className="flex items-center rounded-lg border border-border bg-card overflow-hidden w-fit" role="group">
-            {[true, false].map((value) => (
+            {(['recalculate', 'keep', 'set'] as const).map((value) => (
               <button
-                key={String(value)}
+                key={value}
                 type="button"
-                onClick={() => setRecalculate(value)}
-                aria-pressed={recalculate === value}
+                onClick={() => setRepaymentChoice(value)}
+                aria-pressed={repaymentChoice === value}
                 className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  recalculate === value
+                  repaymentChoice === value
                     ? 'bg-primary text-primary-foreground'
                     : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                 }`}
               >
-                {value ? t('forecast.loans.recalculate') : t('forecast.loans.keep')}
+                {t(`forecast.loans.${value}`)}
               </button>
             ))}
           </div>
           <p className="text-xs text-muted-foreground">
-            {recalculate ? t('forecast.loans.recalculateHint') : t('forecast.loans.keepHint')}
+            {t(`forecast.loans.${repaymentChoice}Hint`)}
           </p>
+          {repaymentChoice === 'set' && (
+            <div className="space-y-2">
+              <Label htmlFor="change-loan-repayment">{t('forecast.loans.newRepaymentAmount')}</Label>
+              <Input
+                id="change-loan-repayment"
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={rateRepayment}
+                onChange={(e) => setRateRepayment(e.target.value)}
+                required
+              />
+            </div>
+          )}
         </div>
       )}
       {isSigned && (

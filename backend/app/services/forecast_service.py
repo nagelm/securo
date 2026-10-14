@@ -439,6 +439,9 @@ def _validate_item(values: dict) -> None:
             rate = values.get("percent")
             if rate is None or not 0 <= rate <= 100:
                 raise ValueError("Interest rate must be between 0 and 100")
+            # Optional: a repayment set alongside the new rate (owner 2026-10-14).
+            if amount is not None and amount <= 0:
+                raise ValueError("Repayment must be greater than zero")
         elif mode in ("amount", "lump_sum"):
             if amount is None or amount <= 0:
                 raise ValueError("Amount must be greater than zero")
@@ -479,7 +482,9 @@ async def create_item(
     _validate_item(values)
     if values["kind"] == "loan_change":
         _require_loan(account)
-        if values["change_mode"] == "rate" and values.get("recalculate_repayment") is None:
+        if values["change_mode"] == "rate" and values.get("amount"):
+            values["recalculate_repayment"] = False  # the repayment is the one given
+        elif values["change_mode"] == "rate" and values.get("recalculate_repayment") is None:
             values["recalculate_repayment"] = True  # a refix recalculates by default
     if not values.get("currency"):
         values["currency"] = account.currency if account else await _primary_currency(session, user_id)
@@ -794,9 +799,12 @@ def _loan_changes(scenario: ForecastScenario, loan_id: uuid.UUID, today: date) -
         if item.kind != "loan_change" or item.account_id != loan_id or item.start_date is None:
             continue
         if item.change_mode == "rate" and item.percent is not None:
+            # A repayment given with the rate replaces whatever the rate
+            # change would have made it.
             changes.append(LoanChange(
                 start=item.start_date, rate=float(item.percent),
-                recalculate=item.recalculate_repayment is not False,
+                recalculate=item.recalculate_repayment is not False and not item.amount,
+                repayment=float(item.amount) if item.amount else None,
             ))
         elif item.change_mode == "amount" and item.amount:
             changes.append(LoanChange(start=item.start_date, repayment=float(item.amount)))

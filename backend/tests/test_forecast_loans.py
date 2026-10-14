@@ -316,6 +316,42 @@ async def test_rate_change(session, test_user, test_workspace, recalculate):
         assert result.scenarios[0].difference == 0
 
 
+async def test_rate_change_with_a_chosen_repayment(session, test_user, test_workspace):
+    """Fork: a new rate and a repayment the user picks, from the same date."""
+    today = app_today()
+    await _account(session, test_user.id)
+    loan = await _loan(session, test_user.id)
+    start = today + timedelta(days=20)
+    chosen = REPAYMENT + 150
+    await _scenario(session, test_user.id, test_workspace.id, {
+        "kind": "loan_change", "account_id": loan.id, "change_mode": "rate",
+        "percent": Decimal("6.50"), "amount": Decimal(str(chosen)), "start_date": start,
+    })
+
+    result = await _forecast(session, test_user, test_workspace)
+
+    _, base = _base_schedule()
+    line = result.loans[0].scenarios[0]
+    assert line.repayment == pytest.approx(chosen)
+    repaid_after = len(_in_horizon(p.date for p in base.periods if p.date >= start))
+    assert result.scenarios[0].difference == pytest.approx(-150 * repaid_after, abs=0.01)
+    # Paying more than the base repayment, even at the higher rate, ends it sooner.
+    assert line.payoff_change_days < 0
+
+
+def test_a_rate_change_repayment_must_be_positive():
+    from app.services.forecast_service import _validate_item
+
+    item = {
+        "kind": "loan_change", "scenario_id": uuid.uuid4(), "account_id": uuid.uuid4(),
+        "change_mode": "rate", "percent": Decimal("6.50"), "start_date": app_today(),
+    }
+    _validate_item({**item, "amount": None})
+    _validate_item({**item, "amount": Decimal("900")})
+    with pytest.raises(ValueError, match="Repayment must be greater than zero"):
+        _validate_item({**item, "amount": Decimal("0")})
+
+
 async def test_changes_to_one_loan_leave_the_others_alone(session, test_user, test_workspace):
     today = app_today()
     await _account(session, test_user.id)

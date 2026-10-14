@@ -91,7 +91,8 @@ class LoanTerms:
 
 @dataclass(frozen=True)
 class LoanChange:
-    """One scenario change; exactly one of rate, repayment, lump_sum is set."""
+    """One scenario change: a rate, a repayment, both (a refix at a repayment
+    the user chose), or a lump sum."""
 
     start: date
     rate: Optional[float] = None

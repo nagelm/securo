@@ -96,7 +96,8 @@ class ForecastItem(Base):
         UUID(as_uuid=True), ForeignKey("recurring_transactions.id", ondelete="CASCADE"), nullable=True
     )
     # recurring_change: amount | pause | stop; income/spending_change: amount | percent;
-    # loan_change (account_id = the loan): rate (new rate in `percent`) | amount (new
+    # loan_change (account_id = the loan): rate (new rate in `percent`, and optionally a
+    # new repayment in `amount`) | amount (new
     # repayment) | lump_sum (one extra repayment of `amount` on start_date).
     change_mode: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(precision=7, scale=2), nullable=True)
