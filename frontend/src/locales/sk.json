@@ -1662,7 +1662,7 @@
     "recurringLine_other": "{{count}} recurring payments feed this forecast",
     "manageRecurring": "Manage",
     "expectedTitle": "Expected payments",
-    "expectedHint": "One-off payments that are real but not in the bank yet. They feed every line and drop out once the bank row arrives.",
+    "expectedHint": "One-off payments not in the bank yet, and the dated payments of your recurring schedules. All feed every line; a one-off drops out once its bank row arrives.",
     "expectedEmpty": "No expected payments",
     "addExpected": "Add expected payment",
     "editExpected": "Edit expected payment",
