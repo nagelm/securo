@@ -1724,12 +1724,14 @@
       "position": "{{index}} of {{count}}"
     },
     "tabs": {
-      "plan": "Expected payments & scenarios",
-      "loans": "Loans ({{count}})"
+      "expected": "Expected payments",
+      "scenarios": "Scenarios"
     },
     "recurringBadge": "Recurring",
     "showAllExpected": "Show all {{count}}",
-    "showFewer": "Show fewer"
+    "showFewer": "Show fewer",
+    "carousel": "Charts",
+    "cashAndCards": "Cash & cards"
   },
   "rules": {
     "searchPlaceholder": "Procurar regras...",

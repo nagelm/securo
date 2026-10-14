@@ -152,6 +152,9 @@ function ForecastView() {
   })
   const currency = data?.currency ?? userCurrency
   const money = (v: number) => mask(formatCurrency(v, currency, locale))
+  const loanList = data?.loans ?? []
+  const slides = [t('forecast.cashAndCards'), ...loanList.map((l) => l.name)]
+  const [slide, setSlide] = useState(0)
   const shortDate = (iso: string) =>
     new Date(iso + 'T00:00:00').toLocaleDateString(dateLocale, { day: 'numeric', month: 'short', year: '2-digit' })
 
@@ -330,8 +333,52 @@ function ForecastView() {
         )}
       </div>
 
-      {/* Chart */}
+      {/* Fork (owner 2026-10-15): one carousel for the cash-and-cards chart
+          and each loan's chart, so the page stays short. */}
       <div className="bg-card rounded-xl border border-border shadow-sm mb-5">
+        {slides.length > 1 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 px-5 pt-4">
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label={t('forecast.carousel')}>
+              {slides.map((name, i) => (
+                <button
+                  key={name + i}
+                  type="button"
+                  aria-pressed={i === slide}
+                  onClick={() => setSlide(i)}
+                  className={cn(
+                    'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                    i === slide
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost" size="icon" aria-label={t('forecast.loans.previous')}
+                onClick={() => setSlide((slide - 1 + slides.length) % slides.length)}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {t('forecast.loans.position', { index: slide + 1, count: slides.length })}
+              </span>
+              <Button
+                variant="ghost" size="icon" aria-label={t('forecast.loans.next')}
+                onClick={() => setSlide((slide + 1) % slides.length)}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
+        {slide > 0 && loanList[slide - 1] ? (
+          <LoanRow key={loanList[slide - 1].account_id} loan={loanList[slide - 1]} />
+        ) : (
+        <>
         <div className="px-5 pt-5 pb-2 flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-semibold text-foreground">{t('forecast.chartTitle')}</p>
           <div className="flex flex-wrap items-center gap-3">
@@ -458,25 +505,22 @@ function ForecastView() {
           )}
         </div>
         <p className="px-5 pb-4 text-[11px] text-muted-foreground">{t('forecast.chartHint')}</p>
+        </>
+        )}
       </div>
 
-      {/* Fork (owner 2026-10-15): the page was too tall. Planning (expected
-          payments and scenarios) and loans sit on tabs under the chart, and
-          the loans show one at a time. */}
-      <Tabs defaultValue="plan" className="gap-4">
+      {/* Fork (owner 2026-10-15): expected payments and scenarios on their own tabs. */}
+      <Tabs defaultValue="expected" className="gap-4">
         <TabsList>
-          <TabsTrigger value="plan">{t('forecast.tabs.plan')}</TabsTrigger>
-          <TabsTrigger value="loans" disabled={(data?.loans ?? []).length === 0}>
-            {t('forecast.tabs.loans', { count: (data?.loans ?? []).length })}
-          </TabsTrigger>
+          <TabsTrigger value="expected">{t('forecast.tabs.expected')}</TabsTrigger>
+          <TabsTrigger value="scenarios">{t('forecast.tabs.scenarios')}</TabsTrigger>
         </TabsList>
-        <TabsContent value="plan">
+        <TabsContent value="expected">
           <RecurringLine />
           <ExpectedPaymentsSection recurring={data?.recurring_payments ?? []} />
-          <ScenariosSection estimates={data?.spending_estimates ?? []} loans={data?.loans ?? []} currency={currency} />
         </TabsContent>
-        <TabsContent value="loans">
-          <LoansSection loans={data?.loans ?? []} />
+        <TabsContent value="scenarios">
+          <ScenariosSection estimates={data?.spending_estimates ?? []} loans={data?.loans ?? []} currency={currency} />
         </TabsContent>
       </Tabs>
     </div>
@@ -503,64 +547,6 @@ function usePayoffShift() {
       : t('forecast.loans.weeks', { count: Math.max(1, Math.round(abs / 7)) })
     return days < 0 ? t('forecast.loans.earlier', { period }) : t('forecast.loans.later', { period })
   }
-}
-
-function LoansSection({ loans }: { loans: LoanForecast[] }) {
-  const { t } = useTranslation()
-  const [index, setIndex] = useState(0)
-  if (loans.length === 0) return null
-  const current = Math.min(index, loans.length - 1)
-  const loan = loans[current]
-  return (
-    <SectionCard>
-      <SectionHeader
-        title={t('forecast.loans.title')}
-        hint={t('forecast.loans.hint')}
-        action={
-          loans.length > 1 ? (
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost" size="icon" aria-label={t('forecast.loans.previous')}
-                onClick={() => setIndex((current - 1 + loans.length) % loans.length)}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {t('forecast.loans.position', { index: current + 1, count: loans.length })}
-              </span>
-              <Button
-                variant="ghost" size="icon" aria-label={t('forecast.loans.next')}
-                onClick={() => setIndex((current + 1) % loans.length)}
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          ) : undefined
-        }
-      />
-      {loans.length > 1 && (
-        <div className="flex flex-wrap gap-1.5 px-5 pb-3" role="group" aria-label={t('forecast.loans.title')}>
-          {loans.map((l, i) => (
-            <button
-              key={l.account_id}
-              type="button"
-              aria-pressed={i === current}
-              onClick={() => setIndex(i)}
-              className={cn(
-                'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-                i === current
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-border text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {l.name}
-            </button>
-          ))}
-        </div>
-      )}
-      <LoanRow key={loan.account_id} loan={loan} />
-    </SectionCard>
-  )
 }
 
 function LoanRow({ loan }: { loan: LoanForecast }) {

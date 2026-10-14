@@ -95,6 +95,12 @@ beforeEach(() => {
   api.categoryGroups.list.mockResolvedValue([])
 })
 
+// Fork (owner 2026-10-15): the cash chart and each loan's chart share one
+// carousel; expected payments and scenarios sit on their own tabs.
+async function openScenarios(user: ReturnType<typeof renderWithProviders>['user']) {
+  await user.click(await screen.findByRole('tab', { name: t('forecast.tabs.scenarios') }))
+}
+
 describe('Forecast page', () => {
   it('draws the base line and one line per scenario, with their summaries', async () => {
     const { container } = renderWithProviders(<ForecastPage />)
@@ -167,6 +173,7 @@ describe('Forecast page', () => {
 
   it('turning a scenario off saves it and fetches the forecast again', async () => {
     const { user } = renderWithProviders(<ForecastPage />)
+    await openScenarios(user)
     const toggle = await screen.findByRole('switch', { name: 'Holiday' })
     await waitFor(() => expect(api.forecast.get).toHaveBeenCalledTimes(1))
     api.forecast.get.mockResolvedValue(response(false))
@@ -180,6 +187,7 @@ describe('Forecast page', () => {
 
   it('a spending change shows each category with its monthly average and what a cut is worth', async () => {
     const { user } = renderWithProviders(<ForecastPage />)
+    await openScenarios(user)
     await user.click(await screen.findByRole('button', { name: t('forecast.addChange') }))
     const dialog = await screen.findByRole('dialog')
 
