@@ -22,6 +22,7 @@ from app.api.import_transactions import router as import_router
 from app.api.info import router as info_router
 from app.api.recurring_transactions import router as recurring_router
 from app.api.forecast import router as forecast_router
+from app.api.insights import router as insights_router
 from app.api.reconciliation import router as reconciliation_router
 from app.api.rules import router as rules_router
 from app.api.assets import router as assets_router
@@ -184,6 +185,7 @@ app.include_router(loan_payments_router)
 app.include_router(connections_router)
 app.include_router(recurring_router)
 app.include_router(forecast_router)
+app.include_router(insights_router)
 app.include_router(budgets_router)
 app.include_router(goals_router)
 app.include_router(groups_router)

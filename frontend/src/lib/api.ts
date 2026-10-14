@@ -51,6 +51,7 @@ import type {
   RecurringTransaction,
   ForecastItem,
   ForecastResponse,
+  InsightsBriefing,
   ForecastScenario,
   ProjectedTransaction,
   TransactionCalendarResponse,
@@ -1286,6 +1287,14 @@ export const recurring = {
 }
 
 // Fork: the Forecast page.
+// Fork: the Insights page's monthly briefing.
+export const insights = {
+  briefing: async (month?: string): Promise<InsightsBriefing> => {
+    const { data } = await api.get('/insights/briefing', { params: month ? { month } : {} })
+    return data
+  },
+}
+
 export const forecast = {
   get: async (
     months = 12,

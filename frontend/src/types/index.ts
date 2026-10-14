@@ -2111,3 +2111,36 @@ export interface ReconciliationHistoryEvent {
   transaction_id?: string | null
   transaction_description?: string | null
 }
+
+// Fork: the Insights page's monthly briefing.
+export interface InsightCard {
+  kind:
+    | 'category_month' | 'trend_cooling' | 'trend_rising' | 'savings_rate' | 'price_up' | 'price_down'
+    | 'payee_new' | 'payee_stopped' | 'small_burst' | 'income_change'
+  direction: 'better' | 'worse'
+  params: Record<string, string | number>
+  series: number[]
+  category_id: string | null
+  payee_id: string | null
+  link_from: string | null
+  link_to: string | null
+}
+
+export interface InsightsBriefing {
+  month: string
+  currency: string
+  first_month: string | null
+  last_month: string
+  everyday_spend: number
+  usual_spend: number
+  income: number
+  savings_rate: number | null
+  savings_rate_before: number | null
+  one_off_count: number
+  one_off_total: number
+  one_off_threshold: number
+  categories: { category_id: string | null; name: string; amount: number; usual: number; diff: number }[]
+  excluded: { category_id: string | null; name: string; reason: 'one_off' | 'more_payments' | 'fewer_payments' }[]
+  better: InsightCard[]
+  worse: InsightCard[]
+}

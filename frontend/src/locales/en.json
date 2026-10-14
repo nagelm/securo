@@ -133,7 +133,8 @@
     "agents": "Agents",
     "aiAgents": "AI Agents",
     "collapseSidebar": "Collapse sidebar",
-    "expandSidebar": "Expand sidebar"
+    "expandSidebar": "Expand sidebar",
+    "insights": "Insights"
   },
   "invoices": {
     "title": "Invoices",
@@ -3301,6 +3302,92 @@
       "available": "Available to draw",
       "notSet": "No credit limit set.",
       "notSetHint": "Add it under Edit details."
+    }
+  },
+  "insights": {
+    "title": "Insights",
+    "previousMonth": "Previous month",
+    "nextMonth": "Next month",
+    "loadError": "Couldn't load the insights for this month.",
+    "empty": "Not enough history yet. Insights need a few months of transactions to compare against.",
+    "headline": {
+      "slide": "Your savings rate has been sliding: {{before}}% a year ago, {{rate}}% now.",
+      "rise": "Your savings rate has been climbing: {{before}}% a year ago, {{rate}}% now.",
+      "under": "Everyday spending came in {{pct}}% under a usual month.",
+      "over": "Everyday spending ran {{pct}}% over a usual month.",
+      "steady": "Everyday spending was close to a usual month."
+    },
+    "summary": "Everyday spending was {{spent}} against a usual {{usual}}. {{lower}} categories came in under their usual month and {{higher}} over.",
+    "everydaySpend": "Everyday spend",
+    "vsUsual": "{{sign}} {{pct}}% vs {{usual}}",
+    "savedTwelve": "Saved, last 12 months",
+    "savedFrom": "from {{before}}% a year ago",
+    "oneOffs": "One-offs",
+    "oneOffsNone": "None",
+    "oneOffsOver": "over {{amount}}",
+    "oneOffsCount_one": "{{count}} purchase, left out above",
+    "oneOffsCount_other": "{{count}} purchases, left out above",
+    "chartTitle": "Each category against its usual month",
+    "chartUsual": "usual = median of the six months before",
+    "less": "less than usual",
+    "more": "more than usual",
+    "excluded": "Not shown: {{list}}.",
+    "reasons": {
+      "one_off": "mostly one-off purchases",
+      "more_payments": "an extra regular payment this month",
+      "fewer_payments": "one regular payment fewer this month"
+    },
+    "better": "Better",
+    "worse": "Worse",
+    "noneBetter": "Nothing stood out as better this month.",
+    "noneWorse": "Nothing stood out as worse this month.",
+    "cards": {
+      "category_month": {
+        "title_better": "{{category}} under usual",
+        "title_worse": "{{category}} over usual",
+        "titleStreak": "{{category}} back up after {{count}} quiet months",
+        "detail_one": "{{amount}} · usual {{usual}} · {{count}} transaction",
+        "detail_other": "{{amount}} · usual {{usual}} · {{count}} transactions"
+      },
+      "trend_cooling": {
+        "title": "{{category}} cooling off",
+        "detail": "12-month total {{total}}, down from {{peak}} ({{month}})"
+      },
+      "trend_rising": {
+        "title": "{{category}} climbing",
+        "detail": "12-month total {{total}}, up {{pct}}% on {{before}} a year earlier"
+      },
+      "savings_rate": {
+        "title_worse": "Savings rate sliding",
+        "title_better": "Savings rate climbing",
+        "detail": "{{rate}}% of income kept over 12 months, from {{before}}%"
+      },
+      "price_up": {
+        "title": "{{payee}} costs more"
+      },
+      "price_down": {
+        "title": "{{payee}} costs less"
+      },
+      "price": {
+        "detail": "{{before}} → {{after}} a payment since {{since}}"
+      },
+      "payee_new": {
+        "title": "New cost: {{payee}}",
+        "detail": "{{amount}} this month in {{category}}"
+      },
+      "payee_stopped": {
+        "title": "{{payee}} stopped",
+        "detail": "{{amount}} a payment in {{category}}, last on {{last}}"
+      },
+      "small_burst": {
+        "title": "Burst of small charges: {{payee}}",
+        "detail": "{{count}} charges, {{amount}} · usually {{usual}} a month"
+      },
+      "income_change": {
+        "title_better": "{{payee}} paying more",
+        "title_worse": "{{payee}} paying less",
+        "detail": "{{before}} → {{after}} a payment ({{pct}}%)"
+      }
     }
   }
 }

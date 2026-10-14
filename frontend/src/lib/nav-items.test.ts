@@ -43,11 +43,12 @@ describe('nav catalog', () => {
     expect([...covered].sort()).toEqual([...MODULE_IDS].sort())
   })
 
-  it("gives every link a distinct module, except Forecast sharing Recurring's", () => {
+  it("gives every link a distinct module, except Forecast sharing Recurring's and Insights sharing Reports'", () => {
     const links = navItems.filter((i) => i.type === 'link')
-    const covered = links.filter((i) => i.key !== 'forecast').map((i) => i.module)
+    const covered = links.filter((i) => i.key !== 'forecast' && i.key !== 'insights').map((i) => i.module)
     expect(new Set(covered).size).toBe(covered.length)
     expect(links.find((i) => i.key === 'forecast')?.module).toBe('recurring')
+    expect(links.find((i) => i.key === 'insights')?.module).toBe('reports')
   })
 })
 
@@ -58,6 +59,8 @@ describe('visibleNavItems', () => {
       'transactions',
       'accounts',
       'import',
+      // Fork: Insights opens the Analysis section, beside Reports.
+      'insights',
       'reports',
       'assets',
       // Fork: Forecast sits in Analysis; Recurring is its own page in Setup.
