@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale } from '@/hooks/use-display-locale'
 import { useQuery } from '@tanstack/react-query'
@@ -26,6 +26,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { DateRangePicker } from '@/components/ui/date-range-picker'
 import { PageHeader } from '@/components/page-header'
 import { CashflowSankey } from '@/components/reports/CashflowSankey'
+import { MONEY_MAP_MAX_MONTHS_BACK, moneyMapWindow } from '@/components/reports/money-map-window'
 import { CategoryTrendDialog } from '@/components/reports/CategoryTrendDialog'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
@@ -212,6 +213,14 @@ export default function ReportsPage() {
   const [trendDetail, setTrendDetail] = useState<CategoryTrendItem | null>(null)
   const [cashFlowBaseline, setCashFlowBaseline] = useState(false)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  // Fork: Money Map slider. `mapBackDraft` follows the thumb; `mapBack` is
+  // what is queried, a moment after the thumb stops.
+  const [mapBackDraft, setMapBackDraft] = useState(0)
+  const [mapBack, setMapBack] = useState(0)
+  useEffect(() => {
+    const id = window.setTimeout(() => setMapBack(mapBackDraft), 250)
+    return () => window.clearTimeout(id)
+  }, [mapBackDraft])
   // Active Collection filter (issue #105): scope all report tabs to its
   // accounts; net worth also includes the collection's wallets' assets.
   const { activeAccountIds, activeWalletIds } = useCollectionFilter()
@@ -256,8 +265,11 @@ export default function ReportsPage() {
   const months = isCustomRange ? customMonths : selectedRange.months
   const period = isCustomRange ? undefined : selectedRange.period
   const days = isCustomRange ? undefined : selectedRange.days
-  const apiStart = hasCustomRange ? customFrom : undefined
-  const apiEnd = hasCustomRange ? customTo : undefined
+  // Fork: on the Money Map, a slider position other than "now" moves the
+  // selected window back in time; the report is asked for those dates.
+  const mapWindow = activeTab === 'money_map' && !isCustomRange ? moneyMapWindow(mapBack, selectedRange) : null
+  const apiStart = hasCustomRange ? customFrom : mapWindow?.start
+  const apiEnd = hasCustomRange ? customTo : mapWindow?.end
   // Fork: long ranges would draw thousands of points, so daily is offered up
   // to 1 year and weekly up to 5 years; a disallowed choice falls back to the
   // next coarser interval until the range is short enough again.
@@ -271,6 +283,8 @@ export default function ReportsPage() {
     : intervalOptions.find((o) => o.value !== 'daily' && intervalAllowed(o.value))?.value ?? 'monthly'
 
   const handleSelectTab = (key: string) => {
+    setMapBackDraft(0)
+    setMapBack(0)
     const nextTab = REPORT_TABS.find((tab) => tab.key === key) ?? REPORT_TABS[0]
     setActiveTab(key)
     setCompositionView(key === 'net_worth' ? 'netWorth' : 'net')
@@ -296,6 +310,8 @@ export default function ReportsPage() {
         : activeTab === 'income_expenses' || isMoneyMap
           ? reports.incomeExpenses(months, interval, acctIds, period, days, apiStart, apiEnd)
           : reports.netWorth(months, interval, acctIds, walletIds, period, apiStart, apiEnd),
+    // Keep the map on screen while the slider asks for the next window.
+    placeholderData: (previous) => (isMoneyMap ? previous : undefined),
     // Only request a custom report with both committed endpoints.
     enabled: currentTab.enabled && !(noAccounts && activeTab !== 'net_worth') && (!isCustomRange || hasCustomRange),
   })
@@ -785,6 +801,30 @@ export default function ReportsPage() {
               <CashflowSankey composition={composition} currency={userCurrency} locale={locale} />
             )}
           </div>
+          {!isCustomRange && (() => {
+            const draftWindow = moneyMapWindow(mapBackDraft, selectedRange)
+            const fmt = (iso: string) =>
+              new Date(iso + 'T00:00:00').toLocaleDateString(locale, { month: 'short', year: 'numeric' })
+            return (
+              <div className="px-5 pb-5 flex items-center gap-3" data-testid="money-map-slider">
+                <input
+                  type="range"
+                  min={-MONEY_MAP_MAX_MONTHS_BACK}
+                  max={0}
+                  step={1}
+                  value={-mapBackDraft}
+                  onChange={(e) => setMapBackDraft(-Number(e.target.value))}
+                  aria-label={t('reports.moneyMapSlider')}
+                  className="flex-1 accent-primary"
+                />
+                <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap min-w-[10rem] text-right">
+                  {draftWindow
+                    ? t('reports.moneyMapWindow', { from: fmt(draftWindow.start), to: fmt(draftWindow.end) })
+                    : t('reports.moneyMapNow')}
+                </span>
+              </div>
+            )
+          })()}
         </div>
       )}
 

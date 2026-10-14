@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 
 import ReportsPage from '@/pages/reports'
 import { renderWithProviders, t } from '@/test/utils'
@@ -305,6 +305,21 @@ it('the money map offers 2Y, 5Y and 10Y (fork)', async () => {
   }
   await user.click(screen.getByRole('button', { name: t('reports.range10y') }))
   await waitFor(() => expect(api.reports.incomeExpenses.mock.calls.at(-1)?.[0]).toBe(120))
+})
+
+it('the money map slider moves the selected window back in time (fork)', async () => {
+  const { user } = renderWithProviders(<ReportsPage />)
+  await user.click(screen.getByRole('button', { name: t('reports.moneyMap') }))
+  await waitFor(() => expect(api.reports.incomeExpenses).toHaveBeenCalled())
+  const slider = screen.getByRole('slider', { name: t('reports.moneyMapSlider') })
+  expect(screen.getByTestId('money-map-slider')).toHaveTextContent(t('reports.moneyMapNow'))
+
+  // Today is 12 Sep 2026; the Money Map opens on 3M. Three months back is
+  // the three months ending 30 Jun 2026.
+  fireEvent.change(slider, { target: { value: '-3' } })
+  await waitFor(() => expect(api.reports.incomeExpenses.mock.calls.at(-1)?.slice(-2)).toEqual([
+    '2026-04-01', '2026-06-30',
+  ]))
 })
 
 describe('Reports page — Category Trends detail (fork)', () => {

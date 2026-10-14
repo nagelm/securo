@@ -2290,7 +2290,10 @@
     "trendHighest": "Highest",
     "trendLowest": "Lowest",
     "trendViewTransactions": "View transactions",
-    "trendOpenDetail": "Show the {{name}} trend in detail"
+    "trendOpenDetail": "Show the {{name}} trend in detail",
+    "moneyMapSlider": "Move the window back in time",
+    "moneyMapWindow": "{{from}} – {{to}}",
+    "moneyMapNow": "Latest"
   },
   "payees": {
     "noPayeeFound": "Nenhuma pessoa encontrada.",
