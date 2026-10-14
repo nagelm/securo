@@ -102,7 +102,16 @@ def _is_match(item: ForecastItem, tx: Transaction, today: date) -> bool:
     if abs((tx.date - cast(date, item.date)).days) > MATCH_WINDOW_DAYS:
         return False
     expected = abs(Decimal(item.amount or 0))
-    return abs(abs(Decimal(tx.amount or 0)) - expected) <= expected * MATCH_AMOUNT_TOLERANCE
+    actual = abs(Decimal(tx.amount or 0))
+    if actual == expected:
+        return True
+    # Near enough in amount is only a match when the wording shares a word
+    # too: a power bill is not the transfer of a similar amount expected the
+    # same week on the same account.
+    return (
+        abs(actual - expected) <= expected * MATCH_AMOUNT_TOLERANCE
+        and token_overlap(item.description, tx.description) > 0
+    )
 
 
 async def match_expected_payments(
@@ -116,8 +125,9 @@ async def match_expected_payments(
     are candidates; without, the workspace's rows around each payment are.
     One bank row settles at most one expected payment. Only rows stored
     after the payment was created, and not linked to a recurring payment,
-    are candidates; the most similar description wins, then the closest
-    date, then the closest amount. Flushes, never commits. Called by sync
+    are candidates; the amount must be exact, or within 5% with a word in
+    common; the most similar description wins, then the closest date, then
+    the closest amount. Flushes, never commits. Called by sync
     and import only; reads use ``pending_expected_matches``.
     """
     found = await _find_expected_matches(session, workspace_id, transactions)

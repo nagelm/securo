@@ -46,10 +46,10 @@ async def _account(session: AsyncSession, user_id, opening: float = 1000, type_:
 
 async def _tx(
     session: AsyncSession, user_id, account_id, amount: float, type_: str, when: date,
-    *, source: str = "manual", category_id=None, status: str = "posted",
+    *, source: str = "manual", category_id=None, status: str = "posted", description: str | None = None,
 ) -> Transaction:
     tx = Transaction(
-        id=uuid.uuid4(), user_id=user_id, account_id=account_id, description=f"{type_} {amount}",
+        id=uuid.uuid4(), user_id=user_id, account_id=account_id, description=description or f"{type_} {amount}",
         amount=Decimal(str(amount)), date=when, type=type_, source=source, currency="BRL",
         category_id=category_id, status=status, created_at=datetime.now(timezone.utc),
     )
@@ -417,7 +417,7 @@ async def test_matching_tolerance(session, test_user, test_workspace):
     today = app_today()
     account = await _account(session, test_user.id)
     item = await _expected(session, test_user.id, test_workspace.id, amount=Decimal("200"), type="debit",
-                           date=today - timedelta(days=2), account_id=account.id)
+                           date=today - timedelta(days=2), account_id=account.id, description="Power bill")
     # Outside the tolerance: 10% off, 12 days off, the other direction, still pending.
     await _tx(session, test_user.id, account.id, 220, "debit", today - timedelta(days=1))
     await _tx(session, test_user.id, account.id, 200, "debit", today - timedelta(days=14))
@@ -426,19 +426,38 @@ async def test_matching_tolerance(session, test_user, test_workspace):
 
     assert await forecast_service.match_expected_payments(session, test_workspace.id) == 0
 
-    real = await _tx(session, test_user.id, account.id, 205, "debit", today - timedelta(days=1))
+    real = await _tx(session, test_user.id, account.id, 205, "debit", today - timedelta(days=1),
+                     description="POWER CO direct debit")
     assert await forecast_service.match_expected_payments(session, test_workspace.id) == 1
     await session.refresh(item)
     assert item.matched_transaction_id == real.id
+
+
+async def test_a_near_amount_with_nothing_in_common_does_not_match(session, test_user, test_workspace):
+    """Fork, 2026-10-15: a power bill matched a transfer expected
+    the same week on the same account. Near amounts need a shared word."""
+    today = app_today()
+    account = await _account(session, test_user.id)
+    item = await _expected(session, test_user.id, test_workspace.id, amount=Decimal("120"), type="debit",
+                           date=today, account_id=account.id, description="Transfer to savings (wk 7)")
+    await _tx(session, test_user.id, account.id, 115, "debit", today - timedelta(days=1),
+              description="Direct Debit -POWER RETAILER LTD PAYMENT")
+    assert await forecast_service.match_expected_payments(session, test_workspace.id) == 0
+
+    exact = await _tx(session, test_user.id, account.id, 120, "debit", today,
+                      description="TRANSFER TO SAVINGS - 03")
+    assert await forecast_service.match_expected_payments(session, test_workspace.id) == 1
+    await session.refresh(item)
+    assert item.matched_transaction_id == exact.id
 
 
 async def test_matched_payment_drops_out_of_the_forecast(session, test_user, test_workspace):
     today = app_today()
     account = await _account(session, test_user.id)
     item = await _expected(session, test_user.id, test_workspace.id, amount=Decimal("200"), type="debit",
-                           date=today + timedelta(days=3), account_id=account.id)
+                           date=today + timedelta(days=3), account_id=account.id, description="Rates instalment")
     # The bill came early; the bank row is already in the balance.
-    real = await _tx(session, test_user.id, account.id, 198, "debit", today)
+    real = await _tx(session, test_user.id, account.id, 198, "debit", today, description="Council rates instalment")
 
     result = await _forecast(session, test_user, test_workspace)
 
@@ -521,7 +540,7 @@ async def test_a_row_linked_to_a_recurring_payment_does_not_match(session, test_
     today = app_today()
     account = await _account(session, test_user.id)
     rec = await _recurring(session, test_user.id, account.id, 100, "debit", today + timedelta(days=30))
-    item = await _expected(session, test_user.id, test_workspace.id, amount=Decimal("100.50"), type="debit",
+    item = await _expected(session, test_user.id, test_workspace.id, amount=Decimal("120"), type="debit",
                            date=today + timedelta(days=2), account_id=account.id)
     holiday_fund = await _tx(session, test_user.id, account.id, 100, "debit", today)
     holiday_fund.recurring_transaction_id = rec.id
