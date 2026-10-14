@@ -137,12 +137,23 @@ beforeEach(() => {
   api.categoryGroups.list.mockResolvedValue([])
 })
 
+// Fork (owner 2026-10-15): loans sit on their own tab, one loan at a time.
+async function openLoans(user: ReturnType<typeof renderWithProviders>['user']) {
+  const tab = await screen.findByRole('tab', { name: /Loans/ })
+  await waitFor(() => expect(tab).not.toBeDisabled())
+  await user.click(tab)
+}
+
 describe('Forecast page: loans', () => {
   it('shows each loan with its payoff, interest and what each scenario changes', async () => {
-    renderWithProviders(<ForecastPage />)
+    const { user } = renderWithProviders(<ForecastPage />)
+    await openLoans(user)
 
+    // One loan at a time, with a picker and a position.
     const rows = await screen.findAllByTestId('loan-row')
-    expect(rows).toHaveLength(2)
+    expect(rows).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Home loan' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText(t('forecast.loans.position', { index: 1, count: 2 }))).toBeInTheDocument()
     const home = rows[0]
     expect(within(home).getByRole('link', { name: 'Home loan' })).toHaveAttribute('href', '/accounts/loan-1')
     expect(within(home).getByText(/\$100,000\.00 owed/)).toBeInTheDocument()
@@ -165,18 +176,21 @@ describe('Forecast page: loans', () => {
   })
 
   it('a loan without enough details links to the loan to fill them in', async () => {
-    renderWithProviders(<ForecastPage />)
+    const { user } = renderWithProviders(<ForecastPage />)
+    await openLoans(user)
+    await user.click(screen.getByRole('button', { name: t('forecast.loans.next') }))
 
     const rows = await screen.findAllByTestId('loan-row')
-    const note = within(rows[1]).getByTestId('loan-missing-details')
+    expect(rows).toHaveLength(1)
+    const note = within(rows[0]).getByTestId('loan-missing-details')
     expect(note).toHaveTextContent(t('forecast.loans.missingDetails'))
     expect(within(note).getByRole('link', { name: t('forecast.loans.addDetails') })).toHaveAttribute('href', '/accounts/loan-2')
-    expect(rows[1].querySelector('.recharts-wrapper')).toBeNull()
+    expect(rows[0].querySelector('.recharts-wrapper')).toBeNull()
   })
 
   it('a loan change picks a projectable loan, a new rate and keeps the repayment', async () => {
     const { user } = renderWithProviders(<ForecastPage />)
-    await screen.findAllByTestId('loan-row')
+    await screen.findByRole('tab', { name: /Loans \(2\)/ })
     await user.click(await screen.findByRole('button', { name: t('forecast.addChange') }))
     const dialog = await screen.findByRole('dialog')
 
@@ -201,7 +215,7 @@ describe('Forecast page: loans', () => {
 
   it('a rate change can set the repayment by hand (fork)', async () => {
     const { user } = renderWithProviders(<ForecastPage />)
-    await screen.findAllByTestId('loan-row')
+    await screen.findByRole('tab', { name: /Loans \(2\)/ })
     await user.click(await screen.findByRole('button', { name: t('forecast.addChange') }))
     const dialog = await screen.findByRole('dialog')
 
@@ -233,7 +247,7 @@ describe('Forecast page: loans', () => {
 
   it('a lump sum sends the amount and its date', async () => {
     const { user } = renderWithProviders(<ForecastPage />)
-    await screen.findAllByTestId('loan-row')
+    await screen.findByRole('tab', { name: /Loans \(2\)/ })
     await user.click(await screen.findByRole('button', { name: t('forecast.addChange') }))
     const dialog = await screen.findByRole('dialog')
 
@@ -294,7 +308,8 @@ describe('Forecast page: history', () => {
         { date: '2026-10-14', value: 1000 },
       ],
     })
-    const { container } = renderWithProviders(<ForecastPage />)
+    const { container, user } = renderWithProviders(<ForecastPage />)
+    await openLoans(user)
 
     const loanRow = await screen.findByTestId('loan-row')
     const chart = container.querySelector('.recharts-wrapper') as HTMLElement

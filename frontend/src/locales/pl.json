@@ -1776,7 +1776,14 @@
       "recalculateHint": "The repayment changes so the loan is still paid off on time, as at a refix.",
       "keepHint": "The repayment stays the same, so the loan is paid off earlier or later.",
       "set": "Set repayment",
-      "setHint": "The repayment becomes the amount you enter, from the same date as the new rate."
+      "setHint": "The repayment becomes the amount you enter, from the same date as the new rate.",
+      "previous": "Previous loan",
+      "next": "Next loan",
+      "position": "{{index}} of {{count}}"
+    },
+    "tabs": {
+      "plan": "Expected payments & scenarios",
+      "loans": "Loans ({{count}})"
     }
   },
   "rules": {

@@ -13,7 +13,7 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from 'recharts'
-import { AlertCircle, ArrowDown, ArrowUp, HelpCircle, Pencil, Plus, Trash2 } from 'lucide-react'
+import { AlertCircle, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, HelpCircle, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   accounts as accountsApi,
@@ -41,6 +41,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type {
   Account,
   Category,
@@ -458,10 +459,25 @@ function ForecastView() {
         <p className="px-5 pb-4 text-[11px] text-muted-foreground">{t('forecast.chartHint')}</p>
       </div>
 
-      <LoansSection loans={data?.loans ?? []} />
-      <RecurringLine />
-      <ExpectedPaymentsSection />
-      <ScenariosSection estimates={data?.spending_estimates ?? []} loans={data?.loans ?? []} currency={currency} />
+      {/* Fork (owner 2026-10-15): the page was too tall. Planning (expected
+          payments and scenarios) and loans sit on tabs under the chart, and
+          the loans show one at a time. */}
+      <Tabs defaultValue="plan" className="gap-4">
+        <TabsList>
+          <TabsTrigger value="plan">{t('forecast.tabs.plan')}</TabsTrigger>
+          <TabsTrigger value="loans" disabled={(data?.loans ?? []).length === 0}>
+            {t('forecast.tabs.loans', { count: (data?.loans ?? []).length })}
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="plan">
+          <RecurringLine />
+          <ExpectedPaymentsSection />
+          <ScenariosSection estimates={data?.spending_estimates ?? []} loans={data?.loans ?? []} currency={currency} />
+        </TabsContent>
+        <TabsContent value="loans">
+          <LoansSection loans={data?.loans ?? []} />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
@@ -490,15 +506,58 @@ function usePayoffShift() {
 
 function LoansSection({ loans }: { loans: LoanForecast[] }) {
   const { t } = useTranslation()
+  const [index, setIndex] = useState(0)
   if (loans.length === 0) return null
+  const current = Math.min(index, loans.length - 1)
+  const loan = loans[current]
   return (
     <SectionCard>
-      <SectionHeader title={t('forecast.loans.title')} hint={t('forecast.loans.hint')} />
-      <div className="divide-y divide-border">
-        {loans.map((loan) => (
-          <LoanRow key={loan.account_id} loan={loan} />
-        ))}
-      </div>
+      <SectionHeader
+        title={t('forecast.loans.title')}
+        hint={t('forecast.loans.hint')}
+        action={
+          loans.length > 1 ? (
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost" size="icon" aria-label={t('forecast.loans.previous')}
+                onClick={() => setIndex((current - 1 + loans.length) % loans.length)}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {t('forecast.loans.position', { index: current + 1, count: loans.length })}
+              </span>
+              <Button
+                variant="ghost" size="icon" aria-label={t('forecast.loans.next')}
+                onClick={() => setIndex((current + 1) % loans.length)}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : undefined
+        }
+      />
+      {loans.length > 1 && (
+        <div className="flex flex-wrap gap-1.5 px-5 pb-3" role="group" aria-label={t('forecast.loans.title')}>
+          {loans.map((l, i) => (
+            <button
+              key={l.account_id}
+              type="button"
+              aria-pressed={i === current}
+              onClick={() => setIndex(i)}
+              className={cn(
+                'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                i === current
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {l.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <LoanRow key={loan.account_id} loan={loan} />
     </SectionCard>
   )
 }
