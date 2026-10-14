@@ -52,6 +52,7 @@ import type {
   ForecastResponse,
   ForecastScenario,
   LoanForecast,
+  LoanPoint,
   RecurringTransaction,
   SpendingEstimate,
 } from '@/types'
@@ -579,6 +580,25 @@ function LoanRow({ loan }: { loan: LoanForecast }) {
     }
     return [...byDate.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)))
   }, [base, loan.actuals, loan.scenarios])
+  // Fork (owner 2026-10-15): the balance chart runs over the loan's whole term,
+  // to the last payoff among its lines, so a scenario shows how much sooner it
+  // ends; the repayment bars keep the forecast's own horizon.
+  const termRows = useMemo(() => {
+    if (!base) return []
+    const byDate = new Map<string, Record<string, number | string>>()
+    for (const p of loan.actuals ?? []) byDate.set(p.date, { date: p.date, actual: p.value })
+    const put = (key: string, line: { points: LoanPoint[]; term_points?: LoanPoint[] }) => {
+      const pts = line.term_points && line.term_points.length > 0 ? line.term_points : line.points
+      for (const p of pts) {
+        const row = byDate.get(p.date) ?? { date: p.date }
+        row[key] = p.balance
+        byDate.set(p.date, row)
+      }
+    }
+    put('base', base)
+    for (const s of loan.scenarios) put(s.scenario_id, s)
+    return [...byDate.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)))
+  }, [base, loan.actuals, loan.scenarios])
   const startIso = base?.points[0]?.date ?? ''
   // Bars are what each future repayment pays, so they start after today.
   const splitRows = rows.filter((r) => typeof r.interest === 'number' && String(r.date) > startIso)
@@ -661,7 +681,7 @@ function LoanRow({ loan }: { loan: LoanForecast }) {
               <p className="text-[11px] font-medium text-muted-foreground mb-1">{t('forecast.loans.balanceChart')}</p>
               <div style={{ height: 180 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                  <ComposedChart data={termRows} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                     <XAxis dataKey="date" tickFormatter={shortDate} tick={axisTick} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                     <YAxis tickFormatter={yTick} tick={axisTick} axisLine={false} tickLine={false} width={56} tickCount={4} />
                     <Tooltip

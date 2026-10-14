@@ -146,6 +146,10 @@ class LoanLine(BaseModel):
     total_interest: float
     # The regular repayment at the end of the horizon (after any change).
     repayment: float
+    # Fork: the balance owed month by month over the loan's whole term, to the
+    # latest payoff among the loan's lines, so a scenario shows how much
+    # sooner it ends. Empty when no line pays off within the cap.
+    term_points: list[LoanPoint] = []
 
 
 class LoanScenarioLine(LoanLine):

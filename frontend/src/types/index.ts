@@ -760,6 +760,8 @@ export interface LoanLine {
   /** From today until payoff. */
   total_interest: number
   repayment: number
+  /** Fork: balance month by month over the whole term, to the last payoff among the loan's lines. */
+  term_points?: LoanPoint[]
 }
 
 export interface LoanScenarioLine extends LoanLine {

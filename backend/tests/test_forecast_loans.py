@@ -352,6 +352,31 @@ async def test_a_rate_change_repayment_must_be_positive():
         _validate_item({**item, "amount": Decimal("0")})
 
 
+async def test_the_whole_term_runs_to_the_last_payoff(session, test_user, test_workspace):
+    """Fork: every line of a loan gets the balance over the whole term, to the
+    latest payoff, so a lump sum shows how much sooner it ends."""
+    today = app_today()
+    await _account(session, test_user.id)
+    loan = await _loan(session, test_user.id)
+    await _scenario(session, test_user.id, test_workspace.id, {
+        "kind": "loan_change", "account_id": loan.id, "change_mode": "lump_sum",
+        "amount": Decimal("20000"), "start_date": today + timedelta(days=5),
+    })
+
+    result = await _forecast(session, test_user, test_workspace)
+
+    base, line = result.loans[0].base, result.loans[0].scenarios[0]
+    assert base is not None and base.payoff_date is not None and line.payoff_date is not None
+    # Both span the same months, past the forecast horizon, to the base payoff.
+    assert [p.date for p in base.term_points] == [p.date for p in line.term_points]
+    assert base.term_points[-1].date >= base.payoff_date > _add_months(today, MONTHS)
+    assert base.term_points[-1].balance == 0
+    # The scenario reaches zero sooner and stays there.
+    first_zero = next(p.date for p in line.term_points if p.balance == 0)
+    assert first_zero < base.payoff_date
+    assert all(p.balance == 0 for p in line.term_points if p.date >= first_zero)
+
+
 async def test_changes_to_one_loan_leave_the_others_alone(session, test_user, test_workspace):
     today = app_today()
     await _account(session, test_user.id)

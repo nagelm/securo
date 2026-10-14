@@ -828,6 +828,49 @@ def _loan_changes(scenario: ForecastScenario, loan_id: uuid.UUID, today: date) -
     return changes
 
 
+# The whole-term chart stops here even if a line never pays off.
+TERM_CHART_MAX_YEARS = 40
+
+
+def _term_points(schedule: LoanSchedule, loan: _Loan, today: date, end: date) -> list[LoanPoint]:
+    """Balance owed at today and each month-end to ``end``; zero once paid off."""
+    from app.services.report_service import _date_points
+
+    dates = _date_points(today, end, "monthly")
+    if not dates or dates[0] != today:
+        dates.insert(0, today)
+    periods = schedule.periods
+    points: list[LoanPoint] = []
+    balance, i = loan.debt, 0
+    for p in dates:
+        interest = principal = 0.0
+        while i < len(periods) and periods[i].date <= p:
+            interest += periods[i].interest
+            principal += periods[i].principal
+            balance = periods[i].closing
+            i += 1
+        points.append(LoanPoint(
+            date=p, balance=round(balance, 2), interest=round(interest, 2), principal=round(principal, 2),
+        ))
+    return points
+
+
+def _fill_term_points(
+    forecast: LoanForecast, schedules: list[LoanSchedule], loan: _Loan, today: date
+) -> None:
+    """Give every line of a loan the whole-term balance, to a shared end."""
+    from app.services.report_service import _add_months
+
+    if forecast.base is None or not schedules:
+        return
+    payoffs = [s.payoff_date for s in schedules if s.payoff_date is not None]
+    cap = _add_months(today, TERM_CHART_MAX_YEARS * 12)
+    end = min(max(payoffs), cap) if payoffs else cap
+    lines: list[LoanLine] = [forecast.base, *forecast.scenarios]
+    for line, schedule in zip(lines, schedules):
+        line.term_points = _term_points(schedule, loan, today, end)
+
+
 def _loan_line(schedule: LoanSchedule, loan: _Loan, today: date, end: date, interval: str) -> LoanLine:
     from app.services.report_service import _date_points
 
@@ -972,6 +1015,8 @@ async def compute_forecast(
         )
         for loan in loans
     ]
+    # Per loan, the base schedule then each scenario's, in the order of its lines.
+    loan_schedules: list[list[LoanSchedule]] = [[loan.base] if loan.base else [] for loan in loans]
     series: list[ForecastScenarioSeries] = []
     for scenario in scenarios:
         deltas = await _scenario_deltas(
@@ -986,7 +1031,7 @@ async def compute_forecast(
             estimates=estimate_by_cat,
             include_spending=include_spending,
         )
-        for loan, forecast in zip(loans, loan_forecasts):
+        for loan, forecast, schedules in zip(loans, loan_forecasts, loan_schedules):
             changes = _loan_changes(scenario, loan.account.id, today)
             if not changes or loan.terms is None or loan.base is None or forecast.base is None:
                 continue
@@ -997,6 +1042,7 @@ async def compute_forecast(
                         Decimal(str(value)), loan.account.currency
                     )
             loan_line = _loan_line(schedule, loan, today, end, interval)
+            schedules.append(schedule)
             both_pay_off = schedule.payoff_date is not None and loan.base.payoff_date is not None
             forecast.scenarios.append(LoanScenarioLine(
                 **loan_line.model_dump(),
@@ -1026,6 +1072,8 @@ async def compute_forecast(
             difference=round(summary.end_balance - base_summary.end_balance, 2),
         ))
 
+    for loan, forecast, schedules in zip(loans, loan_forecasts, loan_schedules):
+        _fill_term_points(forecast, schedules, loan, today)
     return ForecastResponse(
         currency=primary_currency,
         interval=interval,

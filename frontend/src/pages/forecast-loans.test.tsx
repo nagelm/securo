@@ -297,6 +297,30 @@ describe('Forecast page: recurring', () => {
 })
 
 describe('Forecast page: history', () => {
+  it('draws the balance over the whole term while the bars keep the forecast horizon (fork)', async () => {
+    const term = (end: number) => [
+      { date: '2026-10-14', balance: 100000, interest: 0, principal: 0 },
+      { date: '2030-04-30', balance: end === 2030 ? 0 : 60000, interest: 0, principal: 0 },
+      { date: '2033-03-31', balance: 0, interest: 0, principal: 0 },
+    ]
+    api.forecast.get.mockResolvedValue({
+      ...response(),
+      loans: [{
+        ...homeLoan,
+        base: { ...homeLoan.base!, term_points: term(2033) },
+        scenarios: [{ ...homeLoan.scenarios[0], term_points: term(2030) }],
+      }],
+    })
+    const { user } = renderWithProviders(<ForecastPage />)
+    await openLoans(user)
+    const loanRow = await screen.findByTestId('loan-row')
+    await waitFor(() => expect(loanRow.querySelectorAll('.recharts-wrapper')).toHaveLength(2))
+    const [balanceChart, barChart] = [...loanRow.querySelectorAll('.recharts-wrapper')] as HTMLElement[]
+    // The balance chart reaches the base payoff year; the bars stop at the horizon.
+    expect(balanceChart.textContent).toMatch(/33/)
+    expect(barChart.textContent).not.toMatch(/33/)
+  })
+
   it('draws the real balance up to today, then the dashed projection', async () => {
     api.forecast.get.mockResolvedValue({
       ...response(),
