@@ -16,7 +16,7 @@ hook only delays the match.
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Iterable, Optional
+from typing import Iterable, Optional, cast
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,7 +60,7 @@ def _is_match(item: ForecastItem, tx: Transaction, today: date) -> bool:
         return False
     if tx.status != "posted" or tx.date > today or tx.source in _NOT_REAL_SOURCES:
         return False
-    if abs((tx.date - item.date).days) > MATCH_WINDOW_DAYS:
+    if abs((tx.date - cast(date, item.date)).days) > MATCH_WINDOW_DAYS:
         return False
     expected = abs(Decimal(item.amount or 0))
     return abs(abs(Decimal(tx.amount or 0)) - expected) <= expected * MATCH_AMOUNT_TOLERANCE
@@ -144,8 +144,8 @@ async def _find_expected_matches(
                         Transaction.workspace_id == workspace_id,
                         Transaction.account_id == item.account_id,
                         Transaction.type == item.type,
-                        Transaction.date >= item.date - timedelta(days=MATCH_WINDOW_DAYS),
-                        Transaction.date <= item.date + timedelta(days=MATCH_WINDOW_DAYS),
+                        Transaction.date >= cast(date, item.date) - timedelta(days=MATCH_WINDOW_DAYS),
+                        Transaction.date <= cast(date, item.date) + timedelta(days=MATCH_WINDOW_DAYS),
                     )
                 )
             ).scalars()
@@ -155,7 +155,7 @@ async def _find_expected_matches(
         expected = abs(Decimal(item.amount or 0))
         best = min(
             fits,
-            key=lambda tx: (abs((tx.date - item.date).days), abs(abs(Decimal(tx.amount)) - expected)),
+            key=lambda tx: (abs((tx.date - cast(date, item.date)).days), abs(abs(Decimal(tx.amount)) - expected)),
         )
         found.append((item, best.id))
         taken.add(best.id)
@@ -199,7 +199,7 @@ async def expected_payment_projections(
     tomorrow = today + timedelta(days=1)
     return [
         {
-            "date": max(item.date, tomorrow),
+            "date": max(cast(date, item.date), tomorrow),
             "amount": float(abs(item.amount or 0)),
             "currency": item.currency,
             "type": item.type or "debit",
@@ -518,19 +518,19 @@ async def _scenario_deltas(
             deltas[d] = deltas.get(d, 0.0) + value
 
     def window(item: ForecastItem) -> tuple[date, date]:
-        return max(item.start_date, first), min(item.end_date or end, end)
+        return max(cast(date, item.start_date), first), min(item.end_date or end, end)
 
     for item in scenario.items:
         if item.account_id is not None and item.account_id not in account_ids:
             continue  # a loan, an investment, a closed account: not cash
         if item.kind == "one_off":
             if item.date is not None:
-                add(item.date, _sign(item.type) * await to_primary(Decimal(item.amount), item.currency))
+                add(item.date, _sign(item.type) * await to_primary(Decimal(item.amount or 0), item.currency))
         elif item.kind == "repeating":
-            amount = _sign(item.type) * await to_primary(Decimal(item.amount), item.currency)
+            amount = _sign(item.type) * await to_primary(Decimal(item.amount or 0), item.currency)
             for d in get_occurrences_in_range(
-                start=item.start_date,
-                frequency=item.frequency,
+                start=cast(date, item.start_date),
+                frequency=cast(str, item.frequency),
                 end_date=item.end_date,
                 range_start=first,
                 range_end=end + timedelta(days=1),
@@ -551,7 +551,7 @@ async def _scenario_deltas(
                     add(d, -signed)
                 elif item.change_mode == "amount" and d >= item.start_date and rec.amount:
                     # A loan payment's legs scale with the whole payment.
-                    ratio = float(Decimal(item.amount) / Decimal(rec.amount))
+                    ratio = float(Decimal(item.amount or 0) / Decimal(rec.amount))
                     add(d, signed * (ratio - 1))
         elif item.kind == "income_change":
             start, stop = window(item)
@@ -566,9 +566,9 @@ async def _scenario_deltas(
                     continue
                 if item.change_mode == "percent":
                     base = await to_primary(Decimal(str(proj["amount"])), proj["currency"])
-                    add(d, base * float(item.percent) / 100)
+                    add(d, base * float(item.percent or 0) / 100)
                 else:
-                    add(d, await to_primary(Decimal(item.amount), item.currency))
+                    add(d, await to_primary(Decimal(item.amount or 0), item.currency))
         elif item.kind == "spending_change":
             # Applied against the everyday spending estimate, so with the
             # estimate switched off there is nothing to change.
@@ -576,9 +576,9 @@ async def _scenario_deltas(
                 continue
             monthly = estimates.get(item.category_id, 0.0)
             if item.change_mode == "percent":
-                change = monthly * float(item.percent) / 100
+                change = monthly * float(item.percent or 0) / 100
             else:
-                change = await to_primary(Decimal(item.amount), item.currency)
+                change = await to_primary(Decimal(item.amount or 0), item.currency)
             change = max(change, -monthly)  # spending can't go below nothing
             start, stop = window(item)
             for d, daily in _spread_monthly(change, start, stop):

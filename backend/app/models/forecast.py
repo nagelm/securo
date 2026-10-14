@@ -6,7 +6,7 @@ not in the bank yet) or one change inside a scenario. Both are read by
 `forecast_service`, which lays them over the cash-flow projection.
 """
 import uuid
-from datetime import date, datetime
+from datetime import date as _date, datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -78,9 +78,9 @@ class ForecastItem(Base):
     currency: Mapped[str] = mapped_column(String(3), default="USD")
     type: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # debit, credit
     # one_off: the day it lands; changes: the day they take effect.
-    date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    end_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    date: Mapped[Optional[_date]] = mapped_column(Date, nullable=True)
+    start_date: Mapped[Optional[_date]] = mapped_column(Date, nullable=True)
+    end_date: Mapped[Optional[_date]] = mapped_column(Date, nullable=True)
     frequency: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     account_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True
