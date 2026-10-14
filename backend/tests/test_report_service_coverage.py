@@ -406,6 +406,23 @@ async def test_net_worth_composition_includes_credit_card_liability(session, tes
     assert any(c.label == "My Card" for c in liab)
 
 
+async def test_net_worth_lists_an_undrawn_loan_with_the_liabilities(session, test_user, test_workspace):
+    """Fork: a loan at $0 (an undrawn revolving facility) is still a liability,
+    listed under liabilities at zero, not counted as cash."""
+    loan = Account(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        name="Revolving facility", type="loan", balance=Decimal("0"), currency="BRL",
+    )
+    session.add(loan)
+    await session.commit()
+
+    report = await get_net_worth_report(
+        session, test_workspace.id, test_user.id, months=1, interval="monthly"
+    )
+    items = [c for c in report.composition if c.label == "Revolving facility"]
+    assert [(c.group, c.value) for c in items] == [("liabilities", 0)]
+
+
 async def test_net_worth_composition_asset_uses_asset_value_entry(session, test_user, test_workspace):
     """Asset with an AssetValue row is valued via the latest entry."""
     asset = Asset(

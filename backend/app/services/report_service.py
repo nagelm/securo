@@ -162,9 +162,12 @@ async def _net_worth_at(
             session, Decimal(str(abs(bal))), account.currency, primary_currency, cutoff
         )
         converted_val = float(converted)
-        if account.type == "credit_card" or bal < 0:
+        # Fork: a loan is a liability even when it is fully repaid or undrawn
+        # (a revolving facility at $0), and is listed with the liabilities.
+        is_debt_account = account.type in ("credit_card", "loan")
+        if is_debt_account or bal < 0:
             liabilities_total += converted_val
-            if converted_val > 0:
+            if converted_val > 0 or is_debt_account:
                 composition.append(ReportCompositionItem(
                     key=str(account.id),
                     label=get_account_name(account),
