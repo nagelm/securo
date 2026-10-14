@@ -185,7 +185,7 @@ NZFCC_CATEGORY_HINTS = {
     "Hotels, motels, and other temporary accommodation": "travel",
     "Air transport services": "travel",
     "Travel agencies and tour operators": "travel",
-    "Insurance": "other",
+    "Insurance": "insurance",
     "Tax payments": "taxes",
     "Debt repayments": "other",
     "Lending services": "other",

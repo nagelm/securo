@@ -1118,6 +1118,9 @@ EXTRA_CATEGORY_HINTS = {
 FALLBACK_CATEGORY_HINTS = {
     # Money into a loan account: principal repaid (Akahu).
     "loan_repayment": ("loan_repayments", "transfers"),
+    # Insurance premiums (Akahu): workspaces made before the default Insurance
+    # category existed keep filing them under Other.
+    "insurance": ("insurance", "other"),
 }
 
 

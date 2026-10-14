@@ -39,6 +39,7 @@ CATEGORY_TO_GROUP = {
     "shopping": "other",
     "donations": "other",
     "personal_care": "lifestyle",
+    "insurance": "other",
     "taxes": "other",
     "transfers": "other",
     # Repayments are a housing cost to the people paying them, even though

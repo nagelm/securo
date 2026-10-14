@@ -31,7 +31,7 @@ async def test_list_categories_with_defaults(
     response = await client.get("/api/categories", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
-    assert len(data) == 17
+    assert len(data) == 18
     names = {c["name"] for c in data}
     assert "Alimentação" in names
     assert "Pagamentos de empréstimos" in names

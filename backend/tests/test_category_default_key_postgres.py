@@ -43,6 +43,12 @@ assert _SPEC is not None and _SPEC.loader is not None
 migration = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(migration)
 
+_F013_PATH = _PATH.with_name("f013_insurance_default_key.py")
+_F013_SPEC = importlib.util.spec_from_file_location("f013_insurance_default_key", _F013_PATH)
+assert _F013_SPEC is not None and _F013_SPEC.loader is not None
+f013 = importlib.util.module_from_spec(_F013_SPEC)
+_F013_SPEC.loader.exec_module(f013)
+
 
 @pytest_asyncio.fixture
 async def session(postgres_sessions):
@@ -67,7 +73,7 @@ async def client(postgres_sessions, monkeypatch):
         yield client
 
 
-async def _run(session: AsyncSession, step: str) -> None:
+async def _run(session: AsyncSession, step: str, module=migration) -> None:
     def go(sync_session):
         connection = sync_session.connection()
         schema = (connection.get_execution_options().get("schema_translate_map") or {}).get(None)
@@ -76,7 +82,7 @@ async def _run(session: AsyncSession, step: str) -> None:
         connection.exec_driver_sql(f'SET LOCAL search_path TO "{schema}"')
         context = MigrationContext.configure(connection)
         with Operations.context(context):
-            getattr(migration, step)()
+            getattr(module, step)()
 
     await session.run_sync(go)
     await session.commit()
@@ -132,8 +138,10 @@ async def _insert(session: AsyncSession, user_id, ws_id, name: str, cat_id: uuid
     return cat_id
 
 
-def test_the_snapshot_matches_the_template_at_this_revision():
-    assert {key: set(names) for key, names in migration.NAMES.items()} == {
+def test_the_snapshots_match_the_template_at_this_revision():
+    # f009's defaults plus each default added since, from the migration that keys it.
+    snapshots = {**migration.NAMES, **f013.NAMES}
+    assert {key: set(names) for key, names in snapshots.items()} == {
         key: set(default_category_names(key)) for key in DEFAULT_CATEGORIES_I18N
     }
 
@@ -157,6 +165,8 @@ async def test_upgrade_backfills_keys_by_name_per_workspace(session, test_user, 
     portuguese = await _insert(session, test_user.id, test_workspace.id, "Mercado", uuid.UUID(int=4))
 
     await _run(session, "upgrade")
+    # Insurance, a default added later, is keyed by its own migration.
+    await _run(session, "upgrade", f013)
     assert "default_key" in await _columns(session)
     assert migration.INDEX in await _indexes(session)
 
@@ -203,3 +213,22 @@ async def test_an_empty_table_upgrades_and_downgrades(session):
     assert "default_key" in await _columns(session)
     await _run(session, "downgrade")
     assert "default_key" not in await _columns(session)
+
+
+async def test_f013_keys_the_first_unkeyed_insurance_category_per_workspace(session, test_user, test_workspace):
+    other = await _workspace(session, test_user, "Second")
+    await create_default_categories(session, test_user.id, "en", workspace_id=other.id)
+    # Made by hand before Insurance was a default, then the same name in Portuguese.
+    first = await _insert(session, test_user.id, test_workspace.id, "Insurance", uuid.UUID(int=1))
+    second = await _insert(session, test_user.id, test_workspace.id, "Seguros", uuid.UUID(int=2))
+
+    await _run(session, "upgrade", f013)
+
+    keys = await _keys(session, test_workspace.id)
+    assert keys == {("Insurance", first): "insurance", ("Seguros", second): None}
+    # A workspace seeded with the default already has it keyed: nothing changes.
+    other_keys = {name: key for (name, _), key in (await _keys(session, other.id)).items()}
+    assert other_keys["Insurance"] == "insurance"
+
+    await _run(session, "downgrade", f013)
+    assert (await _keys(session, test_workspace.id))[("Insurance", first)] is None
