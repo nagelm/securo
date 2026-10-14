@@ -2281,7 +2281,15 @@
     "range30d": "30Д",
     "customRange": "Довільний діапазон",
     "pickCustomRange": "Виберіть дату початку та кінця",
-    "loadError": "Не вдалося завантажити звіт"
+    "loadError": "Не вдалося завантажити звіт",
+    "trendDetailExpenses": "Spending in this category for each period of the report",
+    "trendDetailIncome": "Income in this category for each period of the report",
+    "trendTotal": "Total",
+    "trendAverage": "Average",
+    "trendHighest": "Highest",
+    "trendLowest": "Lowest",
+    "trendViewTransactions": "View transactions",
+    "trendOpenDetail": "Show the {{name}} trend in detail"
   },
   "payees": {
     "noPayeeFound": "Отримувача не знайдено.",

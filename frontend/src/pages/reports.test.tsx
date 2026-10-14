@@ -266,3 +266,40 @@ describe('Reports page — interval limits on long ranges', () => {
     await waitFor(() => expect(api.reports.netWorth.mock.calls.at(-1)![1]).toBe('daily'))
   })
 })
+
+describe('Reports page — Category Trends detail (fork)', () => {
+  function trendReport(): ReportResponse {
+    const cats = Array.from({ length: 14 }, (_, i) => ({
+      key: `00000000-0000-4000-8000-0000000000${String(i).padStart(2, '0')}`,
+      label: `Cat ${i}`,
+      color: '#123456',
+      total: 1400 - i * 100,
+      group: 'expenses',
+      series: [
+        { date: 'Aug 2026', value: 300 - i, breakdowns: {}, change: null },
+        { date: 'Sep 2026', value: 100 + i, breakdowns: {}, change: null },
+      ],
+    }))
+    return { ...emptyReport('income_expenses'), category_trend: cats }
+  }
+
+  it('pages through every category and opens a card in detail', async () => {
+    api.reports.incomeExpenses.mockResolvedValue(trendReport())
+    const { user } = renderWithProviders(<ReportsPage />)
+    await user.click(screen.getByRole('button', { name: t('reports.incomeExpenses') }))
+    await waitFor(() => expect(api.reports.incomeExpenses).toHaveBeenCalled())
+
+    // All 14 categories are cards (no "Other" bucket), the last one included.
+    const last = await screen.findByRole('button', { name: t('reports.trendOpenDetail', { name: 'Cat 13' }) })
+    expect(screen.getAllByRole('button', { name: /trend in detail/ })).toHaveLength(14)
+
+    await user.click(last)
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('Cat 13')
+    expect(dialog).toHaveTextContent(t('reports.trendAverage'))
+    expect(dialog).toHaveTextContent(t('reports.trendHighest'))
+    expect(screen.getByRole('link', { name: t('reports.trendViewTransactions') })).toHaveAttribute(
+      'href', '/transactions?category_id=00000000-0000-4000-8000-000000000013',
+    )
+  })
+})

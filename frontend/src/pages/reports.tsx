@@ -26,6 +26,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { DateRangePicker } from '@/components/ui/date-range-picker'
 import { PageHeader } from '@/components/page-header'
 import { CashflowSankey } from '@/components/reports/CashflowSankey'
+import { CategoryTrendDialog } from '@/components/reports/CategoryTrendDialog'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
 import { useCollectionFilter } from '@/contexts/collection-filter-context'
@@ -199,6 +200,7 @@ export default function ReportsPage() {
   const [compositionView, setCompositionView] = useState<string>('netWorth')
   const [sparklineView, setSparklineView] = useState<'byExpenses' | 'byIncome'>('byExpenses')
   const [sparklinePage, setSparklinePage] = useState(0)
+  const [trendDetail, setTrendDetail] = useState<CategoryTrendItem | null>(null)
   const [cashFlowBaseline, setCashFlowBaseline] = useState(false)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   // Active Collection filter (issue #105): scope all report tabs to its
@@ -1288,6 +1290,15 @@ export default function ReportsPage() {
           </div>
         </div>
 
+        <CategoryTrendDialog
+          item={trendDetail}
+          label={trendDetail ? (trendDetail.key === 'uncategorized' ? t('reports.uncategorized') : trendDetail.label) : ''}
+          onClose={() => setTrendDetail(null)}
+          formatMoney={(v) => (privacyMode ? MASK : formatCurrency(v, userCurrency, locale))}
+          formatAxis={(v) => (privacyMode ? MASK : formatCompact(v, userCurrency, locale))}
+          tooltipStyle={tooltipStyle}
+        />
+
         {/* Evolution / Category Sparklines */}
         <div className={`lg:col-span-2 rounded-xl border shadow-sm transition-colors ${selectedDate && meta?.type !== 'income_expenses' ? 'bg-primary/5 border-primary/50' : 'bg-card border-border'}`}>
           <div className="px-5 pt-5 pb-2 flex items-center justify-between">
@@ -1399,7 +1410,17 @@ export default function ReportsPage() {
                           return (
                             <div
                               key={`${item.key}-${item.group}`}
-                              className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2"
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => setTrendDetail(item)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault()
+                                  setTrendDetail(item)
+                                }
+                              }}
+                              aria-label={t('reports.trendOpenDetail', { name: item.key === 'uncategorized' ? t('reports.uncategorized') : item.label })}
+                              className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 cursor-pointer transition-colors hover:border-primary/50 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                             >
                               <div className="flex items-center gap-1.5 mb-0.5">
                                 <div

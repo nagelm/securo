@@ -2281,7 +2281,15 @@
     "range30d": "30D",
     "customRange": "Произвольный диапазон",
     "pickCustomRange": "Выберите дату начала и конца",
-    "loadError": "Не удалось загрузить отчёт"
+    "loadError": "Не удалось загрузить отчёт",
+    "trendDetailExpenses": "Spending in this category for each period of the report",
+    "trendDetailIncome": "Income in this category for each period of the report",
+    "trendTotal": "Total",
+    "trendAverage": "Average",
+    "trendHighest": "Highest",
+    "trendLowest": "Lowest",
+    "trendViewTransactions": "View transactions",
+    "trendOpenDetail": "Show the {{name}} trend in detail"
   },
   "payees": {
     "noPayeeFound": "Получатель не найден.",

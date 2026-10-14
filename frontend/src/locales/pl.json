@@ -2353,7 +2353,15 @@
     "range30d": "30D",
     "customRange": "Zakres niestandardowy",
     "pickCustomRange": "Wybierz datę początkową i końcową",
-    "loadError": "Nie udało się załadować raportu"
+    "loadError": "Nie udało się załadować raportu",
+    "trendDetailExpenses": "Spending in this category for each period of the report",
+    "trendDetailIncome": "Income in this category for each period of the report",
+    "trendTotal": "Total",
+    "trendAverage": "Average",
+    "trendHighest": "Highest",
+    "trendLowest": "Lowest",
+    "trendViewTransactions": "View transactions",
+    "trendOpenDetail": "Show the {{name}} trend in detail"
   },
   "payees": {
     "noPayeeFound": "Nie znaleziono odbiorcy.",

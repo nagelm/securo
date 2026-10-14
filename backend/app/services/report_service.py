@@ -43,7 +43,6 @@ from app.services.dashboard_service import (
     _get_open_accounts,
 )
 
-CATEGORY_TREND_TOP_N = 11
 
 _ACCOUNT_TYPE_COLORS: dict[str, str] = {
     "checking": "#6366F1",
@@ -1160,17 +1159,15 @@ async def get_income_expenses_report(
     # Build period labels from the same points used by the trend
     period_labels = [_format_date_label(p, interval) for p in points]
 
-    # Top 6 + Other per group
+    # Fork: every category, largest first (upstream kept the top 11 and
+    # folded the rest into "Other"; owner 2026-10-14 wants them all).
     category_trend: list[CategoryTrendItem] = []
     for group in ("expenses", "income"):
         group_items = [
             (k, v) for (k, g), v in cat_trend_map.items() if g == group
         ]
         group_items.sort(key=lambda x: x[1]["total"], reverse=True)
-        top = group_items[:CATEGORY_TREND_TOP_N]
-        rest = group_items[CATEGORY_TREND_TOP_N:]
-
-        for cat_key, info in top:
+        for cat_key, info in group_items:
             series = [
                 ReportDataPoint(
                     date=pl,
@@ -1184,29 +1181,6 @@ async def get_income_expenses_report(
                 label=info["label"],
                 color=info["color"],
                 total=round(info["total"], 2),
-                group=group,
-                series=series,
-            ))
-
-        if rest:
-            other_total = sum(v["total"] for _, v in rest)
-            other_periods: dict[str, float] = {}
-            for _, v in rest:
-                for pl, amt in v["periods"].items():
-                    other_periods[pl] = other_periods.get(pl, 0.0) + amt
-            series = [
-                ReportDataPoint(
-                    date=pl,
-                    value=round(other_periods.get(pl, 0.0), 2),
-                    breakdowns={},
-                )
-                for pl in period_labels
-            ]
-            category_trend.append(CategoryTrendItem(
-                key="other",
-                label="Other",
-                color="#6B7280",
-                total=round(other_total, 2),
                 group=group,
                 series=series,
             ))

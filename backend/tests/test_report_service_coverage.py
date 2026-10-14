@@ -340,11 +340,10 @@ async def test_income_expenses_pending_is_projected_not_actual(
     assert bd["projectedExpenses"] == pytest.approx(50.0)
 
 
-async def test_income_expenses_many_categories_triggers_other_bucket(session, test_user, test_workspace):
-    """More than CATEGORY_TREND_TOP_N expense categories → an 'Other' bucket."""
+async def test_income_expenses_lists_every_category(session, test_user, test_workspace):
+    """Fork: every expense category gets its own trend, largest first; no 'Other' bucket."""
     acct = await _make_account(session, test_user.id, "IE Many")
     today = date.today()
-    # 14 distinct expense categories (> top-N of 11)
     for i in range(14):
         cat = await _make_category(session, test_user.id, f"Cat{i}", color="#aabbcc")
         await _add_txn(
@@ -355,11 +354,8 @@ async def test_income_expenses_many_categories_triggers_other_bucket(session, te
         session, test_workspace.id, test_user.id, months=1, interval="monthly"
     )
     expense_items = [ct for ct in report.category_trend if ct.group == "expenses"]
-    keys = {ct.key for ct in expense_items}
-    assert "other" in keys
-    other = next(ct for ct in expense_items if ct.key == "other")
-    assert other.label == "Other"
-    assert other.total > 0
+    assert [ct.label for ct in expense_items] == [f"Cat{i}" for i in range(13, -1, -1)]
+    assert "other" not in {ct.key for ct in expense_items}
 
 
 async def test_income_expenses_change_percent_computed(session, test_user, test_workspace):

@@ -2264,7 +2264,15 @@
     "range30d": "30D",
     "customRange": "कस्टम सीमा",
     "pickCustomRange": "प्रारंभ और समाप्ति तिथि चुनें",
-    "loadError": "रिपोर्ट लोड करने में विफल"
+    "loadError": "रिपोर्ट लोड करने में विफल",
+    "trendDetailExpenses": "Spending in this category for each period of the report",
+    "trendDetailIncome": "Income in this category for each period of the report",
+    "trendTotal": "Total",
+    "trendAverage": "Average",
+    "trendHighest": "Highest",
+    "trendLowest": "Lowest",
+    "trendViewTransactions": "View transactions",
+    "trendOpenDetail": "Show the {{name}} trend in detail"
   },
   "payees": {
     "noPayeeFound": "कोई प्राप्तकर्ता नहीं मिला।",

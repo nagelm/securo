@@ -2335,7 +2335,15 @@
     "range30d": "30Η",
     "customRange": "Προσαρμοσμένο εύρος",
     "pickCustomRange": "Επιλέξτε ημερομηνία έναρξης και λήξης",
-    "loadError": "Αποτυχία φόρτωσης αναφοράς"
+    "loadError": "Αποτυχία φόρτωσης αναφοράς",
+    "trendDetailExpenses": "Spending in this category for each period of the report",
+    "trendDetailIncome": "Income in this category for each period of the report",
+    "trendTotal": "Total",
+    "trendAverage": "Average",
+    "trendHighest": "Highest",
+    "trendLowest": "Lowest",
+    "trendViewTransactions": "View transactions",
+    "trendOpenDetail": "Show the {{name}} trend in detail"
   },
   "fiscal": {
     "kind": {
