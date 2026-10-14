@@ -48,6 +48,7 @@ import type {
   CategoryGroup,
   ForecastItem,
   ForecastItemKind,
+  ForecastRecurringPayment,
   ForecastResponse,
   ForecastScenario,
   LoanForecast,
@@ -471,7 +472,7 @@ function ForecastView() {
         </TabsList>
         <TabsContent value="plan">
           <RecurringLine />
-          <ExpectedPaymentsSection />
+          <ExpectedPaymentsSection recurring={data?.recurring_payments ?? []} />
           <ScenariosSection estimates={data?.spending_estimates ?? []} loans={data?.loans ?? []} currency={currency} />
         </TabsContent>
         <TabsContent value="loans">
@@ -809,7 +810,9 @@ function useFormLookups() {
   }
 }
 
-function ExpectedPaymentsSection() {
+const EXPECTED_ROWS = 12
+
+function ExpectedPaymentsSection({ recurring }: { recurring: ForecastRecurringPayment[] }) {
   const { t } = useTranslation()
   const locale = useDisplayLocale()
   const dateLocale = useDateLocale()
@@ -823,6 +826,14 @@ function ExpectedPaymentsSection() {
 
   const { data: items } = useQuery({ queryKey: ['forecast-items'], queryFn: forecastApi.items.list })
   const expected = (items ?? []).filter((i) => i.scenario_id === null)
+  // Fork (owner 2026-10-15): one-off expected payments and the dated payments
+  // of each recurring schedule, in one list by date.
+  const [showAll, setShowAll] = useState(false)
+  const merged = [
+    ...expected.map((item) => ({ key: `item-${item.id}`, date: item.date ?? '', item, rec: null })),
+    ...recurring.map((rec) => ({ key: `rec-${rec.recurring_transaction_id}-${rec.date}`, date: rec.date, item: null, rec })),
+  ].sort((a, b) => a.date.localeCompare(b.date))
+  const visible = showAll ? merged : merged.slice(0, EXPECTED_ROWS)
 
   const close = () => { setDialogOpen(false); setEditing(null) }
   const saveMutation = useMutation({
@@ -863,7 +874,7 @@ function ExpectedPaymentsSection() {
           ) : undefined
         }
       />
-      {expected.length > 0 ? (
+      {merged.length > 0 ? (
         <table className="w-full">
           <thead>
             <tr className="border-b border-border">
@@ -876,8 +887,31 @@ function ExpectedPaymentsSection() {
             </tr>
           </thead>
           <tbody>
-            {expected.map((item) => (
-              <tr key={item.id} className="border-b border-border last:border-0 hover:bg-muted transition-colors">
+            {visible.map(({ key, item, rec }) => rec ? (
+              <tr key={key} className="border-b border-border last:border-0 hover:bg-muted transition-colors" data-testid="expected-recurring">
+                <td className="py-2.5 pl-4 sm:pl-5 text-xs text-muted-foreground tabular-nums">
+                  {new Date(rec.date + 'T00:00:00').toLocaleDateString(dateLocale)}
+                </td>
+                <td className="py-2.5 text-sm text-foreground">{rec.description || '—'}</td>
+                <td className="py-2.5 text-xs text-muted-foreground hidden md:table-cell">{accountName(rec.account_id)}</td>
+                <td className={`py-2.5 text-xs sm:text-sm font-semibold tabular-nums ${rec.type === 'credit' ? 'text-emerald-600' : 'text-rose-500'}`}>
+                  {mask(`${rec.type === 'credit' ? '+' : '−'}${formatCurrency(rec.amount, rec.currency, locale)}`)}
+                </td>
+                <td className="py-2.5 hidden sm:table-cell">
+                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-primary/5 text-primary border-primary/20">
+                    {t('forecast.recurringBadge')}
+                  </span>
+                </td>
+                {canWrite && (
+                  <td className="py-2.5 pr-4 sm:pr-5 text-right">
+                    <Link to="/recurring" className="text-xs font-semibold text-primary hover:underline">
+                      {t('forecast.manageRecurring')}
+                    </Link>
+                  </td>
+                )}
+              </tr>
+            ) : item && (
+              <tr key={key} className="border-b border-border last:border-0 hover:bg-muted transition-colors">
                 <td className="py-2.5 pl-4 sm:pl-5 text-xs text-muted-foreground tabular-nums">
                   {item.date ? new Date(item.date + 'T00:00:00').toLocaleDateString(dateLocale) : '—'}
                 </td>
@@ -924,6 +958,17 @@ function ExpectedPaymentsSection() {
         </table>
       ) : (
         <p className="text-sm text-muted-foreground text-center py-8">{t('forecast.expectedEmpty')}</p>
+      )}
+      {merged.length > EXPECTED_ROWS && (
+        <div className="border-t border-border px-4 sm:px-5 py-2.5">
+          <button
+            type="button"
+            className="text-xs font-semibold text-primary hover:underline"
+            onClick={() => setShowAll((v) => !v)}
+          >
+            {showAll ? t('forecast.showFewer') : t('forecast.showAllExpected', { count: merged.length })}
+          </button>
+        </div>
       )}
 
       <Dialog open={dialogOpen} onOpenChange={close}>

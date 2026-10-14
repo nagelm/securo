@@ -1723,7 +1723,10 @@
     "tabs": {
       "plan": "Expected payments & scenarios",
       "loans": "Loans ({{count}})"
-    }
+    },
+    "recurringBadge": "Recurring",
+    "showAllExpected": "Show all {{count}}",
+    "showFewer": "Show fewer"
   },
   "rules": {
     "searchPlaceholder": "Regeln suchen...",

@@ -676,3 +676,17 @@ async def test_api_viewer_can_read_but_not_write(client, viewer_auth_headers):
     resp = await client.post("/api/forecast/scenarios", json={"name": "S", "color": "#000000"},
                              headers=viewer_auth_headers)
     assert resp.status_code == 403
+
+
+async def test_recurring_payments_are_listed_with_their_dates(session: AsyncSession, test_user, test_workspace):
+    # Fork (owner 2026-10-15): the Expected payments list shows the dated
+    # payments of each recurring schedule, the same rows the base line counts.
+    account = await _account(session, test_user.id)
+    start = app_today() + timedelta(days=3)
+    rec = await _recurring(session, test_user.id, account.id, 120, "debit", start)
+    result = await _forecast(session, test_user, test_workspace)
+    rows = [r for r in result.recurring_payments if r.recurring_transaction_id == rec.id]
+    assert rows[0].date == start
+    assert all(r.amount == 120 and r.type == "debit" and r.account_id == account.id for r in rows)
+    assert [r.date for r in rows] == sorted(r.date for r in rows)
+    assert len(rows) >= MONTHS - 1

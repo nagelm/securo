@@ -140,6 +140,31 @@ describe('Forecast page', () => {
     await waitFor(() => expect(api.forecast.get).toHaveBeenCalledTimes(2))
   })
 
+  it('lists recurring payments with the expected payments, by date', async () => {
+    api.forecast.get.mockResolvedValue({
+      ...response(),
+      recurring_payments: [
+        { recurring_transaction_id: 'rec-1', date: '2026-10-20', description: 'Rates', amount: 70.00, type: 'debit', currency: 'USD', account_id: 'acc-1' },
+        { recurring_transaction_id: 'rec-1', date: '2026-10-27', description: 'Rates', amount: 70.00, type: 'debit', currency: 'USD', account_id: 'acc-1' },
+      ],
+    })
+    api.forecast.items.list.mockResolvedValue([{
+      id: 'it-1', scenario_id: null, kind: 'one_off', description: 'Car service', amount: '400', currency: 'USD',
+      type: 'debit', date: '2026-10-25', start_date: null, end_date: null, frequency: null, account_id: 'acc-1',
+      category_id: null, recurring_transaction_id: null, change_mode: null, percent: null,
+      recalculate_repayment: null, matched_transaction_id: null,
+    }])
+    renderWithProviders(<ForecastPage />)
+
+    const recurringRows = await screen.findAllByTestId('expected-recurring')
+    expect(recurringRows).toHaveLength(2)
+    expect(within(recurringRows[0]).getByText(t('forecast.recurringBadge'))).toBeInTheDocument()
+    // One list by date: Rates (20 Oct), Car service (25 Oct), Rates (27 Oct).
+    const rows = screen.getAllByRole('row').slice(1).map((r) => r.textContent ?? '')
+    expect(rows.map((r) => (r.includes('Car service') ? 'car' : r.includes('Rates') ? 'rates' : '?')).slice(0, 3))
+      .toEqual(['rates', 'car', 'rates'])
+  })
+
   it('turning a scenario off saves it and fetches the forecast again', async () => {
     const { user } = renderWithProviders(<ForecastPage />)
     const toggle = await screen.findByRole('switch', { name: 'Holiday' })

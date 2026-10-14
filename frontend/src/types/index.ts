@@ -784,6 +784,17 @@ export interface LoanForecast {
   scenarios: LoanScenarioLine[]
 }
 
+/** Fork: one dated payment of a recurring schedule inside the forecast. */
+export interface ForecastRecurringPayment {
+  recurring_transaction_id: string
+  date: string
+  description: string
+  amount: number
+  type: 'debit' | 'credit'
+  currency: string
+  account_id: string | null
+}
+
 export interface ForecastResponse {
   currency: string
   interval: string
@@ -798,6 +809,7 @@ export interface ForecastResponse {
   scenarios: ForecastScenarioSeries[]
   spending_estimates: SpendingEstimate[]
   loans?: LoanForecast[]
+  recurring_payments?: ForecastRecurringPayment[]
 }
 
 export interface ProjectedTransaction {

@@ -45,6 +45,7 @@ from app.schemas.forecast import (
     ForecastItemUpdate,
     ForecastLineSummary,
     ForecastPoint,
+    ForecastRecurringPayment,
     ForecastResponse,
     ForecastScenarioCreate,
     ForecastScenarioSeries,
@@ -913,28 +914,24 @@ async def compute_forecast(
         stmt = stmt.where(ForecastScenario.is_enabled.is_(True))
     scenarios = list((await session.execute(stmt)).scalars())
 
-    needs_recurring = any(
-        item.kind in ("recurring_change", "income_change") for s in scenarios for item in s.items
-    )
-    recurring_projections: list[dict] = []
+    # The same rows the base line projected, so a change removes exactly what
+    # the base added, and the list of recurring payments shows exactly what the
+    # base line counts.
     recurring_by_id: dict[uuid.UUID, RecurringTransaction] = {}
-    if needs_recurring:
-        # The same rows the base line projected, so a change removes exactly
-        # what the base added.
-        recurring_projections = await _get_recurring_projections(
-            session, workspace_id, today + timedelta(days=1), end + timedelta(days=1), account_ids,
-            with_recurring_id=True,
-        )
-        ids = {p["recurring_transaction_id"] for p in recurring_projections}
-        if ids:
-            recurring_by_id = {
-                r.id: r
-                for r in (
-                    await session.execute(
-                        select(RecurringTransaction).where(RecurringTransaction.id.in_(ids))
-                    )
-                ).scalars()
-            }
+    recurring_projections: list[dict] = await _get_recurring_projections(
+        session, workspace_id, today + timedelta(days=1), end + timedelta(days=1), account_ids,
+        with_recurring_id=True,
+    )
+    ids = {p["recurring_transaction_id"] for p in recurring_projections}
+    if ids:
+        recurring_by_id = {
+            r.id: r
+            for r in (
+                await session.execute(
+                    select(RecurringTransaction).where(RecurringTransaction.id.in_(ids))
+                )
+            ).scalars()
+        }
 
     # Fork (owner 2026-10-14): as much history as the forecast looks ahead,
     # same accounts. Its last point is today, at the projection's start.
@@ -1032,4 +1029,28 @@ async def compute_forecast(
         scenarios=series,
         spending_estimates=[SpendingEstimate(**e) for e in estimates],
         loans=loan_forecasts,
+        recurring_payments=_recurring_payments(recurring_projections, recurring_by_id),
     )
+
+
+def _recurring_payments(
+    projections: list[dict], by_id: dict[uuid.UUID, RecurringTransaction],
+) -> list[ForecastRecurringPayment]:
+    """One row per schedule and date (a schedule split into legs is one
+    payment), in date order."""
+    totals: dict[tuple[uuid.UUID, date, str, str], float] = {}
+    for p in projections:
+        rec_id = p.get("recurring_transaction_id")
+        if rec_id is None or rec_id not in by_id:
+            continue
+        key = (rec_id, p["date"], p["type"], p["currency"])
+        totals[key] = totals.get(key, 0.0) + float(p["amount"])
+    rows = [
+        ForecastRecurringPayment(
+            recurring_transaction_id=rec_id, date=d, description=by_id[rec_id].description,
+            amount=round(abs(amount), 2), type=type_, currency=currency, account_id=by_id[rec_id].account_id,
+        )
+        for (rec_id, d, type_, currency), amount in totals.items()
+    ]
+    rows.sort(key=lambda r: (r.date, r.description))
+    return rows

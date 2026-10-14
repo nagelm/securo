@@ -175,6 +175,19 @@ class LoanForecast(BaseModel):
     scenarios: list[LoanScenarioLine] = []
 
 
+class ForecastRecurringPayment(BaseModel):
+    """Fork: one dated payment of a recurring schedule inside the forecast,
+    the same rows the base line counts (owner 2026-10-15: listed with the
+    expected payments)."""
+    recurring_transaction_id: uuid.UUID
+    date: _Date
+    description: str
+    amount: float
+    type: str
+    currency: str
+    account_id: Optional[uuid.UUID] = None
+
+
 class ForecastResponse(BaseModel):
     currency: str
     interval: str
@@ -190,3 +203,4 @@ class ForecastResponse(BaseModel):
     scenarios: list[ForecastScenarioSeries]
     spending_estimates: list[SpendingEstimate]
     loans: list[LoanForecast] = []
+    recurring_payments: list[ForecastRecurringPayment] = []
