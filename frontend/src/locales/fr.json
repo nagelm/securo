@@ -1566,9 +1566,7 @@
     "confirmDeleteDescription": "La définition récurrente « {{description}} » sera définitivement supprimée. Les transactions existantes resteront, mais perdront leur lien récurrent. Cette action est irréversible."
   },
   "forecast": {
-    "tabForecast": "Forecast",
-    "tabRecurring": "Recurring",
-    "section": "Planning",
+    "section": "Analysis",
     "title": "Forecast",
     "base": "Forecast",
     "actual": "Actual",

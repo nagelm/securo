@@ -1624,9 +1624,7 @@
     "confirmDeleteDescription": "Definicja transakcji cyklicznej „{{description}}” zostanie trwale usunięta. Istniejące transakcje pozostaną, ale utracą powiązanie z transakcją cykliczną. Tej operacji nie można cofnąć."
   },
   "forecast": {
-    "tabForecast": "Forecast",
-    "tabRecurring": "Recurring",
-    "section": "Planning",
+    "section": "Analysis",
     "title": "Forecast",
     "base": "Forecast",
     "actual": "Actual",

@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
-import { RecurringTab } from '@/pages/recurring'
+import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -133,7 +132,7 @@ function invalidateForecast(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: ['reports'] })
 }
 
-function ForecastView({ tabBar }: { tabBar: React.ReactNode }) {
+function ForecastView() {
   const { t } = useTranslation()
   const locale = useDisplayLocale()
   const dateLocale = useDateLocale()
@@ -261,7 +260,6 @@ function ForecastView({ tabBar }: { tabBar: React.ReactNode }) {
           </div>
         }
       />
-      {tabBar}
 
       {isError && (
         <div className="flex items-center justify-between gap-3 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 rounded-lg px-4 py-2.5 mb-5">
@@ -723,7 +721,6 @@ function LoanRow({ loan }: { loan: LoanForecast }) {
 
 function RecurringLine() {
   const { t } = useTranslation()
-  const [, setSearchParams] = useSearchParams()
   const { data: recurringList } = useQuery({ queryKey: ['recurring'], queryFn: recurringApi.list })
   const count = (recurringList ?? []).filter((r) => r.is_active).length
 
@@ -731,13 +728,9 @@ function RecurringLine() {
     <p className="text-xs text-muted-foreground mb-5 px-1" data-testid="recurring-line">
       {t('forecast.recurringLine', { count })}
       {' · '}
-      <button
-        type="button"
-        onClick={() => setSearchParams({ tab: 'recurring' }, { replace: true })}
-        className="font-semibold text-primary hover:underline"
-      >
+      <Link to="/recurring" className="font-semibold text-primary hover:underline">
         {t('forecast.manageRecurring')}
-      </button>
+      </Link>
     </p>
   )
 }
@@ -1741,44 +1734,7 @@ function ChangeForm({
   )
 }
 
-const FORECAST_TABS = [
-  { key: 'forecast', labelKey: 'forecast.tabForecast' },
-  { key: 'recurring', labelKey: 'forecast.tabRecurring' },
-] as const
-
-/**
- * Fork: Forecast is the parent page; Recurring (genuinely repeating payments,
- * which feed every forecast) is its second tab. /recurring redirects here.
- */
+/** Fork: the Forecast page (Analysis). Recurring has its own page in Setup. */
 export default function ForecastPage() {
-  const { t } = useTranslation()
-  const [searchParams, setSearchParams] = useSearchParams()
-  const tab = searchParams.get('tab') === 'recurring' ? 'recurring' : 'forecast'
-  const tabBar = (
-    <div className="flex items-center gap-1 mb-5 border-b border-border">
-      {FORECAST_TABS.map((item) => (
-        <button
-          key={item.key}
-          type="button"
-          onClick={() => setSearchParams(item.key === 'forecast' ? {} : { tab: item.key }, { replace: true })}
-          className={`relative px-4 py-2.5 text-sm font-medium transition-colors ${
-            tab === item.key ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          {t(item.labelKey)}
-          {tab === item.key && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />}
-        </button>
-      ))}
-    </div>
-  )
-  if (tab === 'recurring') {
-    return (
-      <div>
-        <PageHeader section={t('forecast.section')} title={t('forecast.title')} />
-        {tabBar}
-        <RecurringTab />
-      </div>
-    )
-  }
-  return <ForecastView tabBar={tabBar} />
+  return <ForecastView />
 }

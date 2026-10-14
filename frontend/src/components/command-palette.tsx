@@ -64,7 +64,7 @@ const NAV_ITEMS: StaticItem[] = [
   { id: 'nav-assets', labelKey: 'nav.assets', icon: Landmark, path: '/assets', keywords: ['patrimonio', 'patrimônio'], module: 'assets' },
   { id: 'nav-budgets', labelKey: 'nav.budgets', icon: PiggyBank, path: '/budgets', keywords: ['orcamentos', 'orçamentos'], module: 'budgets' },
   { id: 'nav-goals', labelKey: 'nav.goals', icon: Target, path: '/goals', keywords: ['metas'], module: 'goals' },
-  { id: 'nav-recurring', labelKey: 'nav.recurring', icon: Repeat, path: '/forecast?tab=recurring', keywords: ['recorrentes'], module: 'recurring' },
+  { id: 'nav-recurring', labelKey: 'nav.recurring', icon: Repeat, path: '/recurring', keywords: ['recorrentes'], module: 'recurring' },
   { id: 'nav-forecast', labelKey: 'nav.forecast', icon: LineChart, path: '/forecast', keywords: ['scenarios', 'projection', 'what if'], module: 'recurring' },
   { id: 'nav-categories', labelKey: 'nav.categories', icon: Tag, path: '/categories', keywords: ['categorias'], module: 'categories' },
   { id: 'nav-payees', labelKey: 'nav.payees', icon: Users, path: '/payees', keywords: ['beneficiarios', 'beneficiários'], module: 'payees' },

@@ -1566,9 +1566,7 @@
     "confirmDeleteDescription": "La definizione ricorrente \"{{description}}\" verrà eliminata definitivamente. Le transazioni esistenti rimarranno, ma perderanno il collegamento ricorrente. Questa azione non può essere annullata."
   },
   "forecast": {
-    "tabForecast": "Forecast",
-    "tabRecurring": "Recurring",
-    "section": "Planning",
+    "section": "Analysis",
     "title": "Forecast",
     "base": "Forecast",
     "actual": "Actual",

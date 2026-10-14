@@ -6,6 +6,7 @@ import {
   LineChart,
   PiggyBank,
   Receipt,
+  Repeat,
   SlidersHorizontal,
   Split,
   Tag,
@@ -42,11 +43,13 @@ export const navItems: NavItem[] = [
   { type: 'separator', labelKey: 'nav.groupAnalysis' },
   { type: 'link', key: 'reports', path: '/reports', icon: BarChart3, module: 'reports' },
   { type: 'link', key: 'assets', path: '/assets', icon: Landmark, module: 'assets' },
+  // Fork (owner 2026-10-14): Forecast is analysis; it reads the recurring
+  // module's schedules, so it shares that module with the Recurring link.
+  { type: 'link', key: 'forecast', path: '/forecast', icon: LineChart, module: 'recurring' },
   { type: 'separator', labelKey: 'nav.groupSetup' },
   { type: 'link', key: 'budgets', path: '/budgets', icon: PiggyBank, module: 'budgets' },
   { type: 'link', key: 'goals', path: '/goals', icon: Target, module: 'goals' },
-  // Fork: Forecast is the page for the recurring module; Recurring is a tab in it.
-  { type: 'link', key: 'forecast', path: '/forecast', icon: LineChart, module: 'recurring' },
+  { type: 'link', key: 'recurring', path: '/recurring', icon: Repeat, module: 'recurring' },
   { type: 'link', key: 'categories', path: '/categories', icon: Tag, module: 'categories' },
   { type: 'link', key: 'payees', path: '/payees', icon: Users, module: 'payees' },
   { type: 'link', key: 'splitGroups', path: '/groups', icon: Split, module: 'split_groups' },

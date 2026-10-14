@@ -231,17 +231,14 @@ describe('Forecast page: loans', () => {
 })
 
 describe('Forecast page: recurring', () => {
-  it('shows one line counting the active recurring payments, and Manage opens the Recurring tab', async () => {
-    const { user } = renderWithProviders(<ForecastPage />)
+  it('shows one line counting the active recurring payments, and Manage links to the Recurring page', async () => {
+    renderWithProviders(<ForecastPage />)
 
     const line = await screen.findByTestId('recurring-line')
     await waitFor(() => expect(line).toHaveTextContent('2 recurring payments feed this forecast'))
     expect(screen.queryByText('Salary')).not.toBeInTheDocument()
 
-    await user.click(within(line).getByRole('button', { name: t('forecast.manageRecurring') }))
-
-    expect(await screen.findByTestId('recurring-tab')).toBeInTheDocument()
-    expect(screen.queryByTestId('recurring-line')).not.toBeInTheDocument()
+    expect(within(line).getByRole('link', { name: t('forecast.manageRecurring') })).toHaveAttribute('href', '/recurring')
   })
 })
 

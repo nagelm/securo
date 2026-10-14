@@ -27,6 +27,7 @@ const CategoriesPage = lazy(() => import('@/pages/categories'))
 const CollectionsPage = lazy(() => import('@/pages/collections'))
 const BudgetsPage = lazy(() => import('@/pages/budgets'))
 const ForecastPage = lazy(() => import('@/pages/forecast'))
+const RecurringPage = lazy(() => import('@/pages/recurring'))
 const GoalsPage = lazy(() => import('@/pages/goals'))
 const AssetsPage = lazy(() => import('@/pages/assets'))
 const ReportsPage = lazy(() => import('@/pages/reports'))
@@ -107,7 +108,7 @@ function App() {
                   <Route path="/budgets" element={<ModuleRoute module="budgets"><BudgetsPage /></ModuleRoute>} />
                   <Route path="/goals" element={<ModuleRoute module="goals"><GoalsPage /></ModuleRoute>} />
                   {/* Fork: Recurring is a tab of the Forecast page; old links land there. */}
-                  <Route path="/recurring" element={<Navigate to="/forecast?tab=recurring" replace />} />
+                  <Route path="/recurring" element={<ModuleRoute module="recurring"><RecurringPage /></ModuleRoute>} />
                   <Route path="/forecast" element={<ModuleRoute module="recurring"><ForecastPage /></ModuleRoute>} />
                   <Route path="/assets" element={<ModuleRoute module="assets"><AssetsPage /></ModuleRoute>} />
                   {/* Kept so links minted before the importers were merged keep working. */}

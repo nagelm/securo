@@ -39,13 +39,15 @@ describe('nav catalog', () => {
   })
 
   it('has a link for every module in the catalog', () => {
-    const covered = navItems.filter((i) => i.type === 'link').map((i) => i.module)
+    const covered = new Set(navItems.filter((i) => i.type === 'link').map((i) => i.module))
     expect([...covered].sort()).toEqual([...MODULE_IDS].sort())
   })
 
-  it('gives every link a distinct module', () => {
-    const covered = navItems.filter((i) => i.type === 'link').map((i) => i.module)
+  it("gives every link a distinct module, except Forecast sharing Recurring's", () => {
+    const links = navItems.filter((i) => i.type === 'link')
+    const covered = links.filter((i) => i.key !== 'forecast').map((i) => i.module)
     expect(new Set(covered).size).toBe(covered.length)
+    expect(links.find((i) => i.key === 'forecast')?.module).toBe('recurring')
   })
 })
 
@@ -58,10 +60,11 @@ describe('visibleNavItems', () => {
       'import',
       'reports',
       'assets',
+      // Fork: Forecast sits in Analysis; Recurring is its own page in Setup.
+      'forecast',
       'budgets',
       'goals',
-      // Fork: the recurring module's link is Forecast (Recurring is a tab in it).
-      'forecast',
+      'recurring',
       'categories',
       'payees',
       'splitGroups',

@@ -1564,9 +1564,7 @@
     "confirmDeleteDescription": "De terugkerende definitie \"{{description}}\" wordt permanent verwijderd. Bestaande transacties blijven bestaan, maar verliezen hun koppeling met de terugkerende transactie. Deze actie kan niet ongedaan worden gemaakt."
   },
   "forecast": {
-    "tabForecast": "Forecast",
-    "tabRecurring": "Recurring",
-    "section": "Planning",
+    "section": "Analysis",
     "title": "Forecast",
     "base": "Forecast",
     "actual": "Actual",

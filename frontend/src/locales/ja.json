@@ -1562,9 +1562,7 @@
     "confirmDeleteDescription": "定期取引の定義「{{description}}」を完全に削除します。既存の取引は残りますが、定期の紐付けが失われます。この操作は取り消せません。"
   },
   "forecast": {
-    "tabForecast": "Forecast",
-    "tabRecurring": "Recurring",
-    "section": "Planning",
+    "section": "Analysis",
     "title": "Forecast",
     "base": "Forecast",
     "actual": "Actual",
