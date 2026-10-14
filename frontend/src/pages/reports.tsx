@@ -167,7 +167,8 @@ const REPORT_TABS: ReportTab[] = [
   {
     key: 'income_expenses', labelKey: 'reports.incomeExpenses', enabled: true,
     rangeOptions: HISTORICAL_RANGE_OPTIONS, intervalOptions: HISTORICAL_INTERVAL_OPTIONS,
-    supportsCustomRange: true, fallbackRangeKey: '1y', fallbackInterval: 'monthly',
+    // Fork (owner 2026-10-15): income vs expenses opens on two years, monthly.
+    supportsCustomRange: true, fallbackRangeKey: '2y', fallbackInterval: 'monthly',
   },
   {
     key: 'cash_flow', labelKey: 'reports.cashFlow', enabled: true,
@@ -268,16 +269,16 @@ export default function ReportsPage() {
     setCompositionView(key === 'net_worth' ? 'netWorth' : 'net')
     setSparklinePage(0)
     setSelectedDate(null)
-    // Clamp the range/interval preset to what the new tab supports.
-    const stillValid =
-      (rangeKey === CUSTOM_RANGE_KEY && nextTab.supportsCustomRange) ||
-      nextTab.rangeOptions.some((r) => r.key === rangeKey)
-    if (!stillValid) {
-      setRangeKey(nextTab.fallbackRangeKey)
+    // Fork (owner 2026-10-15): each tab opens on its own default range and
+    // interval; a custom date range carries over to tabs that support one.
+    if (rangeKey === CUSTOM_RANGE_KEY && nextTab.supportsCustomRange) {
+      if (!nextTab.intervalOptions.some((i) => i.value === interval)) {
+        setInterval(nextTab.fallbackInterval)
+      }
+      return
     }
-    if (!nextTab.intervalOptions.some((i) => i.value === interval)) {
-      setInterval(nextTab.fallbackInterval)
-    }
+    setRangeKey(nextTab.fallbackRangeKey)
+    setInterval(nextTab.fallbackInterval)
   }
 
   const { data, isLoading, isError, error, refetch } = useQuery<ReportResponse>({

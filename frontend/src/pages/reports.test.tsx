@@ -134,7 +134,7 @@ it.each(['Cancel', 'Escape', 'outside'] as const)(
 
 it.each([
   ['reports.netWorth', 'reports.range10y', 120],
-  ['reports.incomeExpenses', 'reports.range1y', 12],
+  ['reports.incomeExpenses', 'reports.range2y', 24],
   ['reports.moneyMap', 'reports.range3m', 3],
 ] as const)('Reset then Apply restores the fallback for %s', async (tab, fallback, months) => {
   const { user } = renderWithProviders(<ReportsPage />)
@@ -271,6 +271,19 @@ describe('Reports page — interval limits on long ranges', () => {
     expect(daily()).toBeEnabled()
     await waitFor(() => expect(api.reports.netWorth.mock.calls.at(-1)![1]).toBe('daily'))
   })
+})
+
+it('each tab opens on its own default range, monthly (fork)', async () => {
+  const { user } = renderWithProviders(<ReportsPage />)
+  await waitFor(() => expect(api.reports.netWorth).toHaveBeenCalled())
+  expect(screen.getByRole('button', { name: t('reports.range10y') })).toHaveClass('bg-primary')
+
+  await user.click(screen.getByRole('button', { name: t('reports.incomeExpenses') }))
+  await waitFor(() => expect(api.reports.incomeExpenses.mock.calls.at(-1)?.slice(0, 2)).toEqual([24, 'monthly']))
+  expect(screen.getByRole('button', { name: t('reports.range2y') })).toHaveClass('bg-primary')
+
+  await user.click(screen.getByRole('button', { name: t('reports.netWorth') }))
+  await waitFor(() => expect(api.reports.netWorth.mock.calls.at(-1)?.slice(0, 2)).toEqual([120, 'monthly']))
 })
 
 describe('Reports page — Category Trends detail (fork)', () => {
