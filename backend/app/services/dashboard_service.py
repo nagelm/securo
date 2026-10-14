@@ -80,6 +80,7 @@ async def _get_recurring_projections(
     *,
     include_transfer_like: bool = False,
     with_recurring_id: bool = False,
+    external_transfers: bool = False,
 ) -> list[dict]:
     """Compute virtual recurring transaction projections for a month.
     Pure read — no DB writes. Returns list of dicts with category_id, amount, type, currency.
@@ -100,7 +101,12 @@ async def _get_recurring_projections(
     accounts in scope it nets to minus the interest, as net worth does.
 
     Fork: ``with_recurring_id`` adds each row's ``recurring_transaction_id``,
-    so a forecast scenario can change one schedule's rows."""
+    so a forecast scenario can change one schedule's rows.
+
+    Fork: ``external_transfers`` (with ``account_ids``) keeps a transfer's leg
+    on an account in scope when its other side is outside the scope, e.g. a
+    loan repayment leaving checking while loans are left out of cash flow:
+    that money really leaves the accounts in scope."""
     if account_ids is not None and len(account_ids) == 0:
         return []
     filters = [
@@ -112,7 +118,8 @@ async def _get_recurring_projections(
             Category.is_ignored.is_not(True),
         ),
     ]
-    if not include_transfer_like:
+    keep_external = external_transfers and bool(account_ids) and not include_transfer_like
+    if not include_transfer_like and not keep_external:
         filters.append(or_(
             RecurringTransaction.category_id.is_(None),
             Category.treat_as_transfer.is_not(True),
@@ -131,6 +138,21 @@ async def _get_recurring_projections(
         )
     result = await session.execute(stmt)
     recurring_list = list(result.scalars().all())
+    transfer_like_ids: set[uuid.UUID] = set()
+    if keep_external:
+        transfer_cats = set(
+            (
+                await session.execute(
+                    select(Category.id).where(
+                        Category.id.in_([r.category_id for r in recurring_list if r.category_id]),
+                        Category.treat_as_transfer.is_(True),
+                    )
+                )
+            ).scalars()
+        )
+        transfer_like_ids = {
+            r.id for r in recurring_list if r.kind != LOAN_PAYMENT and r.category_id in transfer_cats
+        }
     excluded_interest = await _excluded_interest_categories(
         session, recurring_list, include_transfer_like=include_transfer_like
     )
@@ -167,7 +189,12 @@ async def _get_recurring_projections(
                 for leg in recurring_loan_legs(rec):
                     if account_ids is not None and leg.account_id not in account_ids:
                         continue
-                    if leg.is_transfer and not include_transfer_like:
+                    leaves_scope = keep_external and (
+                        rec.transfer_account_id not in account_ids
+                        if leg.account_id == rec.account_id
+                        else rec.account_id not in account_ids
+                    )
+                    if leg.is_transfer and not include_transfer_like and not leaves_scope:
                         continue
                     if not leg.is_transfer and leg.category_id in excluded_interest:
                         continue
@@ -179,6 +206,12 @@ async def _get_recurring_projections(
                         "date": occ_date,
                         **({"recurring_transaction_id": rec.id} if with_recurring_id else {}),
                     })
+                continue
+            if keep_external and rec.id in transfer_like_ids and not (
+                rec.account_id in account_ids
+                and rec.transfer_account_id is not None
+                and rec.transfer_account_id not in account_ids
+            ):
                 continue
             projections.append({
                 "category_id": rec.category_id,

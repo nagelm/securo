@@ -1579,6 +1579,8 @@
     "confirmDeleteDescription": "Визначення регулярної транзакції «{{description}}» буде видалено назавжди. Наявні транзакції залишаться, але втратять зв’язок із регулярною транзакцією. Цю дію не можна скасувати."
   },
   "forecast": {
+    "tabForecast": "Forecast",
+    "tabRecurring": "Recurring",
     "section": "Planning",
     "title": "Forecast",
     "base": "Forecast",

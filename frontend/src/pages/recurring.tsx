@@ -67,7 +67,7 @@ export default function RecurringPage() {
   )
 }
 
-function RecurringTab() {
+export function RecurringTab() {
   const { t } = useTranslation()
   const locale = useDisplayLocale()
   const dateLocale = useDateLocale()

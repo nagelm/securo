@@ -442,8 +442,10 @@ async def test_matched_payment_drops_out_of_the_forecast(session, test_user, tes
 
     result = await _forecast(session, test_user, test_workspace)
 
+    # Owner 2026-10-14: viewing never writes; the match is saved by sync/import.
     await session.refresh(item)
-    assert item.matched_transaction_id == real.id
+    assert item.matched_transaction_id is None
+    assert real.id is not None
     assert result.starting_balance == pytest.approx(802)
     assert result.summary.end_balance == pytest.approx(802)
 
@@ -598,3 +600,18 @@ async def test_api_viewer_can_read_but_not_write(client, viewer_auth_headers):
     resp = await client.post("/api/forecast/scenarios", json={"name": "S", "color": "#000000"},
                              headers=viewer_auth_headers)
     assert resp.status_code == 403
+
+
+
+async def test_creating_a_payment_whose_bank_row_has_landed_matches_it(session, test_user, test_workspace):
+    from app.schemas.forecast import ForecastItemCreate
+
+    today = app_today()
+    account = await _account(session, test_user.id)
+    real = await _tx(session, test_user.id, account.id, 200, "debit", today - timedelta(days=1))
+    item = await forecast_service.create_item(
+        session, test_workspace.id, test_user.id,
+        ForecastItemCreate(kind="one_off", amount=Decimal("200"), type="debit",
+                           date=today, account_id=account.id, description="Rates"),
+    )
+    assert item.matched_transaction_id == real.id

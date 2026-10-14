@@ -1597,6 +1597,21 @@ async def get_cash_flow_report(
 
     flow_date_col = Transaction.effective_date if accrual else Transaction.date
 
+    # Fork: with loans and investments out of scope, a paired transfer into
+    # one of them (a loan repayment, a fund deposit) is money leaving cash, so
+    # its leg on a cash account counts as an outflow (an inflow coming back).
+    flow_partner = aliased(Transaction)
+    leaves_cash = and_(
+        Transaction.transfer_pair_id.is_not(None),
+        Transaction.is_ignored.is_(False),
+        exists().where(
+            flow_partner.transfer_pair_id == Transaction.transfer_pair_id,
+            flow_partner.id != Transaction.id,
+            flow_partner.account_id.not_in(account_ids),
+        ),
+    ) if account_ids else None
+    counts_in_cash_flow = or_(counts_as_pnl(), leaves_cash) if leaves_cash is not None else counts_as_pnl()
+
     # 1a. Past actual transactions (chart_start, today]. Gives the chart a
     #     "real" section before the forecast so the today-marker has meaning.
     past_result = await session.execute(
@@ -1615,7 +1630,7 @@ async def get_cash_flow_report(
             flow_date_col <= today,
             Transaction.source != "opening_balance",
             Transaction.status == "posted",
-            counts_as_pnl(),
+            counts_in_cash_flow,
             *acct_filter,
         )
     )
@@ -1645,7 +1660,7 @@ async def get_cash_flow_report(
             flow_date_col <= end,
             Transaction.source != "opening_balance",
             Transaction.status == "posted",
-            counts_as_pnl(),
+            counts_in_cash_flow,
             *acct_filter,
         )
     )
@@ -1729,7 +1744,7 @@ async def get_cash_flow_report(
     else:
         projections = await _get_recurring_projections(
             session, workspace_id, today + timedelta(days=1), end + timedelta(days=1),
-            account_ids,
+            account_ids, external_transfers=True,
         )
     # Fork: expected payments feed every forecast; the extras only when given.
     projections = [

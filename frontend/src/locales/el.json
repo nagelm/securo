@@ -1562,6 +1562,8 @@
     "confirmDeleteDescription": "Ο ορισμός της επαναλαμβανόμενης συναλλαγής \"{{description}}\" θα διαγραφεί οριστικά. Οι υπάρχουσες συναλλαγές θα παραμείνουν αλλά θα χάσουν τη σύνδεσή τους. Αυτή η ενέργεια δεν μπορεί να αναιρεθεί."
   },
   "forecast": {
+    "tabForecast": "Forecast",
+    "tabRecurring": "Recurring",
     "section": "Planning",
     "title": "Forecast",
     "base": "Forecast",

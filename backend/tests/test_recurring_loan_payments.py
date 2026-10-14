@@ -133,8 +133,11 @@ async def test_cash_flow_projection_shows_interest_only(session, book, sqlite_to
     await _schedule(session, book, start_date=app_today() + timedelta(days=1))
     outflow_after, cat_after = await outflow_after_today()
 
-    assert outflow_after - outflow_before == pytest.approx(float(INTEREST))
-    assert cat_after - cat_before == pytest.approx(float(INTEREST))
+    # Fork (owner 2026-10-14): cash flow leaves loan accounts out, so the whole
+    # repayment leaves cash and the interest row, which sits on the loan, isn't
+    # in the cash-flow composition. P&L still sees only the interest (below).
+    assert outflow_after - outflow_before == pytest.approx(float(TOTAL))
+    assert cat_after - cat_before == pytest.approx(0.0)
 
 
 @pytest.mark.asyncio

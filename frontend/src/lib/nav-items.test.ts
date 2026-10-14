@@ -39,18 +39,12 @@ describe('nav catalog', () => {
   })
 
   it('has a link for every module in the catalog', () => {
-    const covered = navItems
-      .filter((i) => i.type === 'link' && i.key !== 'forecast')
-      .map((i) => (i.type === 'link' ? i.module : null))
+    const covered = navItems.filter((i) => i.type === 'link').map((i) => i.module)
     expect([...covered].sort()).toEqual([...MODULE_IDS].sort())
   })
 
   it('gives every link a distinct module', () => {
-    // Fork: Forecast is the one link that shares a module (recurring, whose
-    // payments it reads), so it is shown and hidden together with Recurring.
-    const covered = navItems
-      .filter((i) => i.type === 'link' && i.key !== 'forecast')
-      .map((i) => (i.type === 'link' ? i.module : null))
+    const covered = navItems.filter((i) => i.type === 'link').map((i) => i.module)
     expect(new Set(covered).size).toBe(covered.length)
   })
 })
@@ -66,7 +60,7 @@ describe('visibleNavItems', () => {
       'assets',
       'budgets',
       'goals',
-      'recurring',
+      // Fork: the recurring module's link is Forecast (Recurring is a tab in it).
       'forecast',
       'categories',
       'payees',

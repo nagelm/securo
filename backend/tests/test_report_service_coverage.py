@@ -801,6 +801,9 @@ async def test_custom_income_expenses_only_include_in_range_actuals(
     currency = test_user.primary_currency
     account = await _make_account(session, test_user.id, 'Custom actuals', currency=currency)
     category = await _make_category(session, test_user.id, 'Actual category')
+    # Fork: spending gets its own category, since a credit and a debit in one
+    # category now net (a refund) in the composition.
+    spending = await _make_category(session, test_user.id, 'Actual spending')
     for amount, kind, day, status in [
         (100, 'credit', start, 'posted'),
         (-30, 'debit', end, 'posted'),
@@ -809,8 +812,8 @@ async def test_custom_income_expenses_only_include_in_range_actuals(
         (900, 'credit', start, 'pending'),
         (-800, 'debit', end, 'pending'),
     ]:
-        await _add_txn(session, test_user.id, account.id, amount, kind, day,
-                       status=status, category_id=category.id, currency=currency)
+        await _add_txn(session, test_user.id, account.id, amount, kind, day, status=status,
+                       category_id=(category if kind == 'credit' else spending).id, currency=currency)
     recurring = await _make_recurring(
         session, test_user.id, account.id, 600, 'credit',
         next_occurrence=start, category_id=category.id, currency=currency,

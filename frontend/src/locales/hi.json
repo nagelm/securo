@@ -1562,6 +1562,8 @@
     "confirmDeleteDescription": "आवर्ती परिभाषा \"{{description}}\" स्थायी रूप से हट जाएगी। मौजूदा लेन-देन बने रहेंगे लेकिन उनका आवर्ती लिंक खो जाएगा। यह कार्रवाई पूर्ववत नहीं की जा सकती।"
   },
   "forecast": {
+    "tabForecast": "Forecast",
+    "tabRecurring": "Recurring",
     "section": "Planning",
     "title": "Forecast",
     "base": "Forecast",

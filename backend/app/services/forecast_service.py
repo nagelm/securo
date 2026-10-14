@@ -76,11 +76,34 @@ async def match_expected_payments(
     With ``transactions`` (the rows a sync or import just stored) only those
     are candidates; without, the workspace's rows around each payment are.
     One bank row settles at most one expected payment; the closest date
-    wins, then the closest amount. Flushes, never commits.
+    wins, then the closest amount. Flushes, never commits. Called by sync
+    and import only; reads use ``pending_expected_matches``.
     """
+    found = await _find_expected_matches(session, workspace_id, transactions)
+    for item, tx_id in found:
+        item.matched_transaction_id = tx_id
+    if found:
+        await session.flush()
+    return len(found)
+
+
+async def pending_expected_matches(
+    session: AsyncSession, workspace_id: uuid.UUID
+) -> set[uuid.UUID]:
+    """Ids of expected payments whose bank row has arrived but isn't saved as
+    a match yet. Read-only: a forecast or report leaves them out without
+    writing, so viewing never changes data (a viewer can't write anyway)."""
+    return {item.id for item, _ in await _find_expected_matches(session, workspace_id, None)}
+
+
+async def _find_expected_matches(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    transactions: Optional[Iterable[Transaction]],
+) -> list[tuple[ForecastItem, uuid.UUID]]:
     candidates = list(transactions) if transactions is not None else None
     if candidates is not None and not candidates:
-        return 0
+        return []
     items = list(
         (
             await session.execute(
@@ -98,7 +121,7 @@ async def match_expected_payments(
         ).scalars()
     )
     if not items:
-        return 0
+        return []
     taken = set(
         (
             await session.execute(
@@ -110,7 +133,7 @@ async def match_expected_payments(
         ).scalars()
     )
     today = app_today()
-    matched = 0
+    found: list[tuple[ForecastItem, uuid.UUID]] = []
     for item in items:
         if candidates is not None:
             pool = candidates
@@ -134,12 +157,9 @@ async def match_expected_payments(
             fits,
             key=lambda tx: (abs((tx.date - item.date).days), abs(abs(Decimal(tx.amount)) - expected)),
         )
-        item.matched_transaction_id = best.id
+        found.append((item, best.id))
         taken.add(best.id)
-        matched += 1
-    if matched:
-        await session.flush()
-    return matched
+    return found
 
 
 async def expected_payment_projections(
@@ -158,7 +178,7 @@ async def expected_payment_projections(
     investment, or outside a Collection filter) is left out; one with no
     account counts unless the report is narrowed to particular accounts.
     """
-    await match_expected_payments(session, workspace_id)
+    arrived = await pending_expected_matches(session, workspace_id)
     stmt = select(ForecastItem).where(
         ForecastItem.workspace_id == workspace_id,
         ForecastItem.scenario_id.is_(None),
@@ -186,6 +206,7 @@ async def expected_payment_projections(
             "category_id": item.category_id,
         }
         for item in (await session.execute(stmt)).scalars()
+        if item.id not in arrived
     ]
 
 
@@ -395,6 +416,10 @@ async def create_item(
         values["currency"] = account.currency if account else await _primary_currency(session, user_id)
     item = ForecastItem(user_id=user_id, workspace_id=workspace_id, **values)
     session.add(item)
+    await session.flush()
+    # A payment whose bank row has already landed is matched at once.
+    if item.scenario_id is None:
+        await match_expected_payments(session, workspace_id)
     await session.commit()
     await session.refresh(item)
     return item
@@ -424,6 +449,8 @@ async def update_item(
     # An edited payment is a new promise; let the matcher look again.
     if item.scenario_id is None and {"amount", "date", "account_id", "type", "currency"} & changes.keys():
         item.matched_transaction_id = None
+        await session.flush()
+        await match_expected_payments(session, workspace_id)
     await session.commit()
     await session.refresh(item)
     return item
@@ -581,9 +608,6 @@ async def compute_forecast(
         cash_flow_account_ids,
         get_cash_flow_report,
     )
-
-    if await match_expected_payments(session, workspace_id):
-        await session.commit()
 
     today = app_today()
     end = _add_months(today, months)

@@ -271,7 +271,8 @@ PROBES: dict[str, Probe] = {
     "dashboard_projected": _dashboard_projected,
     "report_income_expenses": _report_income_expenses,
     "report_category_trend": _report_category_trend,
-    "report_cash_flow": _report_cash_flow,
+    # Fork (owner 2026-10-14): cash flow is cash, not P&L. With loans left out
+    # of it, the whole repayment leaves cash; see the test below.
     "budget_actual": _budget_actual,
     "budget_projected": _budget_projected,
     "transactions_summary": _transactions_summary,
@@ -842,3 +843,14 @@ def test_aggregation_modules_never_read_loan_payments():
                 names.add(node.value)
         hits = {forbidden for forbidden in _FORBIDDEN for name in names if forbidden in name}
         assert not hits, f"{path.name} references {sorted(hits)}"
+
+
+@pytest.mark.asyncio
+async def test_cash_flow_shows_the_whole_repayment_leaving_cash(session, book, sqlite_to_char):  # noqa: F811
+    """Fork: cash flow leaves loan accounts out, so a repayment is the total
+    leaving checking (principal and interest), not just the interest."""
+    _, outflow_before, _ = await _report_cash_flow(session, book)
+    await _pay(session, book)
+    inflow_after, outflow_after, _ = await _report_cash_flow(session, book)
+    assert outflow_after - outflow_before == pytest.approx(float(TOTAL))
+    assert inflow_after == pytest.approx(0.0)
