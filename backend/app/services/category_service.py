@@ -2,11 +2,12 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
-from sqlalchemy import func, or_, select, update as sa_update
+from sqlalchemy import delete as sa_delete, func, or_, select, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.budget import Budget
+from app.models.budget_group import BudgetGroupCategory
 from app.models.category import Category
 from app.models.category_group import CategoryGroup
 from app.models.recurring_transaction import RecurringTransaction
@@ -478,7 +479,26 @@ async def _transfer_category_references(
         .values(interest_category_id=destination_id)
     )
     await _merge_budgets(session, workspace_id, category_id, destination_id)
+    await _move_budget_group_membership(session, category_id, destination_id)
     await _repoint_rules(session, workspace_id, category_id, destination_id)
+
+
+async def _move_budget_group_membership(
+    session: AsyncSession, category_id: uuid.UUID, destination_id: uuid.UUID
+) -> None:
+    """Fork: the destination joins the deleted category's budget group,
+    unless it is in a group already (a category is in one group only)."""
+    in_group = (
+        await session.execute(
+            select(BudgetGroupCategory.group_id).where(BudgetGroupCategory.category_id == destination_id)
+        )
+    ).first()
+    if in_group is None:
+        await session.execute(
+            sa_update(BudgetGroupCategory)
+            .where(BudgetGroupCategory.category_id == category_id)
+            .values(category_id=destination_id)
+        )
 
 
 async def delete_category(
@@ -517,6 +537,11 @@ async def delete_category(
             )
 
     try:
+        # Fork: out of its budget group (the foreign key cascades too, but
+        # not on every test database).
+        await session.execute(
+            sa_delete(BudgetGroupCategory).where(BudgetGroupCategory.category_id == category_id)
+        )
         await session.delete(category)
         await session.commit()
     except IntegrityError as exc:

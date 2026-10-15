@@ -311,3 +311,179 @@ async def test_delete_recurring_previous_takes_effect(client, auth_headers, test
     cat_budgets2 = [b for b in list_resp2.json() if b["category_id"] == str(cat.id)]
     assert len(cat_budgets2) == 1
     assert float(cat_budgets2[0]["amount"]) == 100.0
+
+
+# ---------------------------------------------------------------------------
+# Fork: end month and budget groups. Every figure is made up.
+# ---------------------------------------------------------------------------
+
+
+async def _post_budget(client, headers, cat, amount, month, **extra):
+    resp = await client.post(
+        "/api/budgets",
+        json={"category_id": str(cat.id), "amount": amount, "month": month, **extra},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+async def _budget_for(client, headers, cat, month):
+    resp = await client.get("/api/budgets", params={"month": month}, headers=headers)
+    return [b for b in resp.json() if b["category_id"] == str(cat.id)]
+
+
+@pytest.mark.asyncio
+async def test_recurring_budget_ends_after_its_end_month(client, auth_headers, test_categories):
+    cat = test_categories[0]
+    body = await _post_budget(client, auth_headers, cat, 200, _month_str(0), is_recurring=True,
+                              end_month=_month_str(2))
+    assert body["end_month"] == _month_str(2)
+
+    assert [b["amount"] for b in await _budget_for(client, auth_headers, cat, _month_str(2))] == ["200.00"]
+    # No longer after it, and an earlier default does not come back.
+    await _post_budget(client, auth_headers, cat, 999, _month_str(-1), is_recurring=True)
+    assert await _budget_for(client, auth_headers, cat, _month_str(3)) == []
+    # A later default still takes over from its own month.
+    await _post_budget(client, auth_headers, cat, 300, _month_str(4), is_recurring=True)
+    assert await _budget_for(client, auth_headers, cat, _month_str(3)) == []
+    assert [b["amount"] for b in await _budget_for(client, auth_headers, cat, _month_str(5))] == ["300.00"]
+
+    comp = await client.get("/api/budgets/comparison", params={"month": _month_str(1)}, headers=auth_headers)
+    row = next(c for c in comp.json() if c["category_id"] == str(cat.id))
+    assert row["end_month"] == _month_str(2)
+
+
+@pytest.mark.asyncio
+async def test_end_month_validation_and_update(client, auth_headers, test_categories):
+    cat = test_categories[0]
+    for extra, message in [
+        ({"is_recurring": False, "end_month": _month_str(1)}, "Only a recurring budget has an end month"),
+        ({"is_recurring": True, "end_month": _month_str(-1)}, "End month is before the start month"),
+    ]:
+        resp = await client.post(
+            "/api/budgets",
+            json={"category_id": str(cat.id), "amount": 1, "month": _month_str(0), **extra},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400 and resp.json()["detail"] == message
+
+    body = await _post_budget(client, auth_headers, cat, 200, _month_str(0), is_recurring=True)
+    resp = await client.patch(f"/api/budgets/{body['id']}", json={"end_month": _month_str(1)}, headers=auth_headers)
+    assert resp.status_code == 200 and resp.json()["end_month"] == _month_str(1)
+    resp = await client.patch(f"/api/budgets/{body['id']}", json={"end_month": _month_str(-2)}, headers=auth_headers)
+    assert resp.status_code == 400
+    # A new amount from a later month keeps the end month; null clears it.
+    resp = await client.patch(f"/api/budgets/{body['id']}", json={"amount": 250, "effective_month": _month_str(1)},
+                              headers=auth_headers)
+    assert resp.json()["end_month"] == _month_str(1) and resp.json()["id"] != body["id"]
+    resp = await client.patch(f"/api/budgets/{body['id']}", json={"end_month": None}, headers=auth_headers)
+    assert resp.json()["end_month"] is None
+
+
+@pytest.mark.asyncio
+async def test_budget_group_crud_and_comparison(client, auth_headers, test_categories, test_transactions):
+    food, transport, _ = test_categories
+    resp = await client.post("/api/budget-groups", json={
+        "name": "Everyday", "amount": 100, "month": _month_str(0), "is_recurring": True,
+        "category_ids": [str(food.id), str(transport.id)],
+    }, headers=auth_headers)
+    assert resp.status_code == 201, resp.text
+    group = resp.json()
+    assert set(group) >= {"id", "name", "amount", "month", "is_recurring", "end_month", "category_ids"}
+    assert set(group["category_ids"]) == {str(food.id), str(transport.id)}
+
+    # Spending this month: 45.00 food + 25.50 transport.
+    comp = await client.get("/api/budget-groups/comparison", params={"month": _month_str(0)}, headers=auth_headers)
+    assert comp.status_code == 200
+    [row] = comp.json()
+    assert row["id"] == group["id"] and float(row["amount"]) == 100
+    assert float(row["actual_amount"]) == pytest.approx(70.5)
+    assert row["percentage_used"] == pytest.approx(70.5)
+    # A category's own budget still shows on its own row.
+    await _post_budget(client, auth_headers, food, 60, _month_str(0), is_recurring=True)
+    cat_rows = (await client.get("/api/budgets/comparison", params={"month": _month_str(0)},
+                                 headers=auth_headers)).json()
+    assert float(next(c for c in cat_rows if c["category_id"] == str(food.id))["budget_amount"]) == 60
+
+    resp = await client.patch(f"/api/budget-groups/{group['id']}", json={
+        "amount": 80, "category_ids": [str(transport.id)], "end_month": _month_str(1),
+    }, headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["category_ids"] == [str(transport.id)] and float(resp.json()["amount"]) == 80
+    assert (await client.get("/api/budget-groups/comparison", params={"month": _month_str(2)},
+                             headers=auth_headers)).json() == []
+    assert len((await client.get("/api/budget-groups", headers=auth_headers)).json()) == 1
+    assert len((await client.get("/api/budget-groups", params={"month": _month_str(2)},
+                                 headers=auth_headers)).json()) == 0
+
+    assert (await client.delete(f"/api/budget-groups/{group['id']}", headers=auth_headers)).status_code == 204
+    assert (await client.delete(f"/api/budget-groups/{group['id']}", headers=auth_headers)).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_category_is_in_one_budget_group_only(client, auth_headers, test_categories):
+    food, transport, _ = test_categories
+    base = {"amount": 100, "month": _month_str(0)}
+    resp = await client.post("/api/budget-groups", json={**base, "name": "A", "category_ids": [str(food.id)]},
+                             headers=auth_headers)
+    assert resp.status_code == 201
+    resp = await client.post("/api/budget-groups", json={
+        **base, "name": "B", "category_ids": [str(transport.id), str(food.id)],
+    }, headers=auth_headers)
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == f"{food.name} is already in the budget group A"
+    b = (await client.post("/api/budget-groups", json={**base, "name": "B", "category_ids": [str(transport.id)]},
+                           headers=auth_headers)).json()
+    resp = await client.patch(f"/api/budget-groups/{b['id']}", json={"category_ids": [str(food.id)]},
+                              headers=auth_headers)
+    assert resp.status_code == 400
+    for payload in (
+        {**base, "name": "C", "category_ids": []},
+        {**base, "name": "", "category_ids": [str(transport.id)]},
+    ):
+        assert (await client.post("/api/budget-groups", json=payload, headers=auth_headers)).status_code == 422
+    resp = await client.post("/api/budget-groups", json={
+        **base, "name": "C", "category_ids": ["00000000-0000-0000-0000-000000000000"],
+    }, headers=auth_headers)
+    assert resp.status_code == 400 and resp.json()["detail"] == "Category not found"
+    resp = await client.post("/api/budget-groups", json={
+        **base, "name": "C", "is_recurring": False, "end_month": _month_str(1),
+        "category_ids": [str(test_categories[2].id)],
+    }, headers=auth_headers)
+    assert resp.status_code == 400 and resp.json()["detail"] == "Only a recurring budget has an end month"
+
+
+@pytest.mark.asyncio
+async def test_budget_groups_viewer_can_read_but_not_write(client, viewer_auth_headers):
+    assert (await client.get("/api/budget-groups", headers=viewer_auth_headers)).status_code == 200
+    resp = await client.post("/api/budget-groups", json={
+        "name": "X", "amount": 1, "month": _month_str(0), "category_ids": ["00000000-0000-0000-0000-000000000000"],
+    }, headers=viewer_auth_headers)
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_category_moves_or_drops_its_group_membership(client, auth_headers, test_categories):
+    food, transport, income = test_categories
+    group = (await client.post("/api/budget-groups", json={
+        "name": "Everyday", "amount": 100, "month": _month_str(0), "category_ids": [str(food.id)],
+    }, headers=auth_headers)).json()
+
+    # Moved into a category in no group: it joins the group.
+    resp = await client.delete(f"/api/categories/{food.id}", params={"transfer_to_category_id": str(transport.id)},
+                               headers=auth_headers)
+    assert resp.status_code == 204, resp.text
+    groups = (await client.get("/api/budget-groups", headers=auth_headers)).json()
+    assert groups[0]["category_ids"] == [str(transport.id)]
+
+    # Moved into a category already in a group: the membership goes.
+    other = (await client.post("/api/budget-groups", json={
+        "name": "Income", "amount": 1, "month": _month_str(0), "category_ids": [str(income.id)],
+    }, headers=auth_headers)).json()
+    resp = await client.delete(f"/api/categories/{transport.id}", params={"transfer_to_category_id": str(income.id)},
+                               headers=auth_headers)
+    assert resp.status_code == 204
+    by_id = {g["id"]: g for g in (await client.get("/api/budget-groups", headers=auth_headers)).json()}
+    assert by_id[group["id"]]["category_ids"] == []
+    assert by_id[other["id"]]["category_ids"] == [str(income.id)]

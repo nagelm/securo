@@ -12,6 +12,7 @@ from app.models.recurring_transaction import RecurringTransaction
 from app.models.forecast import ForecastItem, ForecastScenario
 from app.models.loan_payment import LoanPayment
 from app.models.budget import Budget
+from app.models.budget_group import BudgetGroup, BudgetGroupCategory
 from app.models.import_log import ImportLog
 from app.models.asset import Asset
 from app.models.asset_group import AssetGroup
@@ -67,6 +68,8 @@ __all__ = [
     "ForecastScenario",
     "LoanPayment",
     "Budget",
+    "BudgetGroup",
+    "BudgetGroupCategory",
     "ImportLog",
     "Asset",
     "AssetGroup",
