@@ -54,6 +54,8 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/page-header'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
+import { useSeriesToggle } from '@/hooks/use-series-toggle'
+import { LegendToggle } from '@/components/chart-legend-toggle'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { useCollectionFilter } from '@/contexts/collection-filter-context'
@@ -1898,6 +1900,17 @@ function PortfolioChart({ data: grossData, valueBasisIds, wallets, currency, loc
       return bv - av || a.name.localeCompare(b.name)
     })
   }, [series, displayTrend])
+  // Legend toggles. A hidden series leaves the chart and the tooltip, and the
+  // total (stacked top and tooltip) counts only what is still shown, so the
+  // axis rescales to it.
+  const seriesToggle = useSeriesToggle(sortedSeries.map(s => s.key))
+  const shownSeries = sortedSeries.filter(s => !seriesToggle.isHidden(s.key))
+  const chartTrend = seriesToggle.anyHidden
+    ? displayTrend.map((row): Record<string, unknown> => ({
+        ...row,
+        _total: shownSeries.reduce((sum, s) => sum + ((row[s.key] as number) ?? 0), 0),
+      }))
+    : displayTrend
 
   return (
     <div className="border border-border rounded-xl bg-card shadow-sm p-5">
@@ -1952,7 +1965,7 @@ function PortfolioChart({ data: grossData, valueBasisIds, wallets, currency, loc
       </div>
       <div className="h-56">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={displayTrend} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
+          <AreaChart data={chartTrend} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
             <defs>
               {isStacked && sortedSeries.map(s => (
                 <linearGradient key={s.key} id={`portfolio-grad-${s.key}`} x1="0" y1="0" x2="0" y2="1">
@@ -1979,9 +1992,9 @@ function PortfolioChart({ data: grossData, valueBasisIds, wallets, currency, loc
             <RechartsTooltip
               content={({ active, payload, label }) => {
                 if (!active || !payload?.length) return null
-                const row = displayTrend.find(r => r.date === label)
+                const row = chartTrend.find(r => r.date === label)
                 const dateTotal = row ? ((row._total as number) ?? 0) : 0
-                const items = sortedSeries
+                const items = shownSeries
                   .map(s => {
                     const val = row ? ((row[s.key] as number) ?? 0) : 0
                     return { key: s.key, name: s.name, value: val, color: s.color }
@@ -2022,6 +2035,7 @@ function PortfolioChart({ data: grossData, valueBasisIds, wallets, currency, loc
                 fill={isStacked ? `url(#portfolio-grad-${s.key})` : 'none'}
                 dot={false}
                 activeDot={{ r: 3, strokeWidth: 1.5, fill: 'var(--card)' }}
+                hide={seriesToggle.isHidden(s.key)}
               />
             ))}
             {/* Hidden total for tooltip. Kept out of the chart in line mode so the
@@ -2034,10 +2048,10 @@ function PortfolioChart({ data: grossData, valueBasisIds, wallets, currency, loc
       {/* Legend */}
       <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 px-1">
         {sortedSeries.map(s => (
-          <div key={s.key} className="flex items-center gap-1.5">
+          <LegendToggle key={s.key} seriesKey={s.key} toggle={seriesToggle} className="flex items-center gap-1.5">
             <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
             <span className="text-[11px] text-muted-foreground">{s.name}</span>
-          </div>
+          </LegendToggle>
         ))}
       </div>
     </div>

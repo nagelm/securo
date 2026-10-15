@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
+import { useSeriesToggle } from '@/hooks/use-series-toggle'
+import { LegendToggle } from '@/components/chart-legend-toggle'
 import { getAccountName, sortAccountsByPosition } from '@/lib/account-utils'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -545,6 +547,11 @@ export default function GroupDetailPage() {
     () => categoryBreakdown.reduce((s, c) => s + c.total, 0),
     [categoryBreakdown],
   )
+  // Legend toggles: a hidden category leaves the bar and the rest fill it.
+  // The legend's amounts and percentages stay those of the whole group.
+  const categoryToggle = useSeriesToggle(categoryBreakdown.map((c) => c.id))
+  const shownCategories = categoryBreakdown.filter((c) => !categoryToggle.isHidden(c.id))
+  const shownCategoryTotal = shownCategories.reduce((s, c) => s + c.total, 0)
 
   if (loadingGroup) {
     return (
@@ -645,12 +652,12 @@ export default function GroupDetailPage() {
           />
           <div className="px-4 py-3 space-y-3">
             <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted">
-              {categoryBreakdown.map((c) => {
+              {shownCategories.map((c) => {
                 const pct = (c.total / categoryBreakdownTotal) * 100
                 return (
                   <div
                     key={c.id}
-                    style={{ width: `${pct}%`, backgroundColor: c.color }}
+                    style={{ width: `${(c.total / shownCategoryTotal) * 100}%`, backgroundColor: c.color }}
                     title={`${c.name} · ${formatCurrency(c.total, groupCurrency, locale)} (${pct.toFixed(1)}%)`}
                   />
                 )
@@ -660,17 +667,23 @@ export default function GroupDetailPage() {
               {categoryBreakdown.map((c) => {
                 const pct = (c.total / categoryBreakdownTotal) * 100
                 return (
-                  <li key={c.id} className="flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-2 min-w-0">
-                      <span
-                        className="h-2.5 w-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: c.color }}
-                      />
-                      <span className="truncate">{c.name}</span>
-                    </span>
-                    <span className="tabular-nums whitespace-nowrap text-muted-foreground">
-                      {formatCurrency(c.total, groupCurrency, locale)} · {pct.toFixed(0)}%
-                    </span>
+                  <li key={c.id}>
+                    <LegendToggle
+                      seriesKey={c.id}
+                      toggle={categoryToggle}
+                      className="flex w-full items-center justify-between gap-2 text-left"
+                    >
+                      <span className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="h-2.5 w-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: c.color }}
+                        />
+                        <span className="truncate">{c.name}</span>
+                      </span>
+                      <span className="tabular-nums whitespace-nowrap text-muted-foreground">
+                        {formatCurrency(c.total, groupCurrency, locale)} · {pct.toFixed(0)}%
+                      </span>
+                    </LegendToggle>
                   </li>
                 )
               })}

@@ -203,3 +203,57 @@ describe('Forecast page', () => {
     })))
   })
 })
+
+describe('Forecast page: chart legend (fork)', () => {
+  const yTicks = (chart: Element) =>
+    [...chart.querySelectorAll('.recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value')].map((n) => n.textContent)
+
+  it('a legend click hides that line and its markers, the axis rescales, and a second click brings it back', async () => {
+    const { container, user } = renderWithProviders(<ForecastPage />)
+    await waitFor(() => expect(container.querySelectorAll('.recharts-line')).toHaveLength(2))
+    // Each line carries a lowest-point and an end-balance marker.
+    expect(container.querySelectorAll('.recharts-reference-dot')).toHaveLength(4)
+    const chart = container.querySelector('.recharts-wrapper')!
+    const before = yTicks(chart)
+    expect(before.length).toBeGreaterThan(0)
+
+    const base = screen.getByRole('button', { name: t('forecast.base') })
+    expect(base).toHaveAttribute('aria-pressed', 'true')
+    await user.click(base)
+
+    await waitFor(() => expect(container.querySelectorAll('.recharts-line')).toHaveLength(1))
+    expect(container.querySelector('.recharts-line-curve')).toHaveAttribute('stroke', '#F59E0B')
+    expect(container.querySelectorAll('.recharts-reference-dot')).toHaveLength(2)
+    expect(base).toHaveAttribute('aria-pressed', 'false')
+    // Without the base line (up to 1,200) the scenario alone tops out at 1,000.
+    await waitFor(() => expect(yTicks(chart)).not.toEqual(before))
+
+    await user.click(base)
+
+    await waitFor(() => expect(container.querySelectorAll('.recharts-line')).toHaveLength(2))
+    expect(container.querySelectorAll('.recharts-reference-dot')).toHaveLength(4)
+    expect(base).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() => expect(yTicks(chart)).toEqual(before))
+  })
+
+  it('works from the keyboard and keeps the last line on', async () => {
+    const { container, user } = renderWithProviders(<ForecastPage />)
+    await waitFor(() => expect(container.querySelectorAll('.recharts-line')).toHaveLength(2))
+
+    const holiday = screen.getByRole('button', { name: 'Holiday' })
+    holiday.focus()
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(container.querySelectorAll('.recharts-line')).toHaveLength(1))
+    expect(holiday).toHaveAttribute('aria-pressed', 'false')
+
+    const base = screen.getByRole('button', { name: t('forecast.base') })
+    expect(base).toHaveAttribute('aria-disabled', 'true')
+    await user.click(base)
+    expect(container.querySelectorAll('.recharts-line')).toHaveLength(1)
+    expect(base).toHaveAttribute('aria-pressed', 'true')
+
+    holiday.focus()
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(container.querySelectorAll('.recharts-line')).toHaveLength(2))
+  })
+})

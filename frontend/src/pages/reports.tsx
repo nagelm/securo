@@ -29,6 +29,8 @@ import { CashflowSankey } from '@/components/reports/CashflowSankey'
 import { MONEY_MAP_MAX_MONTHS_BACK, moneyMapWindow } from '@/components/reports/money-map-window'
 import { CategoryTrendDialog } from '@/components/reports/CategoryTrendDialog'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
+import { useSeriesToggle, type SeriesToggle } from '@/hooks/use-series-toggle'
+import { LegendToggle, ToggleLegend } from '@/components/chart-legend-toggle'
 import { useAuth } from '@/contexts/auth-context'
 import { useCollectionFilter } from '@/contexts/collection-filter-context'
 import type { ReportResponse, CategoryTrendItem } from '@/types'
@@ -419,6 +421,8 @@ export default function ReportsPage() {
     return compositionBreakdownData
       .filter((b) => !excludedKeys.has(b.key) && (!activeCompositionGroups || activeCompositionGroups.has(groupOf(b.key))))
       .map((b) => ({
+        key: b.key,
+        group: groupOf(b.key),
         name: t(`reports.${b.key}`, { defaultValue: b.label }),
         value: b.value,
         color: b.color,
@@ -537,6 +541,7 @@ export default function ReportsPage() {
       name: string
       value: number
       color: string
+      group: string
       children?: { name: string; value: number; color: string }[]
     }[] = []
 
@@ -556,6 +561,7 @@ export default function ReportsPage() {
             name: otherLabel(g),
             value: otherValue,
             color: OTHER_SLICE_COLOR,
+            group: g,
             children: rest.length > 0 ? rest : undefined,
           })
         }
@@ -564,6 +570,93 @@ export default function ReportsPage() {
 
     return result
   })()
+
+  // Legend toggles. A hidden series leaves its chart, so the axis rescales to
+  // what is still shown and the tooltip no longer lists it.
+  // Main trend chart: the legend keys are the chart's own data keys, except
+  // cash flow's "balance", which is the solid (past) part of its line.
+  const trendLegendKey = (key: string) => (meta?.type === 'cash_flow' && key === 'balance' ? 'valuePast' : key)
+  const trendToggle = useSeriesToggle(
+    meta?.type === 'income_expenses'
+      ? [...meta.series_keys, 'value']
+      : meta?.type === 'cash_flow'
+        ? [...meta.series_keys.map(trendLegendKey), 'valueForecast']
+        : [],
+  )
+
+  // Evolution chart: one stacked bar per breakdown with any non-zero value,
+  // plus the net worth line.
+  const evolutionSeries = !meta
+    ? []
+    : (meta.type === 'cash_flow'
+        ? [
+            { key: 'inflow', color: '#10B981' },
+            { key: 'outflow', color: '#F43F5E' },
+          ]
+        : meta.series_keys.map((k) => ({ key: k, color: colorMap[k] || '#6366F1' }))
+      ).filter(({ key }) => chartData.some((d) => { const v = d[key]; return typeof v === 'number' && v !== 0 }))
+  const evolutionToggle = useSeriesToggle([
+    ...evolutionSeries.map((s) => s.key),
+    ...(meta?.type === 'net_worth' ? ['value'] : []),
+  ])
+
+  // Composition donut: the inner ring's legend hides whole groups, the outer
+  // ring's hides single slices. The rings stay aligned: each group's inner
+  // slice shrinks by the share of its outer slices that are hidden, and its
+  // outer slices by the share of its inner slices that are hidden. Hidden
+  // slices leave the ring, so the rest re-proportion.
+  const innerToggle = useSeriesToggle(innerDonutData.map((d) => d.key))
+  const outerKey = (d: { group: string; name: string }, i: number) => `${d.group}:${i}:${d.name}`
+  const outerKeys = outerDonutData.map(outerKey)
+  const outerToggleBase = useSeriesToggle(outerKeys)
+  const groupShare = (rows: { group: string; value: number }[], hidden: (i: number) => boolean) => {
+    const all = new Map<string, number>()
+    const shown = new Map<string, number>()
+    rows.forEach((r, i) => {
+      all.set(r.group, (all.get(r.group) ?? 0) + r.value)
+      if (!hidden(i)) shown.set(r.group, (shown.get(r.group) ?? 0) + r.value)
+    })
+    return (g: string) => {
+      const total = all.get(g)
+      return total ? (shown.get(g) ?? 0) / total : 1
+    }
+  }
+  const innerShare = groupShare(innerDonutData, (i) => innerToggle.isHidden(innerDonutData[i].key))
+  const outerShare = groupShare(outerDonutData, (i) => outerToggleBase.isHidden(outerKeys[i]))
+  const innerDonutShown = innerDonutData
+    .filter((d) => !innerToggle.isHidden(d.key))
+    .map((d) => ({ ...d, value: d.value * outerShare(d.group) }))
+    .filter((d) => d.value > 0)
+  const outerDonutShown = outerDonutData
+    .filter((_, i) => !outerToggleBase.isHidden(outerKeys[i]))
+    .map((d) => ({ ...d, value: d.value * innerShare(d.group) }))
+    .filter((d) => d.value > 0)
+  const outerGroupOf = (key: string) => outerDonutData[outerKeys.indexOf(key)]?.group
+  const outerShownInGroup = (g: string | undefined) =>
+    outerKeys.filter((k, i) => outerDonutData[i].group === g && !outerToggleBase.isHidden(k)).length
+  const groupFullyHidden = (g: string | undefined) => {
+    const inGroup = innerDonutData.filter((d) => d.group === g)
+    return inGroup.length > 0 && inGroup.every((d) => innerToggle.isHidden(d.key))
+  }
+  const outerToggle: SeriesToggle = {
+    ...outerToggleBase,
+    // An outer slice whose whole group is hidden shows as hidden too.
+    isHidden: (key) => outerToggleBase.isHidden(key) || groupFullyHidden(outerGroupOf(key)),
+    // The last shown slice of a group stays, or its inner slice would vanish
+    // while its own legend entry still reads as shown.
+    canHide: (key) =>
+      !groupFullyHidden(outerGroupOf(key)) && outerToggleBase.canHide(key) && outerShownInGroup(outerGroupOf(key)) > 1,
+    toggle: (key) => {
+      const g = outerGroupOf(key)
+      if (groupFullyHidden(g)) {
+        // Clicking a slice of a hidden group brings the group back with it.
+        for (const d of innerDonutData) if (d.group === g && innerToggle.isHidden(d.key)) innerToggle.toggle(d.key)
+        if (outerToggleBase.isHidden(key)) outerToggleBase.toggle(key)
+        return
+      }
+      if (outerToggleBase.isHidden(key) || outerShownInGroup(g) > 1) outerToggleBase.toggle(key)
+    },
+  }
 
   return (
     <div>
@@ -847,7 +940,7 @@ export default function ReportsPage() {
                 </div>
               ) : (
                 meta.series_keys.map((key) => (
-                  <div key={key} className="flex items-center gap-1.5">
+                  <LegendToggle key={key} seriesKey={trendLegendKey(key)} toggle={trendToggle} className="flex items-center gap-1.5">
                     <div
                       className="w-2 h-2 rounded-full"
                       style={{ backgroundColor: colorMap[key] || '#6366F1' }}
@@ -855,24 +948,24 @@ export default function ReportsPage() {
                     <span className="text-[11px] text-muted-foreground">
                       {t(`reports.${key}`, { defaultValue: key })}
                     </span>
-                  </div>
+                  </LegendToggle>
                 ))
               )}
               {meta.type === 'income_expenses' && (
-                <div className="flex items-center gap-1.5">
+                <LegendToggle seriesKey="value" toggle={trendToggle} className="flex items-center gap-1.5">
                   <div className="w-3 h-0 border-t-2 border-dashed" style={{ borderColor: '#6366F1' }} />
                   <span className="text-[11px] text-muted-foreground">
                     {t('reports.netIncome')}
                   </span>
-                </div>
+                </LegendToggle>
               )}
               {meta.type === 'cash_flow' && (
-                <div className="flex items-center gap-1.5">
+                <LegendToggle seriesKey="valueForecast" toggle={trendToggle} className="flex items-center gap-1.5">
                   <div className="w-3 h-0 border-t-2 border-dashed" style={{ borderColor: '#6366F1' }} />
                   <span className="text-[11px] text-muted-foreground">
                     {meta.baseline_active ? t('reports.forecastBaseline') : t('reports.forecast')}
                   </span>
-                </div>
+                </LegendToggle>
               )}
             </div>
           )}
@@ -973,6 +1066,7 @@ export default function ReportsPage() {
                       activeDot={{ r: 4, fill: '#6366F1' }}
                       isAnimationActive={false}
                       connectNulls={false}
+                      hide={trendToggle.isHidden('valuePast')}
                     />
                     <Area
                       type="monotone"
@@ -984,6 +1078,7 @@ export default function ReportsPage() {
                       fillOpacity={0.4}
                       dot={false}
                       activeDot={{ r: 4, fill: '#6366F1' }}
+                      hide={trendToggle.isHidden('valueForecast')}
                     />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -1021,10 +1116,10 @@ export default function ReportsPage() {
                   contentStyle={tooltipStyle}
                 />
                 <ReferenceLine y={0} stroke="var(--border)" strokeDasharray="3 3" />
-                  <Bar dataKey="income" fill="#10B981" radius={[4, 4, 0, 0]} maxBarSize={20} />
-                  <Bar dataKey="expenses" fill="#F43F5E" radius={[4, 4, 0, 0]} maxBarSize={20} />
-                  <Bar dataKey="projectedIncome" fill="#34D399" radius={[4, 4, 0, 0]} maxBarSize={20} fillOpacity={0.65} />
-                  <Bar dataKey="projectedExpenses" fill="#FB7185" radius={[4, 4, 0, 0]} maxBarSize={20} fillOpacity={0.65} />
+                  <Bar dataKey="income" fill="#10B981" radius={[4, 4, 0, 0]} maxBarSize={20} hide={trendToggle.isHidden('income')} />
+                  <Bar dataKey="expenses" fill="#F43F5E" radius={[4, 4, 0, 0]} maxBarSize={20} hide={trendToggle.isHidden('expenses')} />
+                  <Bar dataKey="projectedIncome" fill="#34D399" radius={[4, 4, 0, 0]} maxBarSize={20} fillOpacity={0.65} hide={trendToggle.isHidden('projectedIncome')} />
+                  <Bar dataKey="projectedExpenses" fill="#FB7185" radius={[4, 4, 0, 0]} maxBarSize={20} fillOpacity={0.65} hide={trendToggle.isHidden('projectedExpenses')} />
                 <Line
                   type="monotone"
                   dataKey="value"
@@ -1033,6 +1128,7 @@ export default function ReportsPage() {
                   strokeDasharray="6 3"
                   dot={false}
                   activeDot={{ r: 4, fill: '#6366F1' }}
+                  hide={trendToggle.isHidden('value')}
                 />
               </ComposedChart>
             </ResponsiveContainer>
@@ -1168,7 +1264,7 @@ export default function ReportsPage() {
                       <div className="relative" style={{ width: 200, height: 200 }}>
                         <PieChart width={200} height={200}>
                             <Pie
-                              data={innerDonutData}
+                              data={innerDonutShown}
                               cx="50%"
                               cy="50%"
                               innerRadius={55}
@@ -1178,13 +1274,13 @@ export default function ReportsPage() {
                               stroke="var(--card)"
                               strokeWidth={hasOuter ? 2 : 0}
                             >
-                              {innerDonutData.map((entry, idx) => (
+                              {innerDonutShown.map((entry, idx) => (
                                 <Cell key={idx} fill={entry.color} />
                               ))}
                             </Pie>
                             {hasOuter && (
                               <Pie
-                                data={outerDonutData}
+                                data={outerDonutShown}
                                 cx="50%"
                                 cy="50%"
                                 innerRadius={64}
@@ -1194,7 +1290,7 @@ export default function ReportsPage() {
                                 stroke="var(--card)"
                                 strokeWidth={2}
                               >
-                                {outerDonutData.map((entry, idx) => (
+                                {outerDonutShown.map((entry, idx) => (
                                   <Cell key={idx} fill={entry.color} />
                                 ))}
                               </Pie>
@@ -1271,12 +1367,12 @@ export default function ReportsPage() {
                       <div key={compositionView} className="flex flex-col items-center gap-1 px-3 mt-1 w-full">
                         <div className="flex flex-wrap justify-center gap-x-3 gap-y-1">
                           {innerDonutData.map((d, i) => (
-                            <div key={`${i}-${d.name}`} className="flex items-center gap-1.5">
+                            <LegendToggle key={`${i}-${d.name}`} seriesKey={d.key} toggle={innerToggle} className="flex items-center gap-1.5">
                               <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
                               <span className="text-[11px] text-muted-foreground whitespace-nowrap">
                                 {d.name.length > 30 ? d.name.slice(0, 27) + '…' : d.name}
                               </span>
-                            </div>
+                            </LegendToggle>
                           ))}
                         </div>
                         {hasOuter && (() => {
@@ -1285,12 +1381,12 @@ export default function ReportsPage() {
                           return (
                             <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 items-center">
                               {visible.map((d, i) => (
-                                <div key={`${i}-${d.name}`} className="flex items-center gap-1.5">
+                                <LegendToggle key={`${i}-${d.name}`} seriesKey={outerKeys[i]} toggle={outerToggle} className="flex items-center gap-1.5">
                                   <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
                                   <span className="text-[11px] text-muted-foreground whitespace-nowrap">
                                     {d.name.length > 30 ? d.name.slice(0, 27) + '…' : d.name}
                                   </span>
-                                </div>
+                                </LegendToggle>
                               ))}
                               {hiddenCount > 0 && (
                                 <Popover>
@@ -1583,24 +1679,33 @@ export default function ReportsPage() {
                     iconType="circle"
                     iconSize={8}
                     wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }}
-                    formatter={(value: string) => t(`reports.${value}`, { defaultValue: value })}
+                    content={
+                      <ToggleLegend
+                        iconSize={8}
+                        defaultIcon="circle"
+                        toggle={evolutionToggle}
+                        items={[
+                          ...evolutionSeries.map(({ key, color }) => ({
+                            key,
+                            color,
+                            label: t(`reports.${key}`, { defaultValue: key }),
+                          })),
+                          ...(meta.type === 'net_worth'
+                            ? [{ key: 'value', color: '#10B981', label: t('reports.netWorth', { defaultValue: 'Net Worth' }) }]
+                            : []),
+                        ]}
+                      />
+                    }
                   />
                   {(() => {
                     const isNetWorth = meta.type === 'net_worth'
-                    const allSeries = meta.type === 'cash_flow'
-                      ? [
-                          { key: 'inflow', color: '#10B981' },
-                          { key: 'outflow', color: '#F43F5E' },
-                        ]
-                      : meta.series_keys.map((k) => ({ key: k, color: colorMap[k] || '#6366F1' }))
-                    const filteredSeries = allSeries.filter(({ key }) =>
-                      chartData.some((d) => { const v = d[key]; return typeof v === 'number' && v !== 0 })
-                    )
-                    const positiveKeys = isNetWorth ? filteredSeries.filter(({ key }) => !NEGATIVE_SERIES.has(key)) : filteredSeries
-                    const negativeKeys = isNetWorth ? filteredSeries.filter(({ key }) => NEGATIVE_SERIES.has(key)) : []
+                    // The rounded top goes on the last bar still shown in each stack.
+                    const shownSeries = evolutionSeries.filter(({ key }) => !evolutionToggle.isHidden(key))
+                    const positiveKeys = isNetWorth ? shownSeries.filter(({ key }) => !NEGATIVE_SERIES.has(key)) : shownSeries
+                    const negativeKeys = isNetWorth ? shownSeries.filter(({ key }) => NEGATIVE_SERIES.has(key)) : []
                     const lastPositiveKey = positiveKeys.at(-1)?.key ?? null
                     const lastNegativeKey = negativeKeys.at(-1)?.key ?? null
-                    return filteredSeries.map(({ key, color }) => {
+                    return evolutionSeries.map(({ key, color }) => {
                       let radius: [number, number, number, number] = [0, 0, 0, 0]
                       if (isNetWorth && NEGATIVE_SERIES.has(key) && key === lastNegativeKey) {
                         radius = [4, 4, 0, 0]
@@ -1615,6 +1720,7 @@ export default function ReportsPage() {
                           fill={color}
                           radius={radius}
                           maxBarSize={32}
+                          hide={evolutionToggle.isHidden(key)}
                         >
                           {selectedDate && chartData.map((d) => (
                             <Cell
@@ -1638,6 +1744,7 @@ export default function ReportsPage() {
                       dot={false}
                       activeDot={{ r: 4, fill: '#10B981' }}
                       isAnimationActive={false}
+                      hide={evolutionToggle.isHidden('value')}
                     />
                   )}
                 </ComposedChart>

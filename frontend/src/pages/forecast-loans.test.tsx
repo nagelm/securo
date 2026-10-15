@@ -284,6 +284,37 @@ describe('Forecast page: loans', () => {
   })
 })
 
+describe('Forecast page: loan chart legend (fork)', () => {
+  it('a legend click takes interest out of the repayment stack and a second click puts it back', async () => {
+    const { user } = renderWithProviders(<ForecastPage />)
+    await openLoans(user)
+    const home = await screen.findByTestId('loan-row')
+    // Two future repayments, each an interest and a principal bar.
+    await waitFor(() => expect(home.querySelectorAll('.recharts-bar-rectangle')).toHaveLength(4))
+    const barChart = [...home.querySelectorAll('.recharts-wrapper')][1]
+    const yTicks = () =>
+      [...barChart.querySelectorAll('.recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value')].map((n) => n.textContent)
+    const before = yTicks()
+    expect(before.length).toBeGreaterThan(0)
+
+    const interest = within(home).getByRole('button', { name: t('forecast.loans.interest') })
+    await user.click(interest)
+
+    await waitFor(() => expect(home.querySelectorAll('.recharts-bar-rectangle')).toHaveLength(2))
+    const fills = [...home.querySelectorAll('.recharts-bar-rectangle path')].map((p) => p.getAttribute('fill'))
+    expect(new Set(fills)).toEqual(new Set(['#6366F1']))
+    expect(interest).toHaveAttribute('aria-pressed', 'false')
+    // The stack tops out at 900 (principal alone) instead of 1,380.
+    await waitFor(() => expect(yTicks()).not.toEqual(before))
+
+    await user.click(interest)
+
+    await waitFor(() => expect(home.querySelectorAll('.recharts-bar-rectangle')).toHaveLength(4))
+    expect(interest).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() => expect(yTicks()).toEqual(before))
+  })
+})
+
 describe('Forecast page: recurring', () => {
   it('shows one line counting the active recurring payments, and Manage links to the Recurring page', async () => {
     renderWithProviders(<ForecastPage />)

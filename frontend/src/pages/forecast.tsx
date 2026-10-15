@@ -30,9 +30,11 @@ import { cn } from '@/lib/utils'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
 import { historicTrend } from '@/lib/trend-line'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
+import { useSeriesToggle } from '@/hooks/use-series-toggle'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { PageHeader } from '@/components/page-header'
+import { LegendToggle } from '@/components/chart-legend-toggle'
 import { CategorySelect } from '@/components/category-select'
 import { DeleteConfirmationDialog } from '@/components/delete-confirmation-dialog'
 import { Button } from '@/components/ui/button'
@@ -200,6 +202,10 @@ function ForecastView() {
     ],
     [data, t],
   )
+  // Legend toggles: a hidden line leaves the chart with its markers, and the
+  // axis rescales to the lines still shown.
+  const legendSeries = [...(hasActuals ? [actualSeries] : []), ...(hasTrend ? [trendSeries] : []), ...lines]
+  const lineToggle = useSeriesToggle(legendSeries.map((l) => l.key))
 
   return (
     <div>
@@ -392,11 +398,11 @@ function ForecastView() {
         <div className="px-5 pt-5 pb-2 flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-semibold text-foreground">{t('forecast.chartTitle')}</p>
           <div className="flex flex-wrap items-center gap-3">
-            {[...(hasActuals ? [actualSeries] : []), ...(hasTrend ? [trendSeries] : []), ...lines].map((l) => (
-              <div key={l.key} className="flex items-center gap-1.5">
+            {legendSeries.map((l) => (
+              <LegendToggle key={l.key} seriesKey={l.key} toggle={lineToggle} className="flex items-center gap-1.5">
                 <div className="w-3 h-0.5 rounded-full" style={{ backgroundColor: l.color }} />
                 <span className="text-[11px] text-muted-foreground">{l.name}</span>
-              </div>
+              </LegendToggle>
             ))}
           </div>
         </div>
@@ -462,6 +468,7 @@ function ForecastView() {
                     activeDot={{ r: 4, fill: ACTUAL_COLOR }}
                     connectNulls
                     isAnimationActive={false}
+                    hide={lineToggle.isHidden('actual')}
                   />
                 )}
                 {hasTrend && (
@@ -476,6 +483,7 @@ function ForecastView() {
                     activeDot={false}
                     connectNulls
                     isAnimationActive={false}
+                    hide={lineToggle.isHidden('trend')}
                   />
                 )}
                 {lines.map((l) => (
@@ -491,10 +499,11 @@ function ForecastView() {
                     activeDot={{ r: 4, fill: l.color }}
                     connectNulls
                     isAnimationActive={false}
+                    hide={lineToggle.isHidden(l.key)}
                   />
                 ))}
                 {lines.map((l) =>
-                  l.summary ? (
+                  l.summary && !lineToggle.isHidden(l.key) ? (
                     <ReferenceDot
                       key={`low-${l.key}`}
                       x={l.summary.lowest_date}
@@ -507,7 +516,7 @@ function ForecastView() {
                   ) : null,
                 )}
                 {lines.map((l) =>
-                  l.summary ? (
+                  l.summary && !lineToggle.isHidden(l.key) ? (
                     <ReferenceDot
                       key={`end-${l.key}`}
                       x={data.end_date}
@@ -630,6 +639,8 @@ function LoanRow({ loan }: { loan: LoanForecast }) {
     { key: 'base', name: t('forecast.base'), color: BASE_COLOR },
     ...loan.scenarios.map((s) => ({ key: s.scenario_id, name: s.name, color: s.color })),
   ]
+  // Legend toggles for the interest/principal bars: a hidden part leaves the stack.
+  const splitToggle = useSeriesToggle(['interest', 'principal'])
   const axisTick = { fontSize: 10, fill: 'var(--muted-foreground)' }
   const yTick = (v: number) => (privacyMode ? '' : v === 0 ? '0' : formatCompact(v, loan.currency, locale))
 
@@ -762,12 +773,12 @@ function LoanRow({ loan }: { loan: LoanForecast }) {
             <div>
               <div className="flex flex-wrap items-center gap-3 mb-1">
                 <p className="text-[11px] font-medium text-muted-foreground">{t('forecast.loans.splitChart')}</p>
-                <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <LegendToggle seriesKey="interest" toggle={splitToggle} className="flex items-center gap-1 text-[11px] text-muted-foreground">
                   <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: INTEREST_COLOR }} />{t('forecast.loans.interest')}
-                </span>
-                <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                </LegendToggle>
+                <LegendToggle seriesKey="principal" toggle={splitToggle} className="flex items-center gap-1 text-[11px] text-muted-foreground">
                   <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: BASE_COLOR }} />{t('forecast.loans.principal')}
-                </span>
+                </LegendToggle>
               </div>
               <div style={{ height: 180 }}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -791,8 +802,23 @@ function LoanRow({ loan }: { loan: LoanForecast }) {
                         )
                       }}
                     />
-                    <Bar dataKey="interest" stackId="split" fill={INTEREST_COLOR} isAnimationActive={false} />
-                    <Bar dataKey="principal" stackId="split" fill={BASE_COLOR} radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                    <Bar
+                      dataKey="interest"
+                      stackId="split"
+                      fill={INTEREST_COLOR}
+                      // The rounded top moves to interest when principal is hidden.
+                      radius={splitToggle.isHidden('principal') ? [2, 2, 0, 0] : undefined}
+                      isAnimationActive={false}
+                      hide={splitToggle.isHidden('interest')}
+                    />
+                    <Bar
+                      dataKey="principal"
+                      stackId="split"
+                      fill={BASE_COLOR}
+                      radius={[2, 2, 0, 0]}
+                      isAnimationActive={false}
+                      hide={splitToggle.isHidden('principal')}
+                    />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
