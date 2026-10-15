@@ -313,7 +313,9 @@ export default function ReportsPage() {
           ? reports.incomeExpenses(months, interval, acctIds, period, days, apiStart, apiEnd)
           : reports.netWorth(months, interval, acctIds, walletIds, period, apiStart, apiEnd),
     // Keep the map on screen while the slider asks for the next window.
-    placeholderData: (previous) => (isMoneyMap ? previous : undefined),
+    // Only the Money Map's own previous window: another tab's data is not a map.
+    placeholderData: (previous, previousQuery) =>
+      isMoneyMap && previousQuery?.queryKey[1] === 'money_map' ? previous : undefined,
     // Only request a custom report with both committed endpoints.
     enabled: currentTab.enabled && !(noAccounts && activeTab !== 'net_worth') && (!isCustomRange || hasCustomRange),
   })

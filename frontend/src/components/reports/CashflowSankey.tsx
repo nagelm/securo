@@ -98,15 +98,19 @@ export function CashflowSankey({ composition, currency, locale }: CashflowSankey
   const [width, setWidth] = useState(0)
   const [hover, setHover] = useState<Hover | null>(null)
 
+  // The diagram's box only exists once there is data, so the size watcher
+  // attaches when it appears (a first render with no data used to leave it
+  // unwatched, and the diagram at zero width).
+  const [observedEl, setObservedEl] = useState<HTMLDivElement | null>(null)
   useEffect(() => {
-    const el = containerRef.current
+    const el = observedEl
     if (!el) return
     const observer = new ResizeObserver((entries) => {
       setWidth(entries[0].contentRect.width)
     })
     observer.observe(el)
     return () => observer.disconnect()
-  }, [])
+  }, [observedEl])
 
   const { nodes: rawNodes, links: rawLinks, hasData } = useMemo(() => {
     const income = collapse(
@@ -313,7 +317,13 @@ export function CashflowSankey({ composition, currency, locale }: CashflowSankey
   const nodeDimmed = (idx: number) => hover !== null && !activeNodes.has(idx)
 
   return (
-    <div ref={containerRef} className="w-full privacy-sensitive">
+    <div
+      ref={(el) => {
+        containerRef.current = el
+        setObservedEl(el)
+      }}
+      className="w-full privacy-sensitive"
+    >
       {layout && (
         <svg
           width={width}
