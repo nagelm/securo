@@ -1807,7 +1807,8 @@
     "showAllExpected": "Show all {{count}}",
     "showFewer": "Show fewer",
     "carousel": "Charts",
-    "cashAndCards": "Cash & cards"
+    "cashAndCards": "Cash & cards",
+    "trend": "Past trend"
   },
   "rules": {
     "searchPlaceholder": "Hľadať pravidlá...",

@@ -28,6 +28,7 @@ import { localDateString } from '@/lib/date-utils'
 import { formatCurrency } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
+import { historicTrend } from '@/lib/trend-line'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
@@ -75,6 +76,9 @@ const BASE_COLOR = '#6366F1'
 // Fork: the real balance before today, neutral; projections after it are
 // dashed, as on Reports → Cash Flow.
 const ACTUAL_COLOR = '#64748B'
+// Fork: the straight-line trend through past balances.
+const TREND_COLOR = '#94A3B8'
+const TREND_DASH = '2 4'
 const FORECAST_DASH = '6 3'
 // Loans section bars: what each repayment paid in interest and in principal.
 const INTEREST_COLOR = '#E11D48'
@@ -179,11 +183,16 @@ function ForecastView() {
       for (const p of s.points) row(p.date)[s.id] = p.value
       row(s.summary.lowest_date)[s.id] = s.summary.lowest_balance
     }
+    // Fork (owner 2026-10-15): where the past alone would take the balance.
+    const trend = historicTrend(data.actuals ?? [])
+    if (trend) for (const r of rows.values()) r.trend = trend(String(r.date))
     return [...rows.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)))
   }, [data])
 
   const hasActuals = (data?.actuals ?? []).length > 0
   const actualSeries = { key: 'actual', name: t('forecast.actual'), color: ACTUAL_COLOR }
+  const hasTrend = (data?.actuals ?? []).length >= 2
+  const trendSeries = { key: 'trend', name: t('forecast.trend'), color: TREND_COLOR }
   const lines = useMemo(
     () => [
       { key: 'base', name: t('forecast.base'), color: BASE_COLOR, summary: data?.summary },
@@ -383,7 +392,7 @@ function ForecastView() {
         <div className="px-5 pt-5 pb-2 flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-semibold text-foreground">{t('forecast.chartTitle')}</p>
           <div className="flex flex-wrap items-center gap-3">
-            {[...(hasActuals ? [actualSeries] : []), ...lines].map((l) => (
+            {[...(hasActuals ? [actualSeries] : []), ...(hasTrend ? [trendSeries] : []), ...lines].map((l) => (
               <div key={l.key} className="flex items-center gap-1.5">
                 <div className="w-3 h-0.5 rounded-full" style={{ backgroundColor: l.color }} />
                 <span className="text-[11px] text-muted-foreground">{l.name}</span>
@@ -420,7 +429,7 @@ function ForecastView() {
                       <div style={tooltipStyle} className="px-3 py-2">
                         <p className="text-xs font-medium mb-1">{shortDate(String(label))}</p>
                         {payload.map((p) => {
-                          const line = [actualSeries, ...lines].find((l) => l.key === p.dataKey)
+                          const line = [actualSeries, trendSeries, ...lines].find((l) => l.key === p.dataKey)
                           if (!line || p.value == null) return null
                           return (
                             <p key={line.key} className="text-xs" style={{ color: line.color }}>
@@ -451,6 +460,20 @@ function ForecastView() {
                     strokeWidth={2}
                     dot={false}
                     activeDot={{ r: 4, fill: ACTUAL_COLOR }}
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                )}
+                {hasTrend && (
+                  <Line
+                    type="linear"
+                    dataKey="trend"
+                    name={trendSeries.name}
+                    stroke={TREND_COLOR}
+                    strokeWidth={1.5}
+                    strokeDasharray={TREND_DASH}
+                    dot={false}
+                    activeDot={false}
                     connectNulls
                     isAnimationActive={false}
                   />

@@ -345,11 +345,14 @@ describe('Forecast page: history', () => {
     // The carousel opens on the cash-and-cards chart.
     await waitFor(() => expect(container.querySelector('.recharts-wrapper')).not.toBeNull())
     const chart = container.querySelector('.recharts-wrapper') as HTMLElement
-    await waitFor(() => expect(chart.querySelectorAll('.recharts-line')).toHaveLength(2))
+    // Actual, the past trend (fork), then the forecast.
+    await waitFor(() => expect(chart.querySelectorAll('.recharts-line')).toHaveLength(3))
     const curves = [...chart.querySelectorAll('.recharts-line-curve')]
-    expect(curves.map((c) => c.getAttribute('stroke'))).toEqual(['#64748B', '#6366F1'])
+    expect(curves.map((c) => c.getAttribute('stroke'))).toEqual(['#64748B', '#94A3B8', '#6366F1'])
     expect(curves[0].getAttribute('stroke-dasharray')).toBeNull()
-    expect(curves[1].getAttribute('stroke-dasharray')).toBe('6 3')
+    expect(curves[1].getAttribute('stroke-dasharray')).toBe('2 4')
+    expect(curves[2].getAttribute('stroke-dasharray')).toBe('6 3')
+    expect(screen.getAllByText(t('forecast.trend')).length).toBeGreaterThan(0)
     expect(within(chart).getByText(t('reports.today'))).toBeInTheDocument()
     expect(screen.getAllByText(t('forecast.actual')).length).toBeGreaterThan(0)
     // Summary cards stay future-only.
