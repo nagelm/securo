@@ -13,7 +13,7 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from 'recharts'
-import { AlertCircle, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, HelpCircle, Pencil, Plus, Trash2 } from 'lucide-react'
+import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, HelpCircle, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   accounts as accountsApi,
@@ -42,6 +42,7 @@ import { DatePickerInput } from '@/components/ui/date-picker-input'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -133,6 +134,100 @@ function useFrequencyLabel() {
   return (f: string | null) => (f ? t(`recurring.${f}`, { defaultValue: f }) : '')
 }
 
+// Fork: the account view. Cash-flow accounts are the open ones that are not
+// loans or investments, as the backend counts them.
+const NOT_CASH = new Set(['investment', 'loan'])
+const isCashAccount = (a: Account) => !a.is_closed && !NOT_CASH.has(a.type)
+const accountViewKey = (workspaceId: string | undefined) => `securo.forecast.accounts.${workspaceId ?? 'default'}`
+
+/** The viewer's saved account view (null: all cash accounts). Storage can be
+ * missing or blocked, so every read and write is guarded. */
+function readAccountView(key: string): string[] | null {
+  try {
+    const raw = localStorage.getItem(key)
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed.map(String) : null
+  } catch {
+    return null
+  }
+}
+
+function writeAccountView(key: string, ids: string[] | null) {
+  try {
+    if (ids) localStorage.setItem(key, JSON.stringify(ids))
+    else localStorage.removeItem(key)
+  } catch {
+    // The view still applies for this visit.
+  }
+}
+
+function AccountViewPicker({
+  accounts,
+  selected,
+  onChange,
+}: {
+  accounts: Account[]
+  selected: string[] | null
+  onChange: (ids: string[] | null) => void
+}) {
+  const { t } = useTranslation()
+  const isOn = (id: string) => selected === null || selected.includes(id)
+  const label = selected === null
+    ? t('forecast.allCashAccounts')
+    : selected.length === 1
+      ? getAccountName(accounts.find((a) => a.id === selected[0]) ?? { name: '—' })
+      : t('forecast.someAccounts', { count: selected.length, total: accounts.length })
+  const toggle = (id: string) => {
+    const next = accounts.map((a) => a.id).filter((a) => (a === id ? !isOn(a) : isOn(a)))
+    // Every account (or none) is the default view.
+    onChange(next.length === 0 || next.length === accounts.length ? null : next)
+  }
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+          aria-label={t('forecast.accountView')}
+          title={t('forecast.accountViewHint')}
+        >
+          <span className="max-w-40 truncate">{label}</span>
+          <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 p-2">
+        <p className="px-2 py-1.5 text-xs text-muted-foreground">{t('forecast.accountViewHint')}</p>
+        <button
+          type="button"
+          onClick={() => onChange(null)}
+          aria-pressed={selected === null}
+          className={cn(
+            'w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted',
+            selected === null ? 'font-semibold text-primary' : 'text-foreground',
+          )}
+        >
+          {t('forecast.allCashAccounts')}
+        </button>
+        <ul className="mt-1 max-h-72 overflow-y-auto border-t border-border pt-1">
+          {accounts.map((a) => (
+            <li key={a.id}>
+              <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
+                <input
+                  type="checkbox"
+                  checked={isOn(a.id)}
+                  onChange={() => toggle(a.id)}
+                  className="h-4 w-4 rounded border-border accent-primary"
+                />
+                <span className="flex-1 truncate">{getAccountName(a)}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 function invalidateForecast(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: ['forecast'] })
   queryClient.invalidateQueries({ queryKey: ['forecast-items'] })
@@ -153,9 +248,34 @@ function ForecastView() {
   const [includeSpending, setIncludeSpending] = useState(true)
   const months = RANGE_OPTIONS.find((r) => r.key === rangeKey)?.months ?? 12
 
+  // Fork: the account view, remembered per viewer and workspace. Ids that are
+  // no longer cash accounts drop out; none left is the default view.
+  const { current: workspace } = useWorkspace()
+  const viewKey = accountViewKey(workspace?.id)
+  const [chosenViews, setChosenViews] = useState<Record<string, string[] | null>>({})
+  const storedView = useMemo(() => readAccountView(viewKey), [viewKey])
+  const chosen = viewKey in chosenViews ? chosenViews[viewKey] : storedView
+  const { data: accountsList } = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() })
+  const cashAccounts = useMemo(
+    () => sortAccountsByPosition((accountsList ?? []).filter(isCashAccount)),
+    [accountsList],
+  )
+  const accountIds = useMemo(() => {
+    if (!chosen || cashAccounts.length === 0) return chosen
+    const known = chosen.filter((id) => cashAccounts.some((a) => a.id === id))
+    return known.length > 0 && known.length < cashAccounts.length ? known : null
+  }, [chosen, cashAccounts])
+  const setAccountView = (ids: string[] | null) => {
+    setChosenViews((views) => ({ ...views, [viewKey]: ids }))
+    writeAccountView(viewKey, ids)
+  }
+
   const { data, isLoading, isError, error, refetch } = useQuery<ForecastResponse>({
-    queryKey: ['forecast', months, interval, includeSpending],
-    queryFn: () => forecastApi.get(months, interval, includeSpending),
+    queryKey: ['forecast', months, interval, includeSpending, accountIds],
+    queryFn: () =>
+      accountIds
+        ? forecastApi.get(months, interval, includeSpending, accountIds)
+        : forecastApi.get(months, interval, includeSpending),
   })
   const currency = data?.currency ?? userCurrency
   const money = (v: number) => mask(formatCurrency(v, currency, locale))
@@ -214,6 +334,9 @@ function ForecastView() {
         title={t('forecast.title')}
         action={
           <div className="flex flex-wrap items-center gap-2">
+            {cashAccounts.length > 1 && (
+              <AccountViewPicker accounts={cashAccounts} selected={accountIds} onChange={setAccountView} />
+            )}
             <div
               className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
                 includeSpending
@@ -866,6 +989,11 @@ function useFormLookups() {
 }
 
 const EXPECTED_ROWS = 12
+// Fork: what the expected-payment form can make.
+const EXPECTED_KINDS = ['one_off', 'repeating', 'budget'] as const
+type ExpectedKind = (typeof EXPECTED_KINDS)[number]
+const SERIES_FREQUENCIES: string[] = ['weekly', 'biweekly', 'monthly', 'quarterly', 'semiannual', 'yearly']
+const BUDGET_FREQUENCIES: string[] = ['weekly', 'biweekly', 'monthly']
 
 function ExpectedPaymentsSection({ recurring }: { recurring: ForecastRecurringPayment[] }) {
   const { t } = useTranslation()
@@ -885,7 +1013,7 @@ function ExpectedPaymentsSection({ recurring }: { recurring: ForecastRecurringPa
   // of each recurring schedule, in one list by date.
   const [showAll, setShowAll] = useState(false)
   const merged = [
-    ...expected.map((item) => ({ key: `item-${item.id}`, date: item.date ?? '', item, rec: null })),
+    ...expected.map((item) => ({ key: `item-${item.id}`, date: item.date ?? item.start_date ?? '', item, rec: null })),
     ...recurring.map((rec) => ({ key: `rec-${rec.recurring_transaction_id}-${rec.date}`, date: rec.date, item: null, rec })),
   ].sort((a, b) => a.date.localeCompare(b.date))
   const visible = showAll ? merged : merged.slice(0, EXPECTED_ROWS)
@@ -911,9 +1039,28 @@ function ExpectedPaymentsSection({ recurring }: { recurring: ForecastRecurringPa
     onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
   })
 
-  const accountName = (id: string | null) => {
+  const accountName = (id: string | null | undefined) => {
     const acc = accounts.find((a) => a.id === id)
     return acc ? getAccountName(acc) : '—'
+  }
+  const frequencyLabel = useFrequencyLabel()
+  const day = (iso: string | null) => (iso ? new Date(iso + 'T00:00:00').toLocaleDateString(dateLocale) : '')
+  // Fork: what a series or a budget covers, under its description.
+  const itemDetail = (item: ForecastItem) => {
+    if (item.kind === 'budget') {
+      const amount = formatCurrency(Number(item.amount ?? 0), item.currency, locale)
+      const period = t(`forecast.budgetPeriods.${item.frequency ?? 'monthly'}`, { defaultValue: item.frequency ?? '' })
+      return mask(item.end_date
+        ? t('forecast.budgetSummary', { amount, period, from: day(item.start_date), to: day(item.end_date) })
+        : t('forecast.budgetSummaryOpen', { amount, period, from: day(item.start_date) }))
+    }
+    if (item.kind === 'repeating') {
+      const frequency = frequencyLabel(item.frequency)
+      return item.end_date
+        ? t('forecast.seriesSummary', { frequency, from: day(item.start_date), to: day(item.end_date) })
+        : t('forecast.seriesSummaryOpen', { frequency, from: day(item.start_date) })
+    }
+    return null
   }
 
   return (
@@ -968,22 +1115,50 @@ function ExpectedPaymentsSection({ recurring }: { recurring: ForecastRecurringPa
             ) : item && (
               <tr key={key} className="border-b border-border last:border-0 hover:bg-muted transition-colors">
                 <td className="py-2.5 pl-4 sm:pl-5 text-xs text-muted-foreground tabular-nums">
-                  {item.date ? new Date(item.date + 'T00:00:00').toLocaleDateString(dateLocale) : '—'}
+                  {day(item.date ?? item.start_date) || '—'}
                 </td>
-                <td className="py-2.5 text-sm text-foreground">{item.description || '—'}</td>
-                <td className="py-2.5 text-xs text-muted-foreground hidden md:table-cell">{accountName(item.account_id)}</td>
-                <td className={`py-2.5 text-xs sm:text-sm font-semibold tabular-nums ${item.type === 'credit' ? 'text-emerald-600' : 'text-rose-500'}`}>
-                  {mask(`${item.type === 'credit' ? '+' : '−'}${formatCurrency(Number(item.amount ?? 0), item.currency, locale)}`)}
+                <td className="py-2.5 text-sm text-foreground">
+                  {item.description || '—'}
+                  {itemDetail(item) && (
+                    <p className="text-[11px] text-muted-foreground" data-testid="expected-detail">{itemDetail(item)}</p>
+                  )}
+                </td>
+                <td className="py-2.5 text-xs text-muted-foreground hidden md:table-cell">
+                  {item.transfer_account_id
+                    ? `${accountName(item.account_id)} → ${accountName(item.transfer_account_id)}`
+                    : accountName(item.account_id)}
+                </td>
+                {/* Fork: a transfer moves money between own accounts, so it has no sign. */}
+                <td className={cn(
+                  'py-2.5 text-xs sm:text-sm font-semibold tabular-nums',
+                  item.transfer_account_id ? 'text-foreground' : item.type === 'credit' ? 'text-emerald-600' : 'text-rose-500',
+                )}>
+                  {mask(`${item.transfer_account_id ? '' : item.type === 'credit' ? '+' : '−'}${formatCurrency(Number(item.amount ?? 0), item.currency, locale)}`)}
                 </td>
                 <td className="py-2.5 hidden sm:table-cell">
-                  <span className={cn(
-                    'text-[11px] font-semibold px-2 py-0.5 rounded-full border',
-                    item.matched_transaction_id
-                      ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
-                      : 'bg-muted text-muted-foreground border-border',
-                  )}>
-                    {item.matched_transaction_id ? t('forecast.arrived') : t('forecast.expected')}
-                  </span>
+                  {item.kind === 'budget' ? (
+                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-primary/5 text-primary border-primary/20">
+                      {t('forecast.budgetBadge')}
+                    </span>
+                  ) : item.kind === 'repeating' ? (
+                    <span
+                      className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-muted text-muted-foreground border-border"
+                      data-testid="series-status"
+                    >
+                      {item.occurrence_count != null
+                        ? t('forecast.seriesArrived', { matched: item.matches?.length ?? 0, total: item.occurrence_count })
+                        : t('forecast.seriesArrivedOpen', { matched: item.matches?.length ?? 0 })}
+                    </span>
+                  ) : (
+                    <span className={cn(
+                      'text-[11px] font-semibold px-2 py-0.5 rounded-full border',
+                      item.matched_transaction_id
+                        ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
+                        : 'bg-muted text-muted-foreground border-border',
+                    )}>
+                      {item.matched_transaction_id ? t('forecast.arrived') : t('forecast.expected')}
+                    </span>
+                  )}
                 </td>
                 {canWrite && (
                   <td className="py-2.5 pr-4 sm:pr-5">
@@ -1075,29 +1250,74 @@ function ExpectedPaymentForm({
 }) {
   const { t } = useTranslation()
   const sortedAccounts = useMemo(() => sortAccountsByPosition(accounts.filter((a) => !a.is_closed)), [accounts])
+  // Fork: a one-off or repeating payment (either can be a transfer between
+  // own accounts), or a budget for everyday spending.
+  const [kind, setKind] = useState<ExpectedKind>(
+    item?.kind === 'repeating' || item?.kind === 'budget' ? item.kind : 'one_off',
+  )
   const [description, setDescription] = useState(item?.description ?? '')
   const [amount, setAmount] = useState(item?.amount != null ? String(Number(item.amount)) : '')
-  const [type, setType] = useState<'debit' | 'credit'>(item?.type ?? 'debit')
+  const [type, setType] = useState<'debit' | 'credit' | 'transfer'>(
+    item?.transfer_account_id ? 'transfer' : item?.type ?? 'debit',
+  )
   const [date, setDate] = useState(item?.date ?? localDateString())
-  const [accountId, setAccountId] = useState(item?.account_id ?? sortedAccounts[0]?.id ?? '')
+  const [startDate, setStartDate] = useState(item?.start_date ?? localDateString())
+  const [endDate, setEndDate] = useState(item?.end_date ?? '')
+  const [frequency, setFrequency] = useState<string>(item?.frequency ?? 'weekly')
+  const [accountId, setAccountId] = useState(
+    item?.kind === 'budget' ? item.account_id ?? '' : item?.account_id ?? sortedAccounts[0]?.id ?? '',
+  )
+  const [transferTo, setTransferTo] = useState(item?.transfer_account_id ?? '')
   const [categoryId, setCategoryId] = useState(item?.category_id ?? '')
+  const isBudget = kind === 'budget'
+  const isTransfer = !isBudget && type === 'transfer'
+  const frequencies = isBudget ? BUDGET_FREQUENCIES : SERIES_FREQUENCIES
+  const frequencyLabel = useFrequencyLabel()
 
   return (
     <form
       className="space-y-4"
       onSubmit={(e) => {
         e.preventDefault()
-        onSave({
-          kind: 'one_off',
+        const common = {
+          kind,
           description,
-          amount: amount,
-          type,
-          date,
+          amount,
           account_id: accountId || null,
           category_id: categoryId || null,
-        })
+        }
+        if (isBudget) {
+          onSave({ ...common, frequency: frequency as ForecastItem['frequency'], start_date: startDate, end_date: endDate || null })
+          return
+        }
+        const direction = {
+          type: isTransfer ? ('debit' as const) : (type as 'debit' | 'credit'),
+          transfer_account_id: isTransfer ? transferTo || null : null,
+        }
+        onSave(kind === 'repeating'
+          ? { ...common, ...direction, frequency: frequency as ForecastItem['frequency'], start_date: startDate, end_date: endDate || null }
+          : { ...common, ...direction, date })
       }}
     >
+      <div className="space-y-2">
+        <Label htmlFor="expected-kind">{t('forecast.itemKind')}</Label>
+        <select
+          id="expected-kind"
+          className={selectClass}
+          value={kind}
+          disabled={!!item}
+          onChange={(e) => {
+            const next = e.target.value as ExpectedKind
+            setKind(next)
+            if (next === 'budget' && !BUDGET_FREQUENCIES.includes(frequency)) setFrequency('weekly')
+          }}
+        >
+          {EXPECTED_KINDS.map((k) => (
+            <option key={k} value={k}>{t(`forecast.itemKinds.${k}`)}</option>
+          ))}
+        </select>
+      </div>
+      {isBudget && <p className="text-xs text-muted-foreground">{t('forecast.budgetHint')}</p>}
       <div className="space-y-2">
         <Label htmlFor="expected-description">{t('recurring.description')}</Label>
         <Input id="expected-description" value={description} onChange={(e) => setDescription(e.target.value)} required />
@@ -1107,28 +1327,82 @@ function ExpectedPaymentForm({
           <Label htmlFor="expected-amount">{t('recurring.amount')}</Label>
           <Input id="expected-amount" type="number" step="0.01" min="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} required />
         </div>
+        {isBudget ? (
+          <div className="space-y-2">
+            <Label htmlFor="expected-frequency">{t('recurring.frequency')}</Label>
+            <select id="expected-frequency" className={selectClass} value={frequency} onChange={(e) => setFrequency(e.target.value)}>
+              {frequencies.map((f) => <option key={f} value={f}>{frequencyLabel(f)}</option>)}
+            </select>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <Label htmlFor="expected-type">{t('recurring.type')}</Label>
+            <select id="expected-type" className={selectClass} value={type} onChange={(e) => setType(e.target.value as 'debit' | 'credit' | 'transfer')}>
+              <option value="debit">{t('forecast.moneyOut')}</option>
+              <option value="credit">{t('forecast.moneyIn')}</option>
+              <option value="transfer">{t('forecast.transfer')}</option>
+            </select>
+          </div>
+        )}
+      </div>
+      {kind === 'repeating' && (
         <div className="space-y-2">
-          <Label htmlFor="expected-type">{t('recurring.type')}</Label>
-          <select id="expected-type" className={selectClass} value={type} onChange={(e) => setType(e.target.value as 'debit' | 'credit')}>
-            <option value="debit">{t('forecast.moneyOut')}</option>
-            <option value="credit">{t('forecast.moneyIn')}</option>
+          <Label htmlFor="expected-frequency">{t('recurring.frequency')}</Label>
+          <select id="expected-frequency" className={selectClass} value={frequency} onChange={(e) => setFrequency(e.target.value)}>
+            {frequencies.map((f) => <option key={f} value={f}>{frequencyLabel(f)}</option>)}
           </select>
         </div>
-      </div>
-      <div className="grid grid-cols-2 gap-4">
+      )}
+      {kind === 'one_off' ? (
         <div className="space-y-2">
           <Label>{t('forecast.date')}</Label>
           <DatePickerInput value={date} onChange={setDate} className="w-full justify-start" />
         </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>{t('recurring.startDate')}</Label>
+            <DatePickerInput value={startDate} onChange={setStartDate} className="w-full justify-start" />
+          </div>
+          <div className="space-y-2">
+            <Label>{t('recurring.endDate')}</Label>
+            <DatePickerInput value={endDate} onChange={setEndDate} placeholder={t('forecast.optional')} className="w-full justify-start" />
+          </div>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label htmlFor="expected-account">{t('recurring.account')}</Label>
-          <select id="expected-account" className={selectClass} value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+          <Label htmlFor="expected-account">{isTransfer ? t('forecast.fromAccount') : t('recurring.account')}</Label>
+          <select
+            id="expected-account"
+            className={selectClass}
+            value={accountId}
+            required={isTransfer}
+            onChange={(e) => setAccountId(e.target.value)}
+          >
             <option value="">{t('forecast.noAccount')}</option>
             {sortedAccounts.map((acc) => (
               <option key={acc.id} value={acc.id}>{getAccountName(acc)}</option>
             ))}
           </select>
         </div>
+        {isTransfer && (
+          <div className="space-y-2">
+            <Label htmlFor="expected-transfer-to">{t('forecast.transferTo')}</Label>
+            <select
+              id="expected-transfer-to"
+              className={selectClass}
+              value={transferTo}
+              required
+              onChange={(e) => setTransferTo(e.target.value)}
+            >
+              <option value="">{t('forecast.noAccount')}</option>
+              {sortedAccounts.filter((acc) => acc.id !== accountId).map((acc) => (
+                <option key={acc.id} value={acc.id}>{getAccountName(acc)}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
       <div className="space-y-2">
         <Label>{t('recurring.category')}</Label>
@@ -1141,7 +1415,12 @@ function ExpectedPaymentForm({
           className={selectClass}
         />
       </div>
-      <p className="text-xs text-muted-foreground">{t('forecast.matchHint')}</p>
+      {!isBudget && (
+        <p className="text-xs text-muted-foreground">
+          {isTransfer ? t('forecast.matchHintTransfer') : t('forecast.matchHint')}
+          {kind === 'repeating' && <> {t('forecast.seriesMatchHint')}</>}
+        </p>
+      )}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onCancel}>{t('common.cancel')}</Button>
         <Button type="submit" disabled={loading}>{loading ? t('common.loading') : t('common.save')}</Button>

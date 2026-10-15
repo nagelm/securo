@@ -683,6 +683,8 @@ export type ForecastItemKind =
   | 'income_change'
   | 'spending_change'
   | 'loan_change'
+  // Fork: a plan for everyday spending (no scenario).
+  | 'budget'
 export type ForecastChangeMode = 'amount' | 'pause' | 'stop' | 'percent' | 'rate' | 'lump_sum'
 
 export interface ForecastScenario {
@@ -708,6 +710,8 @@ export interface ForecastItem {
   end_date: string | null
   frequency: RecurringTransaction['frequency'] | null
   account_id: string | null
+  /** Fork: an expected transfer's to-account (`account_id` is where it leaves). */
+  transfer_account_id?: string | null
   category_id: string | null
   recurring_transaction_id: string | null
   change_mode: ForecastChangeMode | null
@@ -716,6 +720,16 @@ export interface ForecastItem {
   /** loan_change 'rate': recalculate the repayment over the remaining term (true) or keep it. */
   recalculate_repayment?: boolean | null
   matched_transaction_id: string | null
+  /** Fork: a repeating expected payment's matched occurrences. */
+  matches?: ForecastItemMatch[]
+  /** Fork: how many payments a repeating expected payment makes, start to end; null when open-ended. */
+  occurrence_count?: number | null
+}
+
+/** Fork: the bank row that settled one occurrence of a repeating expected payment. */
+export interface ForecastItemMatch {
+  occurrence_date: string
+  transaction_id: string
 }
 
 export interface ForecastPoint {
@@ -804,6 +818,8 @@ export interface ForecastResponse {
   end_date: string
   starting_balance: number
   include_spending: boolean
+  /** Fork: the accounts the line covers (all cash and card accounts, or the chosen ones). */
+  account_ids?: string[]
   /** The real balance from (today − horizon) to today; the last point is today's starting balance. */
   actuals?: ForecastPoint[]
   base: ForecastPoint[]

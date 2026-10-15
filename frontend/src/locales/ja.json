@@ -1728,7 +1728,35 @@
     "showFewer": "Show fewer",
     "carousel": "Charts",
     "cashAndCards": "Cash & cards",
-    "trend": "Past trend"
+    "trend": "Past trend",
+    "accountView": "Accounts",
+    "accountViewHint": "The line, its history and every payment keep to the accounts you pick. A transfer between two of them cancels out.",
+    "allCashAccounts": "All cash accounts",
+    "someAccounts": "{{count}} of {{total}} accounts",
+    "itemKind": "Kind",
+    "itemKinds": {
+      "one_off": "One-off payment",
+      "repeating": "Repeating payment",
+      "budget": "Budget"
+    },
+    "transfer": "Transfer between my accounts",
+    "transferTo": "Transfer to",
+    "fromAccount": "From account",
+    "matchHintTransfer": "When a bank transfer between these two accounts arrives, within 5% of the amount and 10 days of the date, the payment is marked as arrived and leaves the forecast.",
+    "seriesMatchHint": "Each payment is matched on its own; one still unmatched after its date stays expected tomorrow.",
+    "seriesSummary": "{{frequency}}, {{from}} – {{to}}",
+    "seriesSummaryOpen": "{{frequency}}, from {{from}}",
+    "seriesArrived": "{{matched}}/{{total}} arrived",
+    "seriesArrivedOpen": "{{matched}} arrived",
+    "budgetBadge": "Budget",
+    "budgetHint": "A budget replaces the everyday spending estimate over its dates: for every category, or only its own when you pick one. It is not matched to bank rows.",
+    "budgetSummary": "Budget: {{amount}} a {{period}}, {{from}} – {{to}}",
+    "budgetSummaryOpen": "Budget: {{amount}} a {{period}}, from {{from}}",
+    "budgetPeriods": {
+      "weekly": "week",
+      "biweekly": "fortnight",
+      "monthly": "month"
+    }
   },
   "rules": {
     "searchPlaceholder": "ルールを検索...",

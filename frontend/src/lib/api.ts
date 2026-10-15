@@ -1300,9 +1300,18 @@ export const forecast = {
     months = 12,
     interval = 'monthly',
     includeSpending = true,
+    // Fork: an account view; omitted for all cash and card accounts.
+    accountIds?: string[],
   ): Promise<ForecastResponse> => {
     const { data } = await api.get('/forecast', {
-      params: { months, interval, include_spending: includeSpending },
+      params: {
+        months,
+        interval,
+        include_spending: includeSpending,
+        ...(accountIds ? { account_ids: accountIds } : {}),
+      },
+      // Repeated `account_ids=a&account_ids=b`, as FastAPI reads a list.
+      ...(accountIds ? { paramsSerializer: { indexes: null as null } } : {}),
     })
     return data
   },
