@@ -1415,25 +1415,43 @@ async def compute_forecast(
     chosen_categories = set(budget_choices.category_ids)
     chosen_groups = set(budget_choices.budget_group_ids)
     budgets, groups = await load_budget_plan(session, workspace_id)
-    committed: dict[tuple[uuid.UUID, date], float] = {}
-    if chosen_categories or chosen_groups:
+
+    async def committed_in(ids: list[uuid.UUID], view: bool) -> dict[tuple[uuid.UUID, date], float]:
+        committed: dict[tuple[uuid.UUID, date], float] = {}
         for proj in [
             *await _get_recurring_projections(
-                session, workspace_id, today + timedelta(days=1), end + timedelta(days=1), account_ids,
+                session, workspace_id, today + timedelta(days=1), end + timedelta(days=1), ids,
                 external_transfers=True,
             ),
-            *await expected_payment_projections(
-                session, workspace_id, today, end, account_ids, narrowed=narrowed
-            ),
+            *await expected_payment_projections(session, workspace_id, today, end, ids, narrowed=view),
         ]:
             if proj["type"] == "debit" and proj["category_id"] is not None and today < proj["date"] <= end:
                 key = (proj["category_id"], proj["date"].replace(day=1))
                 committed[key] = committed.get(key, 0.0) + await to_primary(
                     Decimal(str(proj["amount"])), proj["currency"]
                 )
-    spending, budgeted, uses = _budgeted_spending(
-        estimates, budgets, groups, chosen_categories, chosen_groups, today, end, committed, narrowed
-    )
+        return committed
+
+    if (chosen_categories or chosen_groups) and narrowed:
+        # Fork: a budget is the household's and names no account, so an account
+        # view works it out over every cash account and takes each category's
+        # share of it by how much of that category's spending the view's
+        # accounts carry (their estimate against the household's).
+        all_ids = await cash_flow_account_ids(session, workspace_id)
+        household = await _get_category_spending_estimate(session, workspace_id, today, to_primary, all_ids)
+        spending, budgeted, uses = _budgeted_spending(
+            household, budgets, groups, chosen_categories, chosen_groups, today, end,
+            await committed_in(all_ids, False), False,
+        )
+        house_est = {e["category_id"]: float(e["monthly_amount"]) for e in household}
+        view_est = {e["category_id"]: float(e["monthly_amount"]) for e in estimates}
+        ratio = {c: (view_est.get(c, 0.0) / v if v > 0 else 0.0) for c, v in house_est.items()}
+        spending = [(c, d, a * ratio.get(c, 0.0)) for c, d, a in spending if ratio.get(c, 0.0) > 0]
+    else:
+        committed = await committed_in(account_ids, narrowed) if (chosen_categories or chosen_groups) else {}
+        spending, budgeted, uses = _budgeted_spending(
+            estimates, budgets, groups, chosen_categories, chosen_groups, today, end, committed, narrowed
+        )
     extra: list[dict] = []
     if include_spending:
         for category_id, d, amount in spending:

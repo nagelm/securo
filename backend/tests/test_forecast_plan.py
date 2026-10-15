@@ -836,6 +836,33 @@ async def test_an_account_view_budgets_only_the_categories_it_spends_in(session,
     )
 
 
+async def test_an_account_view_takes_its_share_of_a_household_budget(session, test_user, test_workspace):
+    """A budget is the household's: each account view projects the part of it
+    that matches the share of the category's spending its accounts carry."""
+    from tests.test_forecast import _spending_history, _spread_total, _tx
+
+    today = app_today()
+    this_month = today.replace(day=1)
+    joint = await _account(session, test_user.id)
+    card = await _account(session, test_user.id)
+    eating = await _spending_history(session, test_user.id, joint.id)  # 280 a month on the joint account
+    for back in (1, 2, 3):
+        await _tx(session, test_user.id, card.id, 280, "debit", _add_months(this_month, -back), category_id=eating.id)
+    before_joint = await _forecast(session, test_user, test_workspace, include_spending=True, account_ids=[joint.id])
+    before_card = await _forecast(session, test_user, test_workspace, include_spending=True, account_ids=[card.id])
+    await _budget(session, test_user.id, test_workspace.id, eating.id, "100", this_month)
+
+    joint_view = await _forecast(session, test_user, test_workspace, include_spending=True, account_ids=[joint.id])
+    card_view = await _forecast(session, test_user, test_workspace, include_spending=True, account_ids=[card.id])
+
+    first, end = today + timedelta(days=1), _add_months(today, MONTHS)
+    # Each carries half of the household's Eating out, so half of its 100 budget.
+    for before, after in ((before_joint, joint_view), (before_card, card_view)):
+        assert after.summary.end_balance - before.summary.end_balance == pytest.approx(
+            _spread_total(280, first, end) - _spread_total(50, first, end), abs=0.05
+        )
+
+
 async def test_api_budget_choices(client, auth_headers, session, test_user, test_workspace):
     from tests.test_forecast import _category
 
