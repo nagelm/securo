@@ -9,7 +9,10 @@ vi.mock('@/hooks/use-privacy-mode', () => ({
 }))
 
 class SizedObserver {
-  constructor(private cb: ResizeObserverCallback) {}
+  private cb: ResizeObserverCallback
+  constructor(cb: ResizeObserverCallback) {
+    this.cb = cb
+  }
   observe() {
     this.cb([{ contentRect: { width: 600 } } as ResizeObserverEntry], this as unknown as ResizeObserver)
   }
