@@ -148,10 +148,12 @@ async def get_cash_flow(
     interval: str = Query("daily", pattern="^(daily|weekly|monthly)$"),
     baseline: bool = Query(False),
     account_ids: Optional[list[uuid.UUID]] = Query(None),
+    # Fork (owner 2026-10-15): how much history the chart shows before today.
+    past_months: Optional[int] = Query(None, ge=1, le=120),
     ctx: WorkspaceContext = Depends(current_workspace),
     session: AsyncSession = Depends(get_async_session),
 ):
     return await report_service.get_cash_flow_report(
         session, ctx.workspace.id, ctx.user_id, months, interval, ctx.user.primary_currency,
-        baseline=baseline, account_ids=account_ids,
+        baseline=baseline, account_ids=account_ids, past_months=past_months,
     )

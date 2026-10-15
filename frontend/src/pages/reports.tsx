@@ -112,6 +112,12 @@ const HISTORICAL_INTERVAL_OPTIONS = [
   { key: 'yearly', value: 'yearly' },
 ] as const
 
+// Fork (owner 2026-10-15): Cash Flow shows the selected period of history and
+// half of it ahead (6M = six months back, three ahead).
+function cashFlowAhead(months: number): number {
+  return Math.max(1, Math.ceil(months / 2))
+}
+
 const CASH_FLOW_INTERVAL_OPTIONS = [
   { key: 'daily', value: 'daily' },
   { key: 'weekly', value: 'weekly' },
@@ -309,7 +315,7 @@ export default function ReportsPage() {
     queryKey: ['reports', activeTab, rangeKey, months, period ?? null, days ?? null, interval, isCashFlow ? cashFlowBaseline : false, activeAccountIds, activeWalletIds, apiStart ?? null, apiEnd ?? null],
     queryFn: () =>
       isCashFlow
-        ? reports.cashFlow(months, interval, cashFlowBaseline, acctIds)
+        ? reports.cashFlow(cashFlowAhead(months), interval, cashFlowBaseline, acctIds, months)
         : activeTab === 'income_expenses' || isMoneyMap
           ? reports.incomeExpenses(months, interval, acctIds, period, days, apiStart, apiEnd)
           : reports.netWorth(months, interval, acctIds, walletIds, period, apiStart, apiEnd),

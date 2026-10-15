@@ -1548,8 +1548,13 @@ async def get_cash_flow_report(
     baseline: bool = False,
     account_ids: Optional[list[uuid.UUID]] = None,
     extra_projections: Optional[list[dict]] = None,
+    past_months: Optional[int] = None,
 ) -> ReportResponse:
     """Cash flow chart with a short past window plus a forward projection.
+
+    Fork: ``past_months`` widens the past window (default
+    ``_PAST_HISTORY_MONTHS``); the Reports tab shows the selected period of
+    history and half of it ahead.
 
     Past window (``_PAST_HISTORY_MONTHS`` months back to today) shows actual
     booked transactions so the user has a visible "this is real" anchor next
@@ -1589,7 +1594,7 @@ async def get_cash_flow_report(
     acct_filter = [Transaction.account_id.in_(account_ids)]
     today = app_today()
     end = _add_months(today, months)
-    chart_start = _add_months(today, -_PAST_HISTORY_MONTHS)
+    chart_start = _add_months(today, -(past_months or _PAST_HISTORY_MONTHS))
 
     user = await session.get(User, user_id)
     primary_currency = user.primary_currency if user else get_settings().default_currency

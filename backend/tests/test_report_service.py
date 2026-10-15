@@ -1522,6 +1522,26 @@ async def test_cash_flow_months_range(session: AsyncSession, test_user, test_wor
 
 
 @pytest.mark.asyncio
+async def test_cash_flow_past_months_widens_the_history(session: AsyncSession, test_user, test_workspace: User):
+    """Fork: `past_months` sets how far back the chart starts; the end stays `months` ahead."""
+    from app.core.app_clock import app_today
+    from app.services.report_service import _add_months
+
+    account = await _make_manual_account(session, test_user.id, "CF Past")
+    await _add_txn(session, test_user.id, account.id, 1000, "credit", date.today(), source="opening_balance")
+    today = app_today()
+
+    default = await get_cash_flow_report(session, test_workspace.id, test_user.id, months=3, interval="daily")
+    wide = await get_cash_flow_report(
+        session, test_workspace.id, test_user.id, months=3, interval="daily", past_months=6,
+    )
+
+    assert date.fromisoformat(default.trend[0].date) > _add_months(today, -2)
+    assert date.fromisoformat(wide.trend[0].date) <= _add_months(today, -6) + timedelta(days=1)
+    assert wide.trend[-1].date == default.trend[-1].date
+
+
+@pytest.mark.asyncio
 async def test_cash_flow_balance_is_running_cumulative(
     session: AsyncSession, test_user, test_workspace: User
 ):
@@ -1685,6 +1705,14 @@ async def test_cash_flow_api_validation(client, auth_headers):
     resp = await client.get(
         "/api/reports/cash-flow",
         params={"months": 0},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+    # past_months beyond ten years (fork)
+    resp = await client.get(
+        "/api/reports/cash-flow",
+        params={"months": 6, "past_months": 121},
         headers=auth_headers,
     )
     assert resp.status_code == 422

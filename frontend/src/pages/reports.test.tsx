@@ -186,7 +186,9 @@ it('preserves saved custom dates across supported tabs and preset dismissal', as
   await user.click(screen.getByRole('button', { name: t('reports.cashFlow') }))
   await waitFor(() => expect(api.reports.cashFlow).toHaveBeenCalled())
   expect(screen.queryByRole('button', { name: t('reports.customRange') })).not.toBeInTheDocument()
-  expect(api.reports.cashFlow.mock.calls.at(-1)?.[0]).toBe(6)
+  // Six months back, three ahead (fork).
+  expect(api.reports.cashFlow.mock.calls.at(-1)?.[0]).toBe(3)
+  expect(api.reports.cashFlow.mock.calls.at(-1)?.[4]).toBe(6)
   await user.click(screen.getByRole('button', { name: t('reports.netWorth') }))
   await user.click(screen.getByRole('button', { name: t('reports.customRange') }))
   await user.click(screen.getByRole('button', { name: t('transactions.filtersBar.apply') }))
@@ -286,7 +288,7 @@ it('each tab opens on its own default range, monthly (fork)', async () => {
   await waitFor(() => expect(api.reports.netWorth.mock.calls.at(-1)?.slice(0, 2)).toEqual([120, 'monthly']))
 })
 
-it('cash flow offers 2Y, 5Y and 10Y ahead (fork)', async () => {
+it('cash flow offers 2Y, 5Y and 10Y: that much history and half of it ahead (fork)', async () => {
   const { user } = renderWithProviders(<ReportsPage />)
   await user.click(screen.getByRole('button', { name: t('reports.cashFlow') }))
   await waitFor(() => expect(api.reports.cashFlow).toHaveBeenCalled())
@@ -294,7 +296,8 @@ it('cash flow offers 2Y, 5Y and 10Y ahead (fork)', async () => {
     expect(screen.getByRole('button', { name: t(`reports.${key}`) })).toBeInTheDocument()
   }
   await user.click(screen.getByRole('button', { name: t('reports.range10y') }))
-  await waitFor(() => expect(api.reports.cashFlow.mock.calls.at(-1)?.slice(0, 2)).toEqual([120, 'monthly']))
+  await waitFor(() => expect(api.reports.cashFlow.mock.calls.at(-1)?.slice(0, 2)).toEqual([60, 'monthly']))
+  expect(api.reports.cashFlow.mock.calls.at(-1)?.[4]).toBe(120)
 })
 
 it('the money map offers 2Y, 5Y and 10Y (fork)', async () => {
