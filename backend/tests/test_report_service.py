@@ -1673,10 +1673,10 @@ async def test_cash_flow_api_endpoint(client, auth_headers, test_transactions):
 @pytest.mark.asyncio
 async def test_cash_flow_api_validation(client, auth_headers):
     """GET /reports/cash-flow rejects out-of-range params."""
-    # months > 12
+    # months > 120 (fork: cash flow looks up to ten years ahead)
     resp = await client.get(
         "/api/reports/cash-flow",
-        params={"months": 13},
+        params={"months": 121},
         headers=auth_headers,
     )
     assert resp.status_code == 422
