@@ -362,3 +362,43 @@ async def _unique_default_name(
     while f"{base} {i}" in taken:
         i += 1
     return f"{base} {i}"
+
+
+class GroupOrderError(ValueError):
+    """A wallet named twice in a reorder."""
+
+
+class GroupNotFound(LookupError):
+    """A reorder named a wallet outside the workspace."""
+
+
+async def reorder_groups(
+    session: AsyncSession, workspace_id: uuid.UUID, group_ids: list[uuid.UUID]
+) -> None:
+    """Fork: put the named wallets in this order, in the places they hold.
+
+    The workspace's wallets are renumbered 0..n-1 in their current order
+    (which also separates ties), then the named ones are dealt back into
+    their own places in the requested order, so wallets the page doesn't
+    show (empty synced ones) keep theirs. Nothing is written on an error.
+    Does not commit.
+    """
+    if len(set(group_ids)) != len(group_ids):
+        raise GroupOrderError("A wallet is named more than once")
+    result = await session.execute(
+        select(AssetGroup)
+        .where(AssetGroup.workspace_id == workspace_id)
+        .order_by(AssetGroup.position, AssetGroup.name)
+    )
+    current = list(result.scalars().all())
+    by_id = {g.id: g for g in current}
+    if any(gid not in by_id for gid in group_ids):
+        raise GroupNotFound("Wallet not found")
+    requested = set(group_ids)
+    slots = [i for i, g in enumerate(current) if g.id in requested]
+    reordered = list(current)
+    for slot, gid in zip(slots, group_ids):
+        reordered[slot] = by_id[gid]
+    for position, group in enumerate(reordered):
+        if group.position != position:
+            group.position = position

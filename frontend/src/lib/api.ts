@@ -1584,6 +1584,10 @@ export const assetGroups = {
   delete: async (id: string): Promise<void> => {
     await api.delete(`/asset-groups/${id}`)
   },
+  /** Fork: put these wallets in this order, in the places they already hold. */
+  reorder: async (groupIds: string[]): Promise<void> => {
+    await api.put('/asset-groups/order', { group_ids: groupIds })
+  },
 }
 
 // Collections — user-defined account groups for filtering (issue #105)

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -63,6 +64,8 @@ import { getAssetProfit } from '@/lib/asset-profit'
 import { getPortfolioShare, getPortfolioTotalPrimary } from '@/lib/asset-portfolio-share'
 import { formatCurrency } from '@/lib/format'
 import { AssetEquityLine, AssetEquitySummary } from '@/components/asset-equity-summary'
+import { SortableAccountList } from '@/components/sortable-account-list'
+import { reorderWallets } from '@/lib/wallet-order'
 
 // Renders a logo image when one is available, falling back to the asset's
 // type-based Lucide icon on missing URL or broken image. Uses the type's
@@ -462,6 +465,23 @@ export default function AssetsPage() {
       toast.success(t('assets.walletUpdated'))
     },
     onError: (e) => toast.error(assetErrorMessage(e, t('common.error'))),
+  })
+
+  // Fork: the user's own wallet order. The list is reordered in the cache at
+  // once and refetched after the save (or put back if it fails).
+  const reorderWalletsMutation = useMutation({
+    mutationFn: (ids: string[]) => assetGroups.reorder(ids),
+    onMutate: async (ids: string[]) => {
+      await queryClient.cancelQueries({ queryKey: ['asset-groups'] })
+      const previous = queryClient.getQueryData<AssetGroup[]>(['asset-groups'])
+      if (previous) queryClient.setQueryData<AssetGroup[]>(['asset-groups'], reorderWallets(previous, ids))
+      return { previous }
+    },
+    onError: (e, _ids, context) => {
+      if (context?.previous) queryClient.setQueryData(['asset-groups'], context.previous)
+      toast.error(assetErrorMessage(e, t('common.error')))
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['asset-groups'] }),
   })
 
   const deleteWalletMutation = useMutation({
@@ -1002,7 +1022,7 @@ export default function AssetsPage() {
     }
   }
 
-  function renderWalletSection(wallet: AssetGroup, walletAssets: Asset[]) {
+  function renderWalletSection(wallet: AssetGroup, walletAssets: Asset[], handle?: ReactNode) {
     const isCollapsed = collapsedWallets.has(wallet.id)
     const isSynced = wallet.source !== 'manual'
     // Sum in wallet's reported current_value (already computed by backend).
@@ -1019,6 +1039,7 @@ export default function AssetsPage() {
     return (
       <div key={wallet.id} className="space-y-2">
         <div className="flex items-center gap-3 px-1">
+          {handle}
           <button
             onClick={() => toggleWalletCollapse(wallet.id)}
             className="flex items-center gap-2 flex-1 min-w-0 group"
@@ -1162,7 +1183,15 @@ export default function AssetsPage() {
           {/* Wallets (active assets grouped) */}
           {(sortedWallets.length > 0 || ungroupedAssets.length > 0) && (
             <div className="space-y-4">
-              {sortedWallets.map(w => renderWalletSection(w, assetsByGroup.get(w.id) ?? []))}
+              <SortableAccountList
+                accounts={sortedWallets}
+                enabled={canWrite && !reorderWalletsMutation.isPending}
+                onReorder={(ids) => reorderWalletsMutation.mutate(ids)}
+                label={(w) => w.name}
+                renderRow={(w, controls) => (
+                  renderWalletSection(w, assetsByGroup.get(w.id) ?? [], controls.handle)
+                )}
+              />
 
               {ungroupedAssets.length > 0 && (
                 <div className="space-y-2">
