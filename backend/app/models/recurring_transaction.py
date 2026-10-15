@@ -67,6 +67,8 @@ class RecurringTransaction(Base):
     # Only the interest is ever an expense; the rest is principal, a transfer
     # between two of the user's own accounts (see dashboard_service
     # `_get_recurring_projections`).
+    # Fork: a `standard` item with `transfer_account_id` is a transfer from
+    # `account_id` to another of the user's own accounts (projection only).
     kind: Mapped[str] = mapped_column(String(20), default="standard", server_default="standard")
     transfer_account_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True, index=True
@@ -83,13 +85,6 @@ class RecurringTransaction(Base):
         index=True,
     )
 
-    # Fork: part of the Forecast plan rather than a genuinely regular payment
-    # (f019). The Recurring page leaves plan items out; the Forecast page's
-    # expected payments list them. A `standard` item with
-    # `transfer_account_id` is a transfer between two of the user's own
-    # accounts (projection only).
-    plan: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
-
     user: Mapped["User"] = relationship()
     account: Mapped[Optional["Account"]] = relationship(foreign_keys=[account_id])
     category: Mapped[Optional["Category"]] = relationship(foreign_keys=[category_id])
@@ -104,6 +99,3 @@ class RecurringTransaction(Base):
     payee_name = cast(Optional[str], None)
     payee_logo_url = cast(Optional[str], None)
     payee_icon = cast(Optional[str], None)
-    # Fork: a plan item's progress, filled by the service (not DB columns).
-    arrived_count = cast(Optional[int], None)
-    occurrence_count = cast(Optional[int], None)

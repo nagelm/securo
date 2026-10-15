@@ -217,6 +217,9 @@ class ForecastRecurringPayment(BaseModel):
     type: str
     currency: str
     account_id: Optional[uuid.UUID] = None
+    # Fork: a transfer between own accounts (or a loan payment): the whole
+    # payment from ``account_id`` into this account.
+    transfer_account_id: Optional[uuid.UUID] = None
 
 
 class ForecastResponse(BaseModel):

@@ -133,8 +133,8 @@ async def _hand_over(
         .where(ForecastItem.matched_transaction_id == stale.id)
         .values(matched_transaction_id=settled.id)
     )
-    # Fork: and a Forecast plan item's link (the plan's repeating payments
-    # are recurring items, linked through recurring_transaction_id).
+    # Fork: and a recurring transfer's link (forecast_service
+    # link_recurring_transfers, through recurring_transaction_id).
     if settled.recurring_transaction_id is None and stale.recurring_transaction_id is not None:
         settled.recurring_transaction_id = stale.recurring_transaction_id
 

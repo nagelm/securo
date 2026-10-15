@@ -1,7 +1,6 @@
 import uuid
-from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
@@ -22,12 +21,10 @@ router = APIRouter(prefix="/api/recurring-transactions", tags=["recurring-transa
 
 @router.get("", response_model=list[RecurringTransactionRead])
 async def list_recurring_transactions(
-    # Fork: true for the Forecast plan's items, false for the regular payments.
-    plan: Optional[bool] = Query(None),
     ctx: WorkspaceContext = Depends(current_workspace),
     session: AsyncSession = Depends(get_async_session),
 ):
-    return await recurring_transaction_service.get_recurring_transactions(session, ctx.workspace.id, plan)
+    return await recurring_transaction_service.get_recurring_transactions(session, ctx.workspace.id)
 
 
 @router.post("", response_model=RecurringTransactionRead, status_code=status.HTTP_201_CREATED)

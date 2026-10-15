@@ -7,8 +7,8 @@ accounts) or one change inside a scenario (including a change to a loan's
 rate or repayments, ``loan_change``). Both are read by `forecast_service`,
 which lays them over the cash-flow projection.
 
-Fork: the plan's repeating payments are recurring items with ``plan`` set
-(f019), not forecast items.
+Fork: repeating expected payments are ordinary recurring items (f019, f020),
+not forecast items.
 """
 import uuid
 from datetime import date as _date, datetime

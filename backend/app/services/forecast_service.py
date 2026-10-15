@@ -21,9 +21,11 @@ the item is matched to it and drops out: from the sync and import paths
 after new rows land, and again whenever a forecast is computed, so a missed
 hook only delays the match.
 
-Fork: the plan's repeating payments are recurring items with ``plan`` set
-(``RecurringTransaction``), projected with the other recurring payments;
-``link_plan_payments`` links their bank rows occurrence by occurrence.
+Fork: repeating payments are recurring items (``RecurringTransaction``),
+one kind of object, projected and listed like every recurring payment. A
+standard recurring transfer between own accounts is linked to its bank
+transfer pairs occurrence by occurrence (``link_recurring_transfers``); the
+bill matcher (``recurring_match_service``) links every other one.
 
 Fork: the spending estimate follows the canonical Budgets: in a month
 where a category has a budget, the category projects its budget instead of
@@ -183,15 +185,15 @@ async def match_expected_payments(
     the closest amount. Flushes, never commits. Called by sync
     and import only; reads use ``pending_expected_matches``.
 
-    Fork: then links the rows of the Forecast plan's recurring items
-    (``link_plan_payments``), counted in the total.
+    Fork: then links the debit legs of bank transfer pairs to standard
+    recurring transfers (``link_recurring_transfers``), counted in the total.
     """
     found = await _find_expected_matches(session, workspace_id, transactions)
     for item, tx_id in found:
         item.matched_transaction_id = tx_id
     if found:
         await session.flush()
-    return len(found) + await link_plan_payments(session, workspace_id, transactions)
+    return len(found) + await link_recurring_transfers(session, workspace_id, transactions)
 
 
 async def pending_expected_matches(session: AsyncSession, workspace_id: uuid.UUID) -> set[uuid.UUID]:
@@ -277,30 +279,31 @@ async def _find_expected_matches(
     return found
 
 
-async def link_plan_payments(
+async def link_recurring_transfers(
     session: AsyncSession,
     workspace_id: uuid.UUID,
     transactions: Optional[Iterable[Transaction]] = None,
     *,
     recurring_ids: Optional[list[uuid.UUID]] = None,
 ) -> int:
-    """Fork: link bank rows to the Forecast plan's recurring items
-    (``RecurringTransaction.plan``), occurrence by occurrence, through
+    """Fork: link bank transfer pairs to standard recurring transfers between
+    own accounts (``transfer_account_id`` set; the bill matcher leaves them
+    out), occurrence by occurrence, through
     ``Transaction.recurring_transaction_id``. Returns how many rows it linked.
 
     Each due occurrence (from the item's start to its end, up to today plus
     the window) with no row linked near it takes the best unlinked row on the
     item's account in the same direction, within the window (3 days for a
     weekly item, 6 fortnightly, 10 otherwise), exact in amount or within 5%
-    with a word in common, as an expected payment is matched. A transfer
-    (``transfer_account_id``) is settled only by the debit leg of a bank
-    transfer pair into that account. A row stored before the item was created
-    only settles an occurrence dated before then. The item's
+    with a word in common, as an expected payment is matched, and only the
+    debit leg of a bank transfer pair into the to-account. A row stored
+    before the item was created only settles an occurrence dated before
+    then. The item's
     ``next_occurrence`` moves past the occurrences that arrived. Flushes,
     never commits; with ``transactions`` only those rows are candidates.
     """
     from app.services.recurring_match_service import carry_payee
-    from app.services.recurring_transaction_service import _advance_date, plan_occurrences
+    from app.services.recurring_transaction_service import LOAN_PAYMENT, _advance_date, schedule_occurrences
 
     candidates = list(transactions) if transactions is not None else None
     if candidates is not None and not candidates:
@@ -308,7 +311,8 @@ async def link_plan_payments(
     today = app_today()
     stmt = select(RecurringTransaction).where(
         RecurringTransaction.workspace_id == workspace_id,
-        RecurringTransaction.plan.is_(True),
+        RecurringTransaction.kind != LOAN_PAYMENT,
+        RecurringTransaction.transfer_account_id.is_not(None),
         RecurringTransaction.account_id.is_not(None),
         RecurringTransaction.start_date <= today + timedelta(days=MATCH_WINDOW_DAYS),
     )
@@ -318,7 +322,7 @@ async def link_plan_payments(
     for rec in (await session.execute(stmt.order_by(RecurringTransaction.created_at))).scalars():
         window = _series_window(rec.frequency)
         last = min(rec.end_date or date.max, today + timedelta(days=window))
-        dates = plan_occurrences(rec, rec.start_date, last)
+        dates = schedule_occurrences(rec, rec.start_date, last)
         if not dates:
             continue
         arrived = sorted(
@@ -363,11 +367,10 @@ async def link_plan_payments(
             fits = [
                 tx for tx in pool
                 if tx.recurring_transaction_id is None
-                and _plan_row_fits(rec, tx, today, occurrence, window, check_stored, created)
+                and _transfer_row_fits(rec, tx, today, occurrence, window, check_stored, created)
             ]
-            if rec.transfer_account_id is not None:
-                to_account = rec.transfer_account_id
-                fits = [tx for tx in fits if await _paired_into(session, tx, to_account)]
+            to_account = cast(uuid.UUID, rec.transfer_account_id)
+            fits = [tx for tx in fits if await _paired_into(session, tx, to_account)]
             if not fits:
                 continue
             expected = abs(Decimal(rec.amount or 0))
@@ -395,7 +398,7 @@ async def link_plan_payments(
     return linked
 
 
-def _plan_row_fits(
+def _transfer_row_fits(
     rec: RecurringTransaction,
     tx: Transaction,
     today: date,
@@ -404,11 +407,9 @@ def _plan_row_fits(
     check_stored: bool,
     created: Optional[datetime],
 ) -> bool:
-    """Fork: whether ``tx`` is the bank row of plan item ``rec``'s payment on
-    ``when`` (the expected-payment rules of ``_is_match``)."""
-    if tx.account_id != rec.account_id or tx.type != rec.type:
-        return False
-    if rec.transfer_account_id is not None and tx.transfer_pair_id is None:
+    """Fork: whether ``tx`` is the debit leg of recurring transfer ``rec``'s
+    payment on ``when`` (the expected-payment rules of ``_is_match``)."""
+    if tx.account_id != rec.account_id or tx.type != rec.type or tx.transfer_pair_id is None:
         return False
     stored = _utc(tx.created_at)
     if check_stored and (stored is None or (created is not None and stored < created)):
@@ -446,9 +447,8 @@ async def expected_payment_projections(
     account counts unless the report is narrowed to particular accounts.
     A transfer gives one row per leg in scope (see ``_legs``).
 
-    Fork: the Forecast plan's repeating payments are recurring items
-    (``RecurringTransaction.plan``), projected with the other recurring
-    payments.
+    Fork: repeating payments are recurring items, projected with the other
+    recurring payments.
     """
     arrived = await pending_expected_matches(session, workspace_id)
     stmt = select(ForecastItem).where(
@@ -671,7 +671,7 @@ def _validate_item(values: dict) -> None:
     kind = values["kind"]
     amount = values.get("amount")
     if values.get("scenario_id") is None and kind != "one_off":
-        # Fork: a repeating one is a plan recurring item (the recurring API).
+        # Fork: a repeating one is a recurring item (the recurring API).
         raise ValueError("An expected payment is a one-off payment")
     start, end = values.get("start_date"), values.get("end_date")
     if start and end and end < start:
@@ -1227,8 +1227,8 @@ async def loan_repayment_projections(
     loans = [loan for loan in await _open_loans(session, workspace_id, today) if loan.base is not None]
     if not loans:
         return []
-    # A recurring payment into the loan (a loan payment schedule, a plain
-    # recurring transfer, or a plan item) stands in for the loan card's
+    # A recurring payment into the loan (a loan payment schedule or a plain
+    # recurring transfer) stands in for the loan card's
     # repayments over the dates it covers, from its start to its end. Fork:
     # bounded, so the card's repayments resume after a schedule ends.
     covered_by: dict[uuid.UUID, list[tuple[date, Optional[date]]]] = {}
@@ -1646,21 +1646,65 @@ async def compute_forecast(
         scenarios=series,
         spending_estimates=[SpendingEstimate(**e) for e in estimates],
         loans=loan_forecasts,
-        recurring_payments=_recurring_payments(recurring_projections, recurring_by_id),
+        recurring_payments=await _listed_recurring_payments(
+            session, workspace_id, today, end, account_ids, recurring_by_id,
+        ),
         budget_uses=budget_uses,
     )
+
+
+async def _listed_recurring_payments(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    today: date,
+    end: date,
+    account_ids: list[uuid.UUID],
+    by_id: dict[uuid.UUID, RecurringTransaction],
+) -> list[ForecastRecurringPayment]:
+    """Fork (owner 2026-10-15): every recurring item's dated payments for the
+    Expected transactions list, one row per item and date. The rows the base
+    line counts (the cash-flow projection's), plus each transfer between own
+    accounts in scope, whose legs cancel in the line but which is still a
+    payment the user expects. Display only: the line is not changed."""
+    from app.services.dashboard_service import _get_recurring_projections
+
+    window = (today + timedelta(days=1), end + timedelta(days=1))
+    counted = await _get_recurring_projections(
+        session, workspace_id, *window, account_ids, with_recurring_id=True, external_transfers=True,
+    )
+    moves = await _get_recurring_projections(
+        session, workspace_id, *window, account_ids, with_recurring_id=True, include_transfer_like=True,
+    )
+    missing = {p["recurring_transaction_id"] for p in [*counted, *moves]} - set(by_id)
+    if missing:
+        by_id = {
+            **by_id,
+            **{
+                r.id: r
+                for r in (
+                    await session.execute(select(RecurringTransaction).where(RecurringTransaction.id.in_(missing)))
+                ).scalars()
+            },
+        }
+    transfers = [p for p in moves if by_id[p["recurring_transaction_id"]].transfer_account_id is not None]
+    return _recurring_payments([*counted, *transfers], by_id)
 
 
 def _recurring_payments(
     projections: list[dict], by_id: dict[uuid.UUID, RecurringTransaction],
 ) -> list[ForecastRecurringPayment]:
     """One row per schedule and date (a schedule split into legs is one
-    payment), in date order."""
+    payment), in date order. Fork: a transfer between own accounts (a loan
+    payment too) is one row of its whole payment, from account to
+    to-account, however many of its legs are in scope."""
     totals: dict[tuple[uuid.UUID, date, str, str], float] = {}
     for p in projections:
         rec_id = p.get("recurring_transaction_id")
-        # Fork: plan items are listed with the expected payments instead.
-        if rec_id is None or rec_id not in by_id or by_id[rec_id].plan:
+        if rec_id is None or rec_id not in by_id:
+            continue
+        rec = by_id[rec_id]
+        if rec.transfer_account_id is not None:
+            totals[(rec_id, p["date"], "debit", rec.currency)] = float(rec.amount)
             continue
         key = (rec_id, p["date"], p["type"], p["currency"])
         totals[key] = totals.get(key, 0.0) + float(p["amount"])
@@ -1668,6 +1712,7 @@ def _recurring_payments(
         ForecastRecurringPayment(
             recurring_transaction_id=rec_id, date=d, description=by_id[rec_id].description,
             amount=round(abs(amount), 2), type=type_, currency=currency, account_id=by_id[rec_id].account_id,
+            transfer_account_id=by_id[rec_id].transfer_account_id,
         )
         for (rec_id, d, type_, currency), amount in totals.items()
     ]

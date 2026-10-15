@@ -165,10 +165,10 @@ async def test_a_plain_recurring_transfer_into_the_loan_counts_as_its_schedule(s
     assert await loan_repayment_projections(session, test_workspace.id, today, _add_months(today, MONTHS)) == []
 
 
-async def test_a_plan_transfer_into_the_loan_replaces_its_repayments_until_it_ends(
+async def test_a_recurring_transfer_into_the_loan_replaces_its_repayments_until_it_ends(
     session, test_user, test_workspace,
 ):
-    """Fork: over the dates a plan recurring transfer into the loan covers
+    """Fork: over the dates a recurring transfer into the loan covers
     (its start to its end), the loan card's own repayments are not projected
     as well; after it ends they are again."""
     from app.models.recurring_transaction import RecurringTransaction
@@ -179,8 +179,8 @@ async def test_a_plan_transfer_into_the_loan_replaces_its_repayments_until_it_en
     loan = await _loan(session, test_user.id)
     first, last = today + timedelta(days=1), today + timedelta(days=60)
     session.add(RecurringTransaction(
-        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id, kind="standard", plan=True,
-        description="Plan: loan", amount=Decimal("400"), currency="BRL", type="debit", frequency="weekly",
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id, kind="standard",
+        description="Extra to the loan", amount=Decimal("400"), currency="BRL", type="debit", frequency="weekly",
         start_date=first, end_date=last, next_occurrence=first, is_active=True, auto_generate=False,
         account_id=checking.id, transfer_account_id=loan.id,
     ))
@@ -189,10 +189,9 @@ async def test_a_plan_transfer_into_the_loan_replaces_its_repayments_until_it_en
     rows = await loan_repayment_projections(session, test_workspace.id, today, _add_months(today, MONTHS))
     _, base = _base_schedule()
     assert [r["date"] for r in rows] == [d for d in _in_horizon(p.date for p in base.periods) if d > last]
-    # The plan's own payments leave cash on their dates.
+    # The transfer's own payments leave cash on their dates, listed weekly.
     result = await _forecast(session, test_user, test_workspace)
-    weeks = len([d for d in _in_horizon(p.date for p in base.periods) if d <= last])
-    assert weeks > 0 and result.recurring_payments == []
+    assert [r.date for r in result.recurring_payments] == [first + timedelta(weeks=n) for n in range(9)]
 
 
 async def test_a_loan_without_details_adds_no_repayments(session, test_user, test_workspace):

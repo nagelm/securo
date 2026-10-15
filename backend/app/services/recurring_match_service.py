@@ -290,7 +290,7 @@ async def find_bill_for_incoming(
             RecurringTransaction.currency == currency,
             RecurringTransaction.type == tx_type,
             # Fork: a standard transfer is settled only by a leg of a bank
-            # transfer pair, once paired (forecast_service.link_plan_payments).
+            # transfer pair, once paired (forecast_service.link_recurring_transfers).
             or_(
                 RecurringTransaction.kind != "standard",
                 RecurringTransaction.transfer_account_id.is_(None),
