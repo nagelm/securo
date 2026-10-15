@@ -8,9 +8,10 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 
 from app.models.forecast import ForecastItem, ForecastItemMatch
+from app.models.transaction import Transaction
 from tests import test_forecast_postgres as _pg
 from tests.test_forecast import _account, _tx
 from tests.test_forecast_plan import (  # noqa: F401  (collected here on PostgreSQL)
@@ -98,7 +99,8 @@ async def test_plan_migrations_downgrade_and_upgrade(session, test_user, test_wo
     columns, tables = await _schema_facts(session)
     assert "transfer_account_id" not in columns and "forecast_item_matches" not in tables
     # Budgets and transfers can't live under the old schema; the plain payment stays.
-    kinds = await session.execute(text("SELECT kind FROM forecast_items"))
+    # Through the model, so the per-test schema map applies (raw SQL would read public).
+    kinds = await session.execute(select(ForecastItem.kind))
     assert [r[0] for r in kinds] == ["one_off"]
 
     await _pg._run(session, "upgrade", F014)
@@ -116,7 +118,7 @@ async def test_plan_migrations_downgrade_and_upgrade(session, test_user, test_wo
     session.add(ForecastItemMatch(item_id=series.id, occurrence_date=date(2030, 1, 1), transaction_id=tx.id))
     await session.commit()
     # Deleting the bank row deletes its match (ON DELETE CASCADE from f015).
-    await session.execute(text("DELETE FROM transactions WHERE id = :id"), {"id": tx.id})
+    await session.execute(delete(Transaction).where(Transaction.id == tx.id))
     await session.commit()
     session.expunge_all()
     assert (await session.execute(select(func.count(ForecastItemMatch.id)))).scalar_one() == 0
