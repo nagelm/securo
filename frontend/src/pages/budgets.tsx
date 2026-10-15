@@ -1,9 +1,14 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale } from '@/hooks/use-display-locale'
 import { monthLabel } from '@/lib/month-utils'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { categories as categoriesApi, categoryGroups as groupsApi, budgets as budgetsApi } from '@/lib/api'
+import {
+  categories as categoriesApi,
+  categoryGroups as groupsApi,
+  budgets as budgetsApi,
+  budgetGroups as budgetGroupsApi,
+} from '@/lib/api'
 import { extractApiError } from '@/lib/api-errors'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -17,7 +22,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import type { Budget } from '@/types'
+import type { Budget, BudgetGroup, BudgetGroupVsActual, Category, CategoryGroup } from '@/types'
 import { Pencil, Trash2, Plus, Repeat, CalendarIcon } from 'lucide-react'
 import { format } from 'date-fns'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
@@ -37,6 +42,12 @@ function currentMonth() {
 }
 
 const TH = 'text-xs font-medium text-muted-foreground py-3'
+const selectClass = 'w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary'
+
+// Fork: an end month travels as the first day of the month; the form's
+// month input speaks yyyy-MM.
+const toMonthInput = (iso: string | null | undefined) => (iso ? iso.slice(0, 7) : '')
+const fromMonthInput = (value: FormDataEntryValue | null) => (value ? `${value as string}-01` : null)
 
 function SectionCard({ children }: { children: React.ReactNode }) {
   return (
@@ -69,6 +80,7 @@ export default function BudgetsPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Budget | null>(null)
   const [deletingBudget, setDeletingBudget] = useState<Budget | null>(null)
+  const [newRecurring, setNewRecurring] = useState(false)
 
   const { data: budgetsList } = useQuery({
     queryKey: ['budgets', selectedMonth],
@@ -93,26 +105,31 @@ export default function BudgetsPage() {
   })
 
   const createMutation = useMutation({
-    mutationFn: (data: { category_id: string; amount: number; month: string; is_recurring?: boolean }) =>
-      budgetsApi.create(data),
+    mutationFn: (data: {
+      category_id: string
+      amount: number
+      month: string
+      is_recurring?: boolean
+      end_month?: string | null
+    }) => budgetsApi.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['budgets'] })
       setDialogOpen(false)
       toast.success(t('budgets.created'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, amount }: { id: string; amount: number }) =>
-      budgetsApi.update(id, { amount }),
+    mutationFn: ({ id, ...changes }: { id: string; amount: number; end_month?: string | null }) =>
+      budgetsApi.update(id, changes),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['budgets'] })
       setDialogOpen(false)
       setEditing(null)
       toast.success(t('budgets.updated'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
   })
 
   const deleteMutation = useMutation({
@@ -197,7 +214,7 @@ export default function BudgetsPage() {
           title={t('budgets.title')}
           action={
             canWrite ? (
-              <Button size="sm" className="gap-1.5 h-8" onClick={() => { setEditing(null); setDialogOpen(true) }}>
+              <Button size="sm" className="gap-1.5 h-8" onClick={() => { setEditing(null); setNewRecurring(false); setDialogOpen(true) }}>
                 <Plus size={13} /> {t('budgets.add')}
               </Button>
             ) : undefined
@@ -221,6 +238,11 @@ export default function BudgetsPage() {
                       {budget.is_recurring && (
                         <span title={t('budgets.recurringLabel')} className="text-muted-foreground">
                           <Repeat size={12} />
+                        </span>
+                      )}
+                      {budget.end_month && (
+                        <span className="text-xs font-normal text-muted-foreground" data-testid="budget-until">
+                          {t('budgets.untilLabel', { month: monthLabel(toMonthInput(budget.end_month), uiLocale) })}
                         </span>
                       )}
                     </span>
@@ -272,6 +294,7 @@ export default function BudgetsPage() {
                 updateMutation.mutate({
                   id: editing.id,
                   amount: parseFloat(formData.get('amount') as string),
+                  ...(editing.is_recurring ? { end_month: fromMonthInput(formData.get('end_month')) } : {}),
                 })
               } else {
                 const isRecurring = formData.get('is_recurring') === 'on'
@@ -280,6 +303,7 @@ export default function BudgetsPage() {
                   amount: parseFloat(formData.get('amount') as string),
                   month: monthParam,
                   is_recurring: isRecurring,
+                  ...(isRecurring ? { end_month: fromMonthInput(formData.get('end_month')) } : {}),
                 })
               }
             }}
@@ -308,10 +332,29 @@ export default function BudgetsPage() {
                   </select>
                 </div>
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" name="is_recurring" className="rounded border-border" />
+                  <input
+                    type="checkbox"
+                    name="is_recurring"
+                    className="rounded border-border"
+                    checked={newRecurring}
+                    onChange={(e) => setNewRecurring(e.target.checked)}
+                  />
                   <span className="text-sm text-foreground">{t('budgets.repeatEveryMonth')}</span>
                 </label>
               </>
+            )}
+            {/* Fork: a recurring budget can stop after a month ("until"). */}
+            {(editing ? editing.is_recurring : newRecurring) && (
+              <div className="space-y-2">
+                <Label htmlFor="budget-end-month">{t('budgets.untilOptional')}</Label>
+                <Input
+                  id="budget-end-month"
+                  name="end_month"
+                  type="month"
+                  min={editing ? toMonthInput(editing.month) : selectedMonth}
+                  defaultValue={toMonthInput(editing?.end_month)}
+                />
+              </div>
             )}
             <div className="space-y-2">
               <Label>{t('budgets.amount')}</Label>
@@ -335,6 +378,15 @@ export default function BudgetsPage() {
         </DialogContent>
       </Dialog>
 
+      <BudgetGroupsSection
+        month={monthParam}
+        selectedMonth={selectedMonth}
+        currency={userCurrency}
+        categories={categoriesList ?? []}
+        displayCategories={displayCategories}
+        groups={groupsList ?? []}
+      />
+
       <DeleteConfirmationDialog
         open={!!deletingBudget}
         title={t('budgets.confirmDeleteTitle')}
@@ -352,5 +404,288 @@ export default function BudgetsPage() {
         onConfirm={() => deletingBudget && deleteMutation.mutate(deletingBudget.id)}
       />
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Fork: budget groups, one cap over several categories
+// ---------------------------------------------------------------------------
+
+function BudgetGroupsSection({
+  month,
+  selectedMonth,
+  currency,
+  categories,
+  displayCategories,
+  groups,
+}: {
+  month: string
+  selectedMonth: string
+  currency: string
+  categories: Category[]
+  displayCategories: Category[]
+  groups: CategoryGroup[]
+}) {
+  const { t, i18n } = useTranslation()
+  const { mask } = usePrivacyMode()
+  const { canWrite } = useWorkspace()
+  const locale = useDisplayLocale()
+  const queryClient = useQueryClient()
+  const uiLocale = i18n.resolvedLanguage ?? i18n.language
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [editing, setEditing] = useState<BudgetGroupVsActual | null>(null)
+  const [deleting, setDeleting] = useState<BudgetGroupVsActual | null>(null)
+
+  const { data: comparison } = useQuery({
+    queryKey: ['budget-groups', 'comparison', month],
+    queryFn: () => budgetGroupsApi.comparison(month),
+  })
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['budget-groups'] })
+    queryClient.invalidateQueries({ queryKey: ['forecast'] })
+  }
+  const close = () => { setDialogOpen(false); setEditing(null) }
+  const saveMutation = useMutation({
+    mutationFn: (data: Parameters<typeof budgetGroupsApi.create>[0]): Promise<BudgetGroup> =>
+      editing ? budgetGroupsApi.update(editing.id, data) : budgetGroupsApi.create(data),
+    onSuccess: () => {
+      invalidate()
+      toast.success(t(editing ? 'budgets.groupUpdated' : 'budgets.groupCreated'))
+      close()
+    },
+    onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
+  })
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => budgetGroupsApi.delete(id),
+    onSuccess: () => {
+      invalidate()
+      setDeleting(null)
+      toast.success(t('budgets.groupDeleted'))
+    },
+    onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
+  })
+  const categoryName = (id: string) => findCategoryReference(displayCategories, id)?.name ?? '—'
+  const money = (v: number | string) => mask(formatCurrency(Number(v), currency, locale))
+
+  return (
+    <div className="mt-6">
+      <SectionCard>
+        <SectionHeader
+          title={t('budgets.groupsTitle')}
+          action={
+            canWrite ? (
+              <Button size="sm" className="gap-1.5 h-8" onClick={() => { setEditing(null); setDialogOpen(true) }}>
+                <Plus size={13} /> {t('budgets.addGroup')}
+              </Button>
+            ) : undefined
+          }
+        />
+        <p className="px-4 sm:px-5 pt-3 text-xs text-muted-foreground">{t('budgets.groupsHint')}</p>
+        {comparison && comparison.length > 0 ? (
+          <ul className="divide-y divide-border">
+            {comparison.map((group) => {
+              const pct = Math.min(group.percentage_used ?? 0, 100)
+              const over = (group.percentage_used ?? 0) > 100
+              return (
+                <li key={group.id} className="px-4 sm:px-5 py-3" data-testid="budget-group">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
+                        {group.name}
+                        {group.is_recurring && (
+                          <span title={t('budgets.recurringLabel')} className="text-muted-foreground"><Repeat size={12} /></span>
+                        )}
+                        {group.end_month && (
+                          <span className="text-xs font-normal text-muted-foreground">
+                            {t('budgets.untilLabel', { month: monthLabel(toMonthInput(group.end_month), uiLocale) })}
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {group.category_ids.map(categoryName).join(', ')}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-sm tabular-nums text-foreground">
+                        {t('budgets.spentOf', { spent: money(group.projected_amount), cap: money(group.amount) })}
+                      </span>
+                      {canWrite && (
+                        <>
+                          <button
+                            className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
+                            onClick={() => { setEditing(group); setDialogOpen(true) }}
+                            aria-label={t('common.edit')}
+                            title={t('common.edit')}
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            className="p-1.5 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-rose-50 transition-colors"
+                            onClick={() => setDeleting(group)}
+                            aria-label={t('common.delete')}
+                            title={t('common.delete')}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden" role="progressbar" aria-label={group.name} aria-valuenow={group.percentage_used ?? 0}>
+                    <div className={over ? 'h-full bg-rose-500' : 'h-full bg-primary'} style={{ width: `${pct}%` }} />
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground text-center py-10">{t('budgets.groupsEmpty')}</p>
+        )}
+      </SectionCard>
+
+      <Dialog open={dialogOpen} onOpenChange={close}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editing ? t('budgets.editGroup') : t('budgets.addGroup')}</DialogTitle>
+          </DialogHeader>
+          <BudgetGroupForm
+            key={editing?.id ?? 'new'}
+            group={editing}
+            month={month}
+            selectedMonth={selectedMonth}
+            categories={categories}
+            groups={groups}
+            loading={saveMutation.isPending}
+            onCancel={close}
+            onSave={(data) => saveMutation.mutate(data)}
+          />
+        </DialogContent>
+      </Dialog>
+
+      <DeleteConfirmationDialog
+        open={!!deleting}
+        title={t('budgets.confirmDeleteGroupTitle')}
+        description={t('budgets.confirmDeleteGroupDescription', { name: deleting?.name ?? '' })}
+        isPending={deleteMutation.isPending}
+        onClose={() => setDeleting(null)}
+        onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
+      />
+    </div>
+  )
+}
+
+function BudgetGroupForm({
+  group,
+  month,
+  selectedMonth,
+  categories,
+  groups,
+  loading,
+  onCancel,
+  onSave,
+}: {
+  group: BudgetGroupVsActual | null
+  month: string
+  selectedMonth: string
+  categories: Category[]
+  groups: CategoryGroup[]
+  loading: boolean
+  onCancel: () => void
+  onSave: (data: Parameters<typeof budgetGroupsApi.create>[0]) => void
+}) {
+  const { t } = useTranslation()
+  const [name, setName] = useState(group?.name ?? '')
+  const [amount, setAmount] = useState(group ? String(Number(group.amount)) : '')
+  const [isRecurring, setIsRecurring] = useState(group?.is_recurring ?? true)
+  const [endMonth, setEndMonth] = useState(toMonthInput(group?.end_month))
+  const [chosen, setChosen] = useState<string[]>(group?.category_ids ?? [])
+  // Fork: expense categories only: not transfers, ignored or hidden ones.
+  const spending = useMemo(
+    () => categories.filter((c) => !c.treat_as_transfer && !c.is_ignored && !c.is_hidden),
+    [categories],
+  )
+  const sections = [
+    ...groups.map((g) => ({ key: g.id, label: g.name, items: spending.filter((c) => c.group_id === g.id) })),
+    { key: 'none', label: '', items: spending.filter((c) => !c.group_id || !groups.some((g) => g.id === c.group_id)) },
+  ].filter((section) => section.items.length > 0)
+  const start = group?.month ?? month
+
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (chosen.length === 0) {
+          toast.error(t('budgets.pickCategories'))
+          return
+        }
+        onSave({
+          name,
+          amount: parseFloat(amount),
+          month: start,
+          is_recurring: isRecurring,
+          end_month: isRecurring && endMonth ? `${endMonth}-01` : null,
+          category_ids: chosen,
+        })
+      }}
+    >
+      <div className="space-y-2">
+        <Label htmlFor="group-name">{t('budgets.groupName')}</Label>
+        <Input id="group-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} required />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="group-cap">{t('budgets.groupCap')}</Label>
+        <Input id="group-cap" type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+      </div>
+      <div className="space-y-2">
+        <Label>{t('budgets.groupCategories')}</Label>
+        <div className="max-h-48 overflow-y-auto rounded-lg border border-border p-2 space-y-2" data-testid="group-categories">
+          {sections.map((section) => (
+            <div key={section.key} className="space-y-1">
+              {section.label && <p className="text-[11px] font-semibold text-muted-foreground">{section.label}</p>}
+              {section.items.map((c) => (
+                <label key={c.id} className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="rounded border-border"
+                    checked={chosen.includes(c.id)}
+                    onChange={() =>
+                      setChosen((ids) => (ids.includes(c.id) ? ids.filter((id) => id !== c.id) : [...ids, c.id]))
+                    }
+                  />
+                  {c.name}
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          className="rounded border-border"
+          checked={isRecurring}
+          onChange={(e) => setIsRecurring(e.target.checked)}
+        />
+        <span className="text-sm text-foreground">{t('budgets.repeatEveryMonth')}</span>
+      </label>
+      {isRecurring && (
+        <div className="space-y-2">
+          <Label htmlFor="group-end-month">{t('budgets.untilOptional')}</Label>
+          <Input
+            id="group-end-month"
+            type="month"
+            min={toMonthInput(start) || selectedMonth}
+            value={endMonth}
+            onChange={(e) => setEndMonth(e.target.value)}
+            className={selectClass}
+          />
+        </div>
+      )}
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel}>{t('common.cancel')}</Button>
+        <Button type="submit" disabled={loading}>{t('common.save')}</Button>
+      </DialogFooter>
+    </form>
   )
 }

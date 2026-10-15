@@ -510,7 +510,7 @@ export default function TransactionsPage() {
 
   const { data: recurringList } = useQuery({
     queryKey: ['recurring'],
-    queryFn: recurring.list,
+    queryFn: () => recurring.list(),
   })
   const recurringById = useMemo(
     () => new Map((recurringList ?? []).map(item => [item.id, item])),

@@ -17,6 +17,8 @@ import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight
 import { toast } from 'sonner'
 import {
   accounts as accountsApi,
+  budgetGroups as budgetGroupsApi,
+  budgets as budgetsApi,
   categories as categoriesApi,
   categoryGroups as categoryGroupsApi,
   forecast as forecastApi,
@@ -50,6 +52,8 @@ import type {
   Account,
   Category,
   CategoryGroup,
+  ForecastBudgetChoices,
+  ForecastBudgetUse,
   ForecastItem,
   ForecastItemKind,
   ForecastRecurringPayment,
@@ -234,6 +238,8 @@ function invalidateForecast(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: ['forecast-scenarios'] })
   // Expected payments also feed Reports → Cash Flow.
   queryClient.invalidateQueries({ queryKey: ['reports'] })
+  // Fork: the plan's repeating payments are recurring items.
+  queryClient.invalidateQueries({ queryKey: ['recurring'] })
 }
 
 function ForecastView() {
@@ -665,11 +671,12 @@ function ForecastView() {
         )}
       </div>
 
-      {/* Fork (owner 2026-10-15): expected payments and scenarios on their own tabs. */}
+      {/* Fork (owner 2026-10-15): expected transactions, scenarios and budgets on their own tabs. */}
       <Tabs defaultValue="expected" className="gap-4">
         <TabsList>
           <TabsTrigger value="expected">{t('forecast.tabs.expected')}</TabsTrigger>
           <TabsTrigger value="scenarios">{t('forecast.tabs.scenarios')}</TabsTrigger>
+          <TabsTrigger value="budgets">{t('forecast.tabs.budgets')}</TabsTrigger>
         </TabsList>
         <TabsContent value="expected">
           <RecurringLine />
@@ -677,6 +684,9 @@ function ForecastView() {
         </TabsContent>
         <TabsContent value="scenarios">
           <ScenariosSection estimates={data?.spending_estimates ?? []} loans={data?.loans ?? []} currency={currency} />
+        </TabsContent>
+        <TabsContent value="budgets">
+          <BudgetChoicesSection uses={data?.budget_uses ?? []} includeSpending={includeSpending} currency={currency} />
         </TabsContent>
       </Tabs>
     </div>
@@ -959,8 +969,9 @@ function LoanRow({ loan }: { loan: LoanForecast }) {
 
 function RecurringLine() {
   const { t } = useTranslation()
-  const { data: recurringList } = useQuery({ queryKey: ['recurring'], queryFn: recurringApi.list })
-  const count = (recurringList ?? []).filter((r) => r.is_active).length
+  const { data: recurringList } = useQuery({ queryKey: ['recurring'], queryFn: () => recurringApi.list() })
+  // Fork: plan items are counted with the expected transactions instead.
+  const count = (recurringList ?? []).filter((r) => r.is_active && !r.plan).length
 
   return (
     <p className="text-xs text-muted-foreground mb-5 px-1" data-testid="recurring-line">
@@ -989,11 +1000,18 @@ function useFormLookups() {
 }
 
 const EXPECTED_ROWS = 12
-// Fork: what the expected-payment form can make.
-const EXPECTED_KINDS = ['one_off', 'repeating', 'budget'] as const
+// Fork: what the expected-transaction form can make. A repeating one is a
+// Recurring item with `plan` set (owner 2026-10-15: one recurring mechanism).
+const EXPECTED_KINDS = ['one_off', 'repeating'] as const
 type ExpectedKind = (typeof EXPECTED_KINDS)[number]
 const SERIES_FREQUENCIES: string[] = ['weekly', 'biweekly', 'monthly', 'quarterly', 'semiannual', 'yearly']
-const BUDGET_FREQUENCIES: string[] = ['weekly', 'biweekly', 'monthly']
+
+/** What the form saves: a one-off expected payment, or a plan recurring item. */
+type ExpectedSave =
+  | { kind: 'one_off'; item: Partial<ForecastItem> }
+  | { kind: 'repeating'; rec: Partial<RecurringTransaction> }
+
+type ExpectedEditing = { item: ForecastItem; rec?: undefined } | { rec: RecurringTransaction; item?: undefined }
 
 function ExpectedPaymentsSection({ recurring }: { recurring: ForecastRecurringPayment[] }) {
   const { t } = useTranslation()
@@ -1004,24 +1022,36 @@ function ExpectedPaymentsSection({ recurring }: { recurring: ForecastRecurringPa
   const queryClient = useQueryClient()
   const { accounts, categories, categoryGroups } = useFormLookups()
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [editing, setEditing] = useState<ForecastItem | null>(null)
-  const [deleting, setDeleting] = useState<ForecastItem | null>(null)
+  const [editing, setEditing] = useState<ExpectedEditing | null>(null)
+  const [deleting, setDeleting] = useState<ExpectedEditing | null>(null)
 
   const { data: items } = useQuery({ queryKey: ['forecast-items'], queryFn: forecastApi.items.list })
+  const { data: recurringList } = useQuery({ queryKey: ['recurring'], queryFn: () => recurringApi.list() })
   const expected = (items ?? []).filter((i) => i.scenario_id === null)
-  // Fork (owner 2026-10-15): one-off expected payments and the dated payments
-  // of each recurring schedule, in one list by date.
+  const planItems = (recurringList ?? []).filter((r) => r.plan)
+  // Fork (owner 2026-10-15): one-off expected transactions, the plan's
+  // repeating ones and the dated payments of each recurring schedule, in one
+  // list by date.
   const [showAll, setShowAll] = useState(false)
   const merged = [
-    ...expected.map((item) => ({ key: `item-${item.id}`, date: item.date ?? item.start_date ?? '', item, rec: null })),
-    ...recurring.map((rec) => ({ key: `rec-${rec.recurring_transaction_id}-${rec.date}`, date: rec.date, item: null, rec })),
+    ...expected.map((item) => ({ key: `item-${item.id}`, date: item.date ?? '', item, plan: null, rec: null })),
+    ...planItems.map((plan) => ({ key: `plan-${plan.id}`, date: plan.start_date, item: null, plan, rec: null })),
+    ...recurring.map((rec) => ({
+      key: `rec-${rec.recurring_transaction_id}-${rec.date}`, date: rec.date, item: null, plan: null, rec,
+    })),
   ].sort((a, b) => a.date.localeCompare(b.date))
   const visible = showAll ? merged : merged.slice(0, EXPECTED_ROWS)
 
   const close = () => { setDialogOpen(false); setEditing(null) }
   const saveMutation = useMutation({
-    mutationFn: (payload: Partial<ForecastItem>) =>
-      editing ? forecastApi.items.update(editing.id, payload) : forecastApi.items.create(payload),
+    mutationFn: async (save: ExpectedSave) => {
+      if (save.kind === 'repeating') {
+        return editing?.rec
+          ? recurringApi.update(editing.rec.id, save.rec)
+          : recurringApi.create({ ...save.rec, plan: true })
+      }
+      return editing?.item ? forecastApi.items.update(editing.item.id, save.item) : forecastApi.items.create(save.item)
+    },
     onSuccess: () => {
       invalidateForecast(queryClient)
       toast.success(t(editing ? 'forecast.expectedUpdated' : 'forecast.expectedCreated'))
@@ -1030,7 +1060,8 @@ function ExpectedPaymentsSection({ recurring }: { recurring: ForecastRecurringPa
     onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
   })
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => forecastApi.items.delete(id),
+    mutationFn: (target: ExpectedEditing) =>
+      target.rec ? recurringApi.delete(target.rec.id) : forecastApi.items.delete(target.item.id),
     onSuccess: () => {
       invalidateForecast(queryClient)
       setDeleting(null)
@@ -1044,24 +1075,50 @@ function ExpectedPaymentsSection({ recurring }: { recurring: ForecastRecurringPa
     return acc ? getAccountName(acc) : '—'
   }
   const frequencyLabel = useFrequencyLabel()
-  const day = (iso: string | null) => (iso ? new Date(iso + 'T00:00:00').toLocaleDateString(dateLocale) : '')
-  // Fork: what a series or a budget covers, under its description.
-  const itemDetail = (item: ForecastItem) => {
-    if (item.kind === 'budget') {
-      const amount = formatCurrency(Number(item.amount ?? 0), item.currency, locale)
-      const period = t(`forecast.budgetPeriods.${item.frequency ?? 'monthly'}`, { defaultValue: item.frequency ?? '' })
-      return mask(item.end_date
-        ? t('forecast.budgetSummary', { amount, period, from: day(item.start_date), to: day(item.end_date) })
-        : t('forecast.budgetSummaryOpen', { amount, period, from: day(item.start_date) }))
-    }
-    if (item.kind === 'repeating') {
-      const frequency = frequencyLabel(item.frequency)
-      return item.end_date
-        ? t('forecast.seriesSummary', { frequency, from: day(item.start_date), to: day(item.end_date) })
-        : t('forecast.seriesSummaryOpen', { frequency, from: day(item.start_date) })
-    }
-    return null
+  const day = (iso: string | null | undefined) => (iso ? new Date(iso + 'T00:00:00').toLocaleDateString(dateLocale) : '')
+  // Fork: what a plan item covers, under its description.
+  const planDetail = (plan: RecurringTransaction) => {
+    const frequency = frequencyLabel(plan.frequency)
+    return plan.end_date
+      ? t('forecast.seriesSummary', { frequency, from: day(plan.start_date), to: day(plan.end_date) })
+      : t('forecast.seriesSummaryOpen', { frequency, from: day(plan.start_date) })
   }
+  const actions = (target: ExpectedEditing) => (
+    <td className="py-2.5 pr-4 sm:pr-5">
+      <div className="flex items-center justify-end gap-1">
+        <button
+          className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
+          onClick={() => { setEditing(target); setDialogOpen(true) }}
+          aria-label={t('common.edit')}
+          title={t('common.edit')}
+        >
+          <Pencil size={13} />
+        </button>
+        <button
+          className="p-1.5 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-rose-50 transition-colors"
+          onClick={() => setDeleting(target)}
+          aria-label={t('common.delete')}
+          title={t('common.delete')}
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
+    </td>
+  )
+  const accountCell = (accountId: string | null | undefined, transferTo: string | null | undefined) => (
+    <td className="py-2.5 text-xs text-muted-foreground hidden md:table-cell">
+      {transferTo ? `${accountName(accountId)} → ${accountName(transferTo)}` : accountName(accountId)}
+    </td>
+  )
+  // Fork: a transfer moves money between own accounts, so it has no sign.
+  const amountCell = (amount: number, currency: string, type: string | null, transfer: boolean) => (
+    <td className={cn(
+      'py-2.5 text-xs sm:text-sm font-semibold tabular-nums',
+      transfer ? 'text-foreground' : type === 'credit' ? 'text-emerald-600' : 'text-rose-500',
+    )}>
+      {mask(`${transfer ? '' : type === 'credit' ? '+' : '−'}${formatCurrency(amount, currency, locale)}`)}
+    </td>
+  )
 
   return (
     <SectionCard>
@@ -1089,7 +1146,7 @@ function ExpectedPaymentsSection({ recurring }: { recurring: ForecastRecurringPa
             </tr>
           </thead>
           <tbody>
-            {visible.map(({ key, item, rec }) => rec ? (
+            {visible.map(({ key, item, plan, rec }) => rec ? (
               <tr key={key} className="border-b border-border last:border-0 hover:bg-muted transition-colors" data-testid="expected-recurring">
                 <td className="py-2.5 pl-4 sm:pl-5 text-xs text-muted-foreground tabular-nums">
                   {new Date(rec.date + 'T00:00:00').toLocaleDateString(dateLocale)}
@@ -1112,76 +1169,45 @@ function ExpectedPaymentsSection({ recurring }: { recurring: ForecastRecurringPa
                   </td>
                 )}
               </tr>
+            ) : plan ? (
+              <tr key={key} className="border-b border-border last:border-0 hover:bg-muted transition-colors" data-testid="expected-plan">
+                <td className="py-2.5 pl-4 sm:pl-5 text-xs text-muted-foreground tabular-nums">{day(plan.start_date) || '—'}</td>
+                <td className="py-2.5 text-sm text-foreground">
+                  {plan.description || '—'}
+                  <p className="text-[11px] text-muted-foreground" data-testid="expected-detail">{planDetail(plan)}</p>
+                </td>
+                {accountCell(plan.account_id, plan.transfer_account_id)}
+                {amountCell(Number(plan.amount ?? 0), plan.currency, plan.type, !!plan.transfer_account_id)}
+                <td className="py-2.5 hidden sm:table-cell">
+                  {/* Fork: progress from the bank rows linked to the item. */}
+                  <span
+                    className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-muted text-muted-foreground border-border"
+                    data-testid="series-status"
+                  >
+                    {plan.occurrence_count != null
+                      ? t('forecast.seriesArrived', { matched: plan.arrived_count ?? 0, total: plan.occurrence_count })
+                      : t('forecast.seriesArrivedOpen', { matched: plan.arrived_count ?? 0 })}
+                  </span>
+                </td>
+                {canWrite && actions({ rec: plan })}
+              </tr>
             ) : item && (
               <tr key={key} className="border-b border-border last:border-0 hover:bg-muted transition-colors">
-                <td className="py-2.5 pl-4 sm:pl-5 text-xs text-muted-foreground tabular-nums">
-                  {day(item.date ?? item.start_date) || '—'}
-                </td>
-                <td className="py-2.5 text-sm text-foreground">
-                  {item.description || '—'}
-                  {itemDetail(item) && (
-                    <p className="text-[11px] text-muted-foreground" data-testid="expected-detail">{itemDetail(item)}</p>
-                  )}
-                </td>
-                <td className="py-2.5 text-xs text-muted-foreground hidden md:table-cell">
-                  {item.transfer_account_id
-                    ? `${accountName(item.account_id)} → ${accountName(item.transfer_account_id)}`
-                    : accountName(item.account_id)}
-                </td>
-                {/* Fork: a transfer moves money between own accounts, so it has no sign. */}
-                <td className={cn(
-                  'py-2.5 text-xs sm:text-sm font-semibold tabular-nums',
-                  item.transfer_account_id ? 'text-foreground' : item.type === 'credit' ? 'text-emerald-600' : 'text-rose-500',
-                )}>
-                  {mask(`${item.transfer_account_id ? '' : item.type === 'credit' ? '+' : '−'}${formatCurrency(Number(item.amount ?? 0), item.currency, locale)}`)}
-                </td>
+                <td className="py-2.5 pl-4 sm:pl-5 text-xs text-muted-foreground tabular-nums">{day(item.date) || '—'}</td>
+                <td className="py-2.5 text-sm text-foreground">{item.description || '—'}</td>
+                {accountCell(item.account_id, item.transfer_account_id)}
+                {amountCell(Number(item.amount ?? 0), item.currency, item.type, !!item.transfer_account_id)}
                 <td className="py-2.5 hidden sm:table-cell">
-                  {item.kind === 'budget' ? (
-                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-primary/5 text-primary border-primary/20">
-                      {t('forecast.budgetBadge')}
-                    </span>
-                  ) : item.kind === 'repeating' ? (
-                    <span
-                      className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-muted text-muted-foreground border-border"
-                      data-testid="series-status"
-                    >
-                      {item.occurrence_count != null
-                        ? t('forecast.seriesArrived', { matched: item.matches?.length ?? 0, total: item.occurrence_count })
-                        : t('forecast.seriesArrivedOpen', { matched: item.matches?.length ?? 0 })}
-                    </span>
-                  ) : (
-                    <span className={cn(
-                      'text-[11px] font-semibold px-2 py-0.5 rounded-full border',
-                      item.matched_transaction_id
-                        ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
-                        : 'bg-muted text-muted-foreground border-border',
-                    )}>
-                      {item.matched_transaction_id ? t('forecast.arrived') : t('forecast.expected')}
-                    </span>
-                  )}
+                  <span className={cn(
+                    'text-[11px] font-semibold px-2 py-0.5 rounded-full border',
+                    item.matched_transaction_id
+                      ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
+                      : 'bg-muted text-muted-foreground border-border',
+                  )}>
+                    {item.matched_transaction_id ? t('forecast.arrived') : t('forecast.expected')}
+                  </span>
                 </td>
-                {canWrite && (
-                  <td className="py-2.5 pr-4 sm:pr-5">
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
-                        onClick={() => { setEditing(item); setDialogOpen(true) }}
-                        aria-label={t('common.edit')}
-                        title={t('common.edit')}
-                      >
-                        <Pencil size={13} />
-                      </button>
-                      <button
-                        className="p-1.5 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-rose-50 transition-colors"
-                        onClick={() => setDeleting(item)}
-                        aria-label={t('common.delete')}
-                        title={t('common.delete')}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </td>
-                )}
+                {canWrite && actions({ item })}
               </tr>
             ))}
           </tbody>
@@ -1207,14 +1233,15 @@ function ExpectedPaymentsSection({ recurring }: { recurring: ForecastRecurringPa
             <DialogTitle>{editing ? t('forecast.editExpected') : t('forecast.addExpected')}</DialogTitle>
           </DialogHeader>
           <ExpectedPaymentForm
-            key={editing?.id ?? 'new'}
-            item={editing}
+            key={editing?.item?.id ?? editing?.rec?.id ?? 'new'}
+            item={editing?.item ?? null}
+            plan={editing?.rec ?? null}
             accounts={accounts}
             categories={categories}
             categoryGroups={categoryGroups}
             loading={saveMutation.isPending}
             onCancel={close}
-            onSave={(payload) => saveMutation.mutate(payload)}
+            onSave={(save) => saveMutation.mutate(save)}
           />
         </DialogContent>
       </Dialog>
@@ -1222,10 +1249,12 @@ function ExpectedPaymentsSection({ recurring }: { recurring: ForecastRecurringPa
       <DeleteConfirmationDialog
         open={!!deleting}
         title={t('forecast.confirmDeleteExpected')}
-        description={t('forecast.confirmDeleteExpectedDescription', { description: deleting?.description || '—' })}
+        description={t('forecast.confirmDeleteExpectedDescription', {
+          description: (deleting?.item ?? deleting?.rec)?.description || '—',
+        })}
         isPending={deleteMutation.isPending}
         onClose={() => setDeleting(null)}
-        onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
+        onConfirm={() => deleting && deleteMutation.mutate(deleting)}
       />
     </SectionCard>
   )
@@ -1233,6 +1262,7 @@ function ExpectedPaymentsSection({ recurring }: { recurring: ForecastRecurringPa
 
 function ExpectedPaymentForm({
   item,
+  plan,
   accounts,
   categories,
   categoryGroups,
@@ -1241,37 +1271,34 @@ function ExpectedPaymentForm({
   onSave,
 }: {
   item: ForecastItem | null
+  plan: RecurringTransaction | null
   accounts: Account[]
   categories: Category[]
   categoryGroups: CategoryGroup[]
   loading: boolean
   onCancel: () => void
-  onSave: (payload: Partial<ForecastItem>) => void
+  onSave: (save: ExpectedSave) => void
 }) {
   const { t } = useTranslation()
   const sortedAccounts = useMemo(() => sortAccountsByPosition(accounts.filter((a) => !a.is_closed)), [accounts])
-  // Fork: a one-off or repeating payment (either can be a transfer between
-  // own accounts), or a budget for everyday spending.
-  const [kind, setKind] = useState<ExpectedKind>(
-    item?.kind === 'repeating' || item?.kind === 'budget' ? item.kind : 'one_off',
-  )
-  const [description, setDescription] = useState(item?.description ?? '')
-  const [amount, setAmount] = useState(item?.amount != null ? String(Number(item.amount)) : '')
+  const source = item ?? plan
+  // Fork: a one-off or repeating transaction; either can be a transfer
+  // between own accounts. A repeating one is a plan recurring item.
+  const [kind, setKind] = useState<ExpectedKind>(plan ? 'repeating' : 'one_off')
+  const [description, setDescription] = useState(source?.description ?? '')
+  const [amount, setAmount] = useState(source?.amount != null ? String(Number(source.amount)) : '')
   const [type, setType] = useState<'debit' | 'credit' | 'transfer'>(
-    item?.transfer_account_id ? 'transfer' : item?.type ?? 'debit',
+    source?.transfer_account_id ? 'transfer' : source?.type ?? 'debit',
   )
   const [date, setDate] = useState(item?.date ?? localDateString())
-  const [startDate, setStartDate] = useState(item?.start_date ?? localDateString())
-  const [endDate, setEndDate] = useState(item?.end_date ?? '')
-  const [frequency, setFrequency] = useState<string>(item?.frequency ?? 'weekly')
-  const [accountId, setAccountId] = useState(
-    item?.kind === 'budget' ? item.account_id ?? '' : item?.account_id ?? sortedAccounts[0]?.id ?? '',
-  )
-  const [transferTo, setTransferTo] = useState(item?.transfer_account_id ?? '')
-  const [categoryId, setCategoryId] = useState(item?.category_id ?? '')
-  const isBudget = kind === 'budget'
-  const isTransfer = !isBudget && type === 'transfer'
-  const frequencies = isBudget ? BUDGET_FREQUENCIES : SERIES_FREQUENCIES
+  const [startDate, setStartDate] = useState(plan?.start_date ?? localDateString())
+  const [endDate, setEndDate] = useState(plan?.end_date ?? '')
+  const [frequency, setFrequency] = useState<string>(plan?.frequency ?? 'weekly')
+  const [accountId, setAccountId] = useState(source?.account_id ?? sortedAccounts[0]?.id ?? '')
+  const [transferTo, setTransferTo] = useState(source?.transfer_account_id ?? '')
+  const [categoryId, setCategoryId] = useState(source?.category_id ?? '')
+  const isTransfer = type === 'transfer'
+  const repeating = kind === 'repeating'
   const frequencyLabel = useFrequencyLabel()
 
   return (
@@ -1279,24 +1306,35 @@ function ExpectedPaymentForm({
       className="space-y-4"
       onSubmit={(e) => {
         e.preventDefault()
-        const common = {
-          kind,
-          description,
-          amount,
-          account_id: accountId || null,
-          category_id: categoryId || null,
-        }
-        if (isBudget) {
-          onSave({ ...common, frequency: frequency as ForecastItem['frequency'], start_date: startDate, end_date: endDate || null })
-          return
-        }
         const direction = {
           type: isTransfer ? ('debit' as const) : (type as 'debit' | 'credit'),
           transfer_account_id: isTransfer ? transferTo || null : null,
         }
-        onSave(kind === 'repeating'
-          ? { ...common, ...direction, frequency: frequency as ForecastItem['frequency'], start_date: startDate, end_date: endDate || null }
-          : { ...common, ...direction, date })
+        if (repeating) {
+          const account = sortedAccounts.find((a) => a.id === accountId)
+          onSave({
+            kind: 'repeating',
+            rec: {
+              description,
+              amount: Number(amount),
+              ...direction,
+              frequency: frequency as RecurringTransaction['frequency'],
+              start_date: startDate,
+              end_date: endDate || null,
+              account_id: accountId,
+              category_id: categoryId || null,
+              ...(account ? { currency: account.currency } : {}),
+            },
+          })
+          return
+        }
+        onSave({
+          kind: 'one_off',
+          item: {
+            kind: 'one_off', description, amount, ...direction, date,
+            account_id: accountId || null, category_id: categoryId || null,
+          },
+        })
       }}
     >
       <div className="space-y-2">
@@ -1305,11 +1343,11 @@ function ExpectedPaymentForm({
           id="expected-kind"
           className={selectClass}
           value={kind}
-          disabled={!!item}
+          disabled={!!source}
           onChange={(e) => {
             const next = e.target.value as ExpectedKind
             setKind(next)
-            if (next === 'budget' && !BUDGET_FREQUENCIES.includes(frequency)) setFrequency('weekly')
+            if (next === 'repeating' && !accountId) setAccountId(sortedAccounts[0]?.id ?? '')
           }}
         >
           {EXPECTED_KINDS.map((k) => (
@@ -1317,7 +1355,6 @@ function ExpectedPaymentForm({
           ))}
         </select>
       </div>
-      {isBudget && <p className="text-xs text-muted-foreground">{t('forecast.budgetHint')}</p>}
       <div className="space-y-2">
         <Label htmlFor="expected-description">{t('recurring.description')}</Label>
         <Input id="expected-description" value={description} onChange={(e) => setDescription(e.target.value)} required />
@@ -1327,38 +1364,24 @@ function ExpectedPaymentForm({
           <Label htmlFor="expected-amount">{t('recurring.amount')}</Label>
           <Input id="expected-amount" type="number" step="0.01" min="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} required />
         </div>
-        {isBudget ? (
-          <div className="space-y-2">
-            <Label htmlFor="expected-frequency">{t('recurring.frequency')}</Label>
-            <select id="expected-frequency" className={selectClass} value={frequency} onChange={(e) => setFrequency(e.target.value)}>
-              {frequencies.map((f) => <option key={f} value={f}>{frequencyLabel(f)}</option>)}
-            </select>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <Label htmlFor="expected-type">{t('recurring.type')}</Label>
-            <select id="expected-type" className={selectClass} value={type} onChange={(e) => setType(e.target.value as 'debit' | 'credit' | 'transfer')}>
-              <option value="debit">{t('forecast.moneyOut')}</option>
-              <option value="credit">{t('forecast.moneyIn')}</option>
-              <option value="transfer">{t('forecast.transfer')}</option>
-            </select>
-          </div>
-        )}
+        <div className="space-y-2">
+          <Label htmlFor="expected-type">{t('recurring.type')}</Label>
+          <select id="expected-type" className={selectClass} value={type} onChange={(e) => setType(e.target.value as 'debit' | 'credit' | 'transfer')}>
+            <option value="debit">{t('forecast.moneyOut')}</option>
+            <option value="credit">{t('forecast.moneyIn')}</option>
+            <option value="transfer">{t('forecast.transfer')}</option>
+          </select>
+        </div>
       </div>
-      {kind === 'repeating' && (
+      {repeating && (
         <div className="space-y-2">
           <Label htmlFor="expected-frequency">{t('recurring.frequency')}</Label>
           <select id="expected-frequency" className={selectClass} value={frequency} onChange={(e) => setFrequency(e.target.value)}>
-            {frequencies.map((f) => <option key={f} value={f}>{frequencyLabel(f)}</option>)}
+            {SERIES_FREQUENCIES.map((f) => <option key={f} value={f}>{frequencyLabel(f)}</option>)}
           </select>
         </div>
       )}
-      {kind === 'one_off' ? (
-        <div className="space-y-2">
-          <Label>{t('forecast.date')}</Label>
-          <DatePickerInput value={date} onChange={setDate} className="w-full justify-start" />
-        </div>
-      ) : (
+      {repeating ? (
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>{t('recurring.startDate')}</Label>
@@ -1369,6 +1392,11 @@ function ExpectedPaymentForm({
             <DatePickerInput value={endDate} onChange={setEndDate} placeholder={t('forecast.optional')} className="w-full justify-start" />
           </div>
         </div>
+      ) : (
+        <div className="space-y-2">
+          <Label>{t('forecast.date')}</Label>
+          <DatePickerInput value={date} onChange={setDate} className="w-full justify-start" />
+        </div>
       )}
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
@@ -1377,10 +1405,11 @@ function ExpectedPaymentForm({
             id="expected-account"
             className={selectClass}
             value={accountId}
-            required={isTransfer}
+            required={isTransfer || repeating}
             onChange={(e) => setAccountId(e.target.value)}
           >
-            <option value="">{t('forecast.noAccount')}</option>
+            {/* A repeating transaction is a recurring item, which always has an account. */}
+            <option value="">{repeating ? t('forecast.pickAccount') : t('forecast.noAccount')}</option>
             {sortedAccounts.map((acc) => (
               <option key={acc.id} value={acc.id}>{getAccountName(acc)}</option>
             ))}
@@ -1415,17 +1444,142 @@ function ExpectedPaymentForm({
           className={selectClass}
         />
       </div>
-      {!isBudget && (
-        <p className="text-xs text-muted-foreground">
-          {isTransfer ? t('forecast.matchHintTransfer') : t('forecast.matchHint')}
-          {kind === 'repeating' && <> {t('forecast.seriesMatchHint')}</>}
-        </p>
-      )}
+      <p className="text-xs text-muted-foreground">
+        {isTransfer ? t('forecast.matchHintTransfer') : t('forecast.matchHint')}
+        {repeating && <> {t('forecast.seriesMatchHint')}</>}
+      </p>
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onCancel}>{t('common.cancel')}</Button>
         <Button type="submit" disabled={loading}>{loading ? t('common.loading') : t('common.save')}</Button>
       </DialogFooter>
     </form>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Budgets (fork): the canonical budgets the forecast applies, by choice
+// ---------------------------------------------------------------------------
+
+const BUDGET_USE_ROWS = 8
+
+function BudgetChoicesSection({
+  uses,
+  includeSpending,
+  currency,
+}: {
+  uses: ForecastBudgetUse[]
+  includeSpending: boolean
+  currency: string
+}) {
+  const { t, i18n } = useTranslation()
+  const locale = useDisplayLocale()
+  const { mask } = usePrivacyMode()
+  const { canWrite } = useWorkspace()
+  const queryClient = useQueryClient()
+  const [showAll, setShowAll] = useState(false)
+  const { data: choices } = useQuery({ queryKey: ['forecast-budget-choices'], queryFn: forecastApi.budgetChoices.get })
+  const { data: budgetList } = useQuery({ queryKey: ['budgets', 'all'], queryFn: () => budgetsApi.list() })
+  const { data: groupList } = useQuery({ queryKey: ['budget-groups', 'all'], queryFn: () => budgetGroupsApi.list() })
+  const { categories } = useFormLookups()
+  const saveMutation = useMutation({
+    mutationFn: (choices: ForecastBudgetChoices) => forecastApi.budgetChoices.set(choices),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(['forecast-budget-choices'], saved)
+      queryClient.invalidateQueries({ queryKey: ['forecast'] })
+    },
+    onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
+  })
+  const categoryIds = [...new Set((budgetList ?? []).map((b) => b.category_id))]
+  const categoryName = (id: string) => categories.find((c) => c.id === id)?.name ?? '—'
+  const chosenCategories = choices?.category_ids ?? []
+  const chosenGroups = choices?.budget_group_ids ?? []
+  const toggle = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id])
+  const monthName = (iso: string) =>
+    new Date(iso + 'T00:00:00').toLocaleDateString(i18n.resolvedLanguage ?? i18n.language, { month: 'short', year: 'numeric' })
+  const money = (v: number) => mask(formatCurrency(v, currency, locale))
+  const shown = showAll ? uses : uses.slice(0, BUDGET_USE_ROWS)
+  const checkbox = (checked: boolean, label: string, onChange: () => void) => (
+    <label key={label} className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
+      <input
+        type="checkbox"
+        className="rounded border-border"
+        checked={checked}
+        disabled={!canWrite || saveMutation.isPending}
+        onChange={onChange}
+      />
+      {label}
+    </label>
+  )
+
+  return (
+    <SectionCard>
+      <SectionHeader title={t('forecast.budgetsTitle')} hint={t('forecast.budgetsHint')} />
+      <div className="px-4 sm:px-5 py-4 space-y-4">
+        {categoryIds.length === 0 && (groupList ?? []).length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {t('forecast.budgetsNone')}{' '}
+            <Link to="/budgets" className="font-semibold text-primary hover:underline">{t('forecast.manageBudgets')}</Link>
+          </p>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2" data-testid="budget-choices-categories">
+              <p className="text-xs font-medium text-muted-foreground">{t('forecast.categoryBudgets')}</p>
+              {categoryIds.length === 0 && <p className="text-xs text-muted-foreground">—</p>}
+              {categoryIds.map((id) =>
+                checkbox(chosenCategories.includes(id), categoryName(id), () =>
+                  saveMutation.mutate({ category_ids: toggle(chosenCategories, id), budget_group_ids: chosenGroups }),
+                ),
+              )}
+            </div>
+            <div className="space-y-2" data-testid="budget-choices-groups">
+              <p className="text-xs font-medium text-muted-foreground">{t('forecast.budgetGroups')}</p>
+              {(groupList ?? []).length === 0 && <p className="text-xs text-muted-foreground">—</p>}
+              {(groupList ?? []).map((g) =>
+                checkbox(chosenGroups.includes(g.id), g.name, () =>
+                  saveMutation.mutate({ category_ids: chosenCategories, budget_group_ids: toggle(chosenGroups, g.id) }),
+                ),
+              )}
+            </div>
+          </div>
+        )}
+        {!includeSpending && (chosenCategories.length > 0 || chosenGroups.length > 0) && (
+          <p className="text-xs text-amber-600">{t('forecast.budgetsNeedSpending')}</p>
+        )}
+      </div>
+      {shown.length > 0 && (
+        <table className="w-full border-t border-border" data-testid="budget-uses">
+          <thead>
+            <tr className="border-b border-border">
+              <th className={`${TH} pl-4 sm:pl-5 text-left`}>{t('forecast.budgetName')}</th>
+              <th className={`${TH} text-left w-24`}>{t('forecast.budgetMonth')}</th>
+              <th className={`${TH} text-right w-28`}>{t('forecast.budgetAmount')}</th>
+              <th className={`${TH} text-right w-28`}>{t('forecast.budgetCommitted')}</th>
+              <th className={`${TH} pr-4 sm:pr-5 text-right w-28`}>{t('forecast.budgetRemainder')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((u) => (
+              <tr key={`${u.category_id ?? u.budget_group_id}-${u.month}`} className="border-b border-border last:border-0">
+                <td className="py-2 pl-4 sm:pl-5 text-sm text-foreground">{u.name}</td>
+                <td className="py-2 text-xs text-muted-foreground">{monthName(u.month)}</td>
+                <td className="py-2 text-right text-xs sm:text-sm tabular-nums">{money(u.amount)}</td>
+                <td className={cn('py-2 text-right text-xs sm:text-sm tabular-nums', u.committed > u.amount && 'text-rose-500')}>
+                  {money(u.committed)}
+                </td>
+                <td className="py-2 pr-4 sm:pr-5 text-right text-xs sm:text-sm tabular-nums">{money(u.remainder)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {uses.length > BUDGET_USE_ROWS && (
+        <div className="border-t border-border px-4 sm:px-5 py-2.5">
+          <button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={() => setShowAll((v) => !v)}>
+            {showAll ? t('forecast.showFewer') : t('forecast.showAllExpected', { count: uses.length })}
+          </button>
+        </div>
+      )}
+    </SectionCard>
   )
 }
 
@@ -1446,7 +1600,7 @@ function ScenariosSection({
   const { canWrite } = useWorkspace()
   const queryClient = useQueryClient()
   const lookups = useFormLookups()
-  const { data: recurringList } = useQuery({ queryKey: ['recurring'], queryFn: recurringApi.list })
+  const { data: recurringList } = useQuery({ queryKey: ['recurring'], queryFn: () => recurringApi.list() })
   const { data: scenarios } = useQuery({ queryKey: ['forecast-scenarios'], queryFn: forecastApi.scenarios.list })
   const { data: items } = useQuery({ queryKey: ['forecast-items'], queryFn: forecastApi.items.list })
   const [scenarioDialog, setScenarioDialog] = useState<{ open: boolean; scenario: ForecastScenario | null }>({ open: false, scenario: null })

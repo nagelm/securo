@@ -56,7 +56,10 @@ import type {
   ProjectedTransaction,
   TransactionCalendarResponse,
   Budget,
+  BudgetGroup,
+  BudgetGroupVsActual,
   BudgetVsActual,
+  ForecastBudgetChoices,
   Rule,
   RuleAction,
   RuleConditionNode,
@@ -1265,8 +1268,9 @@ export const reconciliation = {
 }
 
 export const recurring = {
-  list: async (): Promise<RecurringTransaction[]> => {
-    const { data } = await api.get('/recurring-transactions')
+  // Fork: `plan` true lists the Forecast plan's items, false the regular payments.
+  list: async (plan?: boolean): Promise<RecurringTransaction[]> => {
+    const { data } = await api.get('/recurring-transactions', { params: plan === undefined ? {} : { plan } })
     return data
   },
   create: async (rt: Partial<RecurringTransaction>): Promise<RecurringTransaction> => {
@@ -1315,6 +1319,17 @@ export const forecast = {
     })
     return data
   },
+  // Fork: the budgets the forecast applies (opt-in).
+  budgetChoices: {
+    get: async (): Promise<ForecastBudgetChoices> => {
+      const { data } = await api.get('/forecast/budget-choices')
+      return data
+    },
+    set: async (choices: ForecastBudgetChoices): Promise<ForecastBudgetChoices> => {
+      const { data } = await api.put('/forecast/budget-choices', choices)
+      return data
+    },
+  },
   items: {
     list: async (): Promise<ForecastItem[]> => {
       const { data } = await api.get('/forecast/items')
@@ -1357,11 +1372,20 @@ export const budgets = {
     const { data } = await api.get('/budgets', { params: { month } })
     return data
   },
-  create: async (budget: { category_id: string; amount: number; month: string; is_recurring?: boolean }): Promise<Budget> => {
+  create: async (budget: {
+    category_id: string
+    amount: number
+    month: string
+    is_recurring?: boolean
+    end_month?: string | null
+  }): Promise<Budget> => {
     const { data } = await api.post('/budgets', budget)
     return data
   },
-  update: async (id: string, budget: { amount?: number }): Promise<Budget> => {
+  update: async (
+    id: string,
+    budget: { amount?: number; effective_month?: string; end_month?: string | null },
+  ): Promise<Budget> => {
     const { data } = await api.patch(`/budgets/${id}`, budget)
     return data
   },
@@ -1370,6 +1394,37 @@ export const budgets = {
   },
   comparison: async (month?: string): Promise<BudgetVsActual[]> => {
     const { data } = await api.get('/budgets/comparison', { params: { month } })
+    return data
+  },
+}
+
+// Fork: budget groups, one cap over several categories.
+export type BudgetGroupInput = {
+  name: string
+  amount: number
+  month: string
+  is_recurring: boolean
+  end_month: string | null
+  category_ids: string[]
+}
+export const budgetGroups = {
+  list: async (month?: string): Promise<BudgetGroup[]> => {
+    const { data } = await api.get('/budget-groups', { params: { month } })
+    return data
+  },
+  create: async (group: BudgetGroupInput): Promise<BudgetGroup> => {
+    const { data } = await api.post('/budget-groups', group)
+    return data
+  },
+  update: async (id: string, group: Partial<BudgetGroupInput>): Promise<BudgetGroup> => {
+    const { data } = await api.patch(`/budget-groups/${id}`, group)
+    return data
+  },
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/budget-groups/${id}`)
+  },
+  comparison: async (month?: string): Promise<BudgetGroupVsActual[]> => {
+    const { data } = await api.get('/budget-groups/comparison', { params: { month } })
     return data
   },
 }

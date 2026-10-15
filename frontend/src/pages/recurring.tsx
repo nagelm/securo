@@ -82,10 +82,13 @@ export function RecurringTab() {
   const [editing, setEditing] = useState<RecurringTransaction | null>(null)
   const [deletingRecurring, setDeletingRecurring] = useState<RecurringTransaction | null>(null)
 
-  const { data: recurringList } = useQuery({
+  const { data: allRecurring } = useQuery({
     queryKey: ['recurring'],
-    queryFn: recurringApi.list,
+    queryFn: () => recurringApi.list(),
   })
+  // Fork (owner rule): Recurring holds only genuinely regular payments; the
+  // Forecast plan's items live on the Forecast page.
+  const recurringList = useMemo(() => allRecurring?.filter((rt) => !rt.plan), [allRecurring])
 
   const { data: categoriesList } = useQuery({
     queryKey: ['categories'],

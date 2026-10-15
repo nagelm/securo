@@ -673,6 +673,16 @@ export interface RecurringTransaction {
   payee_logo_url?: string | null
   /** The icon the user picked for the payee; wins over the logo. */
   payee_icon?: string | null
+  /**
+   * Fork: part of the Forecast plan rather than a genuinely regular payment.
+   * The Recurring page leaves plan items out; the Forecast page lists them.
+   * A standard item with `transfer_account_id` is a transfer between own accounts.
+   */
+  plan?: boolean
+  /** Fork, plan items: bank rows linked from start to end. */
+  arrived_count?: number | null
+  /** Fork, plan items: payments from start to end; null when open-ended. */
+  occurrence_count?: number | null
 }
 
 // Fork: the Forecast page.
@@ -683,8 +693,6 @@ export type ForecastItemKind =
   | 'income_change'
   | 'spending_change'
   | 'loan_change'
-  // Fork: a plan for everyday spending (no scenario).
-  | 'budget'
 export type ForecastChangeMode = 'amount' | 'pause' | 'stop' | 'percent' | 'rate' | 'lump_sum'
 
 export interface ForecastScenario {
@@ -720,16 +728,6 @@ export interface ForecastItem {
   /** loan_change 'rate': recalculate the repayment over the remaining term (true) or keep it. */
   recalculate_repayment?: boolean | null
   matched_transaction_id: string | null
-  /** Fork: a repeating expected payment's matched occurrences. */
-  matches?: ForecastItemMatch[]
-  /** Fork: how many payments a repeating expected payment makes, start to end; null when open-ended. */
-  occurrence_count?: number | null
-}
-
-/** Fork: the bank row that settled one occurrence of a repeating expected payment. */
-export interface ForecastItemMatch {
-  occurrence_date: string
-  transaction_id: string
 }
 
 export interface ForecastPoint {
@@ -828,6 +826,29 @@ export interface ForecastResponse {
   spending_estimates: SpendingEstimate[]
   loans?: LoanForecast[]
   recurring_payments?: ForecastRecurringPayment[]
+  /** Fork: the chosen budgets, month by month. */
+  budget_uses?: ForecastBudgetUse[]
+}
+
+/** Fork: the budgets the forecast applies (none by default). */
+export interface ForecastBudgetChoices {
+  category_ids: string[]
+  budget_group_ids: string[]
+}
+
+/**
+ * Fork: one chosen budget in one month of the forecast. `committed` is what
+ * recurring and expected payments categorised there already project;
+ * `remainder` what is left for everyday spending (days still to come).
+ */
+export interface ForecastBudgetUse {
+  category_id: string | null
+  budget_group_id: string | null
+  name: string
+  month: string
+  amount: number
+  committed: number
+  remainder: number
 }
 
 export interface ProjectedTransaction {
@@ -974,6 +995,34 @@ export interface Budget {
   amount: number
   month: string
   is_recurring: boolean
+  /** Fork: a recurring budget's last month (first day, inclusive); null = open-ended. */
+  end_month?: string | null
+}
+
+/** Fork: one cap over several categories. */
+export interface BudgetGroup {
+  id: string
+  user_id: string
+  name: string
+  amount: number | string
+  month: string
+  is_recurring: boolean
+  end_month: string | null
+  category_ids: string[]
+}
+
+/** Fork: a group's cap for a month against its members' spending. */
+export interface BudgetGroupVsActual {
+  id: string
+  name: string
+  amount: number | string
+  month: string
+  is_recurring: boolean
+  end_month: string | null
+  category_ids: string[]
+  actual_amount: number | string
+  projected_amount: number | string
+  percentage_used: number | null
 }
 
 export interface BudgetVsActual {
@@ -990,6 +1039,8 @@ export interface BudgetVsActual {
   projected_prev_month_amount: number
   percentage_used: number | null
   is_recurring: boolean
+  /** Fork: the budget's last month, if it has one. */
+  end_month?: string | null
 }
 
 export interface Asset {
