@@ -59,8 +59,8 @@ describe('visibleNavItems', () => {
       'transactions',
       'accounts',
       'import',
-      // Fork: Insights opens the Analysis section, beside Reports.
       'reports',
+      // Fork: Insights sits under Reports in Analysis.
       'insights',
       'assets',
       // Fork: Forecast sits in Analysis; Recurring is its own page in Setup.
