@@ -5,8 +5,8 @@ import ForecastPage from '@/pages/forecast'
 import { renderWithProviders, t } from '@/test/utils'
 import type { Account, Category, ForecastItem, ForecastResponse, RecurringTransaction } from '@/types'
 
-// Fork: the Forecast page as a household plan. Expected transfers, plan
-// recurring items, chosen budgets and the account view. Made-up names and figures.
+// Fork: the Forecast page as a household plan. Expected transfers, recurring
+// items (one kind), chosen budgets and the account view. Made-up names and figures.
 
 const api = vi.hoisted(() => ({
   forecast: {
@@ -16,8 +16,6 @@ const api = vi.hoisted(() => ({
     budgetChoices: { get: vi.fn(), set: vi.fn() },
   },
   recurring: { list: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
-  budgets: { list: vi.fn() },
-  budgetGroups: { list: vi.fn() },
   accounts: { list: vi.fn() },
   categories: { list: vi.fn(), listIncludingHidden: vi.fn() },
   categoryGroups: { list: vi.fn() },
@@ -86,13 +84,13 @@ function item(values: Partial<ForecastItem>): ForecastItem {
   }
 }
 
-function plan(values: Partial<RecurringTransaction>): RecurringTransaction {
+function recurring(values: Partial<RecurringTransaction>): RecurringTransaction {
   return {
     id: 'rec-1', user_id: 'u', account_id: 'acc-1', category_id: null, description: 'Allowance', amount: 100,
     currency: 'USD', type: 'debit', frequency: 'weekly', weekend_adjustment: 'none', day_of_month: null,
     start_date: '2026-10-01', end_date: '2026-10-22', is_active: true, auto_generate: false,
     next_occurrence: '2026-10-15', amount_primary: null, fx_rate_used: null, kind: 'standard',
-    transfer_account_id: null, plan: true, arrived_count: 2, occurrence_count: 4,
+    transfer_account_id: null,
     ...values,
   }
 }
@@ -110,8 +108,6 @@ beforeEach(() => {
   api.recurring.create.mockResolvedValue({})
   api.recurring.update.mockResolvedValue({})
   api.recurring.delete.mockResolvedValue(undefined)
-  api.budgets.list.mockResolvedValue([])
-  api.budgetGroups.list.mockResolvedValue([])
   api.forecast.budgetChoices.get.mockResolvedValue({ category_ids: [], budget_group_ids: [] })
   api.accounts.list.mockResolvedValue(accounts)
   api.categories.list.mockResolvedValue([eatingOut])
@@ -156,7 +152,7 @@ describe('Forecast page: account view (fork)', () => {
   })
 })
 
-describe('Forecast page: plan items (fork)', () => {
+describe('Forecast page: expected transactions (fork)', () => {
   it('an expected transfer sends the to-account and goes out of the from-account', async () => {
     const { user } = renderWithProviders(<ForecastPage />)
     const dialog = await openExpectedForm(user)
@@ -171,77 +167,57 @@ describe('Forecast page: plan items (fork)', () => {
     })))
   })
 
-  it('a repeating transaction is saved as a plan recurring item', async () => {
+  it('makes one-off transactions only; a repeating one goes to the Recurring page', async () => {
     const { user } = renderWithProviders(<ForecastPage />)
     const dialog = await openExpectedForm(user)
 
-    await user.selectOptions(within(dialog).getByLabelText(t('forecast.itemKind')), 'repeating')
-    await user.selectOptions(within(dialog).getByLabelText(t('recurring.frequency')), 'biweekly')
-    await user.selectOptions(within(dialog).getByLabelText(t('recurring.type')), 'transfer')
-    await user.selectOptions(within(dialog).getByLabelText(t('forecast.transferTo')), 'acc-2')
+    expect(within(dialog).queryByLabelText(t('recurring.frequency'))).not.toBeInTheDocument()
+    const hint = within(dialog).getByTestId('expected-repeating-hint')
+    expect(within(hint).getByRole('link', { name: t('forecast.repeatingLink') })).toHaveAttribute('href', '/recurring')
     await user.click(within(dialog).getByRole('button', { name: t('common.save') }))
-
-    await waitFor(() => expect(api.recurring.create).toHaveBeenCalledTimes(1))
-    expect(api.forecast.items.create).not.toHaveBeenCalled()
-    const payload = api.recurring.create.mock.calls[0][0]
-    expect(payload).toEqual(expect.objectContaining({
-      plan: true, description: 'Plan line', amount: 450, type: 'debit', frequency: 'biweekly', end_date: null,
-      account_id: 'acc-1', transfer_account_id: 'acc-2', currency: 'USD',
-    }))
-    expect(payload.start_date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    await waitFor(() => expect(api.forecast.items.create).toHaveBeenCalledTimes(1))
+    expect(api.recurring.create).not.toHaveBeenCalled()
   })
 
-  it('edits and deletes a plan item through the recurring API', async () => {
-    api.recurring.list.mockResolvedValue([plan({})])
-    const { user } = renderWithProviders(<ForecastPage />)
-
-    const row = await screen.findByTestId('expected-plan')
-    await user.click(within(row).getByRole('button', { name: t('common.edit') }))
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByLabelText(t('forecast.itemKind'))).toHaveValue('repeating')
-    await user.clear(within(dialog).getByLabelText(t('recurring.amount')))
-    await user.type(within(dialog).getByLabelText(t('recurring.amount')), '120')
-    await user.click(within(dialog).getByRole('button', { name: t('common.save') }))
-    await waitFor(() => expect(api.recurring.update).toHaveBeenCalledWith('rec-1', expect.objectContaining({ amount: 120 })))
-
-    await user.click(within(await screen.findByTestId('expected-plan')).getByRole('button', { name: t('common.delete') }))
-    await user.click(await screen.findByRole('button', { name: t('common.delete') }))
-    await waitFor(() => expect(api.recurring.delete).toHaveBeenCalledWith('rec-1'))
-  })
-
-  it('lists a transfer as from → to and a plan item with its arrived count', async () => {
+  it('lists every recurring item per payment with a Manage link, transfers as from → to', async () => {
     api.forecast.items.list.mockResolvedValue([
-      item({ id: 'it-1', description: 'To savings', date: '2026-10-20', transfer_account_id: 'acc-2' }),
+      item({ id: 'it-1', description: 'Car service', date: '2026-10-20' }),
     ])
     api.recurring.list.mockResolvedValue([
-      plan({}),
-      // A genuinely regular payment is not a plan item.
-      plan({ id: 'rec-2', description: 'Rent', plan: false }),
+      recurring({ id: 'rec-1', description: 'Allowance' }),
+      recurring({ id: 'rec-2', description: 'Rent' }),
     ])
+    api.forecast.get.mockResolvedValue({
+      ...response(),
+      recurring_payments: [
+        { recurring_transaction_id: 'rec-1', date: '2026-10-22', description: 'Allowance', amount: 100,
+          type: 'debit', currency: 'USD', account_id: 'acc-1', transfer_account_id: 'acc-2' },
+        { recurring_transaction_id: 'rec-1', date: '2026-10-29', description: 'Allowance', amount: 100,
+          type: 'debit', currency: 'USD', account_id: 'acc-1', transfer_account_id: 'acc-2' },
+        { recurring_transaction_id: 'rec-2', date: '2026-11-01', description: 'Rent', amount: 600,
+          type: 'debit', currency: 'USD', account_id: 'acc-1' },
+      ],
+    })
     renderWithProviders(<ForecastPage />)
 
-    expect(await screen.findByText('Joint → Savings')).toBeInTheDocument()
-    expect(await screen.findByTestId('series-status')).toHaveTextContent('2/4 arrived')
-    expect(screen.getAllByTestId('expected-plan')).toHaveLength(1)
-    const details = screen.getAllByTestId('expected-detail').map((d) => d.textContent)
-    expect(details).toContain('Weekly, 10/1/2026 – 10/22/2026')
-    // The recurring line counts the regular payment only.
-    expect(screen.getByTestId('recurring-line')).toHaveTextContent(t('forecast.recurringLine', { count: 1 }))
+    const rows = await screen.findAllByTestId('expected-recurring')
+    expect(rows).toHaveLength(3)
+    // No series rows or "arrived" counts: every recurring payment is drawn alike.
+    expect(screen.queryByText(/arrived/i)).not.toBeInTheDocument()
+    expect(rows[0]).toHaveTextContent('Joint → Savings')
+    expect(rows[0]).toHaveTextContent('$100.00')
+    expect(rows[0]).not.toHaveTextContent('−$100.00')
+    expect(rows[2]).toHaveTextContent('−$600.00')
+    for (const row of rows) {
+      expect(within(row).getByRole('link', { name: t('forecast.manageRecurring') })).toHaveAttribute('href', '/recurring')
+    }
+    expect(screen.getByTestId('recurring-line')).toHaveTextContent(t('forecast.recurringLine', { count: 2 }))
   })
 })
 
 describe('Forecast page: budgets (fork)', () => {
-  it('lists the budgets, saves the chosen ones and shows what each month already has', async () => {
-    api.budgets.list.mockResolvedValue([
-      { id: 'b-1', user_id: 'u', category_id: 'cat-1', amount: 300, month: '2026-10-01', is_recurring: true },
-      { id: 'b-2', user_id: 'u', category_id: 'cat-1', amount: 350, month: '2027-01-01', is_recurring: true },
-    ])
-    api.budgetGroups.list.mockResolvedValue([
-      { id: 'g-1', user_id: 'u', name: 'Everyday', amount: 500, month: '2026-10-01', is_recurring: true,
-        end_month: null, category_ids: ['cat-2'] },
-    ])
+  it('has no Budgets tab; chosen budgets are rows of the expected list, managed on Budgets', async () => {
     api.forecast.budgetChoices.get.mockResolvedValue({ category_ids: [], budget_group_ids: ['g-1'] })
-    api.forecast.budgetChoices.set.mockImplementation(async (choices) => choices)
     api.forecast.get.mockResolvedValue({
       ...response(),
       budget_uses: [{
@@ -249,19 +225,22 @@ describe('Forecast page: budgets (fork)', () => {
         amount: 500, committed: 120, remainder: 380,
       }],
     })
+    renderWithProviders(<ForecastPage />)
+
+    const row = await screen.findByTestId('expected-budget')
+    expect(screen.queryByRole('tab', { name: 'Budgets' })).not.toBeInTheDocument()
+    expect(row).toHaveTextContent('Everyday')
+    expect(row).toHaveTextContent('Nov 2026')
+    expect(row).toHaveTextContent('−$380.00')
+    expect(row).toHaveTextContent(t('forecast.budgetRowDetail', { amount: '$500.00', committed: '$120.00' }))
+    expect(within(row).getByRole('link', { name: t('forecast.manageRecurring') })).toHaveAttribute('href', '/budgets')
+  })
+
+  it('says chosen budgets need the everyday spending estimate', async () => {
+    api.forecast.budgetChoices.get.mockResolvedValue({ category_ids: ['cat-1'], budget_group_ids: [] })
     const { user } = renderWithProviders(<ForecastPage />)
 
-    await user.click(await screen.findByRole('tab', { name: t('forecast.tabs.budgets') }))
-    const eating = await screen.findByRole('checkbox', { name: 'Eating out' })
-    expect(eating).not.toBeChecked()
-    expect(screen.getByRole('checkbox', { name: 'Everyday' })).toBeChecked()
-    const uses = screen.getByTestId('budget-uses')
-    expect(within(uses).getByText('$120.00')).toBeInTheDocument()
-    expect(within(uses).getByText('$380.00')).toBeInTheDocument()
-
-    await user.click(eating)
-    await waitFor(() => expect(api.forecast.budgetChoices.set).toHaveBeenCalledWith({
-      category_ids: ['cat-1'], budget_group_ids: ['g-1'],
-    }))
+    await user.click(await screen.findByRole('button', { name: t('forecast.includeSpending') }))
+    expect(await screen.findByTestId('budgets-need-spending')).toHaveTextContent(t('forecast.budgetsNeedSpending'))
   })
 })

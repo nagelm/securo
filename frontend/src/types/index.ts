@@ -661,6 +661,8 @@ export interface RecurringTransaction {
    * `loan_payment`: pays the loan `transfer_account_id` from `account_id`.
    * `amount` is the whole payment, `interest_amount` its fixed interest share
    * (booked in `interest_category_id`); only the interest is an expense.
+   * Fork: a `standard` item with `transfer_account_id` is a transfer from
+   * `account_id` to another own account (projection only).
    */
   kind?: 'standard' | 'loan_payment'
   transfer_account_id?: string | null
@@ -673,16 +675,6 @@ export interface RecurringTransaction {
   payee_logo_url?: string | null
   /** The icon the user picked for the payee; wins over the logo. */
   payee_icon?: string | null
-  /**
-   * Fork: part of the Forecast plan rather than a genuinely regular payment.
-   * The Recurring page leaves plan items out; the Forecast page lists them.
-   * A standard item with `transfer_account_id` is a transfer between own accounts.
-   */
-  plan?: boolean
-  /** Fork, plan items: bank rows linked from start to end. */
-  arrived_count?: number | null
-  /** Fork, plan items: payments from start to end; null when open-ended. */
-  occurrence_count?: number | null
 }
 
 // Fork: the Forecast page.
@@ -807,6 +799,8 @@ export interface ForecastRecurringPayment {
   type: 'debit' | 'credit'
   currency: string
   account_id: string | null
+  /** Fork: a transfer between own accounts (or a loan payment): the whole payment into this account. */
+  transfer_account_id?: string | null
 }
 
 export interface ForecastResponse {

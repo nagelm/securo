@@ -1268,9 +1268,8 @@ export const reconciliation = {
 }
 
 export const recurring = {
-  // Fork: `plan` true lists the Forecast plan's items, false the regular payments.
-  list: async (plan?: boolean): Promise<RecurringTransaction[]> => {
-    const { data } = await api.get('/recurring-transactions', { params: plan === undefined ? {} : { plan } })
+  list: async (): Promise<RecurringTransaction[]> => {
+    const { data } = await api.get('/recurring-transactions')
     return data
   },
   create: async (rt: Partial<RecurringTransaction>): Promise<RecurringTransaction> => {

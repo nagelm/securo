@@ -1399,7 +1399,6 @@
     "confirmDeleteTitle": "Budget verwijderen?",
     "confirmDeleteDescription": "Het budget voor \"{{name}}\" wordt permanent verwijderd. Bestaande transacties worden niet beïnvloed. Deze actie kan niet ongedaan worden gemaakt.",
     "confirmDeleteRecurringDescription": "Het terugkerende budget voor \"{{name}}\" wordt permanent verwijderd. Deze definitie geldt niet meer voor latere maanden. Bestaande transacties worden niet beïnvloed. Deze actie kan niet ongedaan worden gemaakt.",
-    "until": "Until",
     "untilOptional": "Until (optional)",
     "untilLabel": "until {{month}}",
     "groupsTitle": "Budget groups",
@@ -1416,7 +1415,15 @@
     "confirmDeleteGroupTitle": "Delete budget group?",
     "confirmDeleteGroupDescription": "The budget group \"{{name}}\" will be deleted. Its categories and their own budgets stay.",
     "spentOf": "{{spent}} of {{cap}}",
-    "pickCategories": "Pick at least one category"
+    "pickCategories": "Pick at least one category",
+    "noEnd": "No end month",
+    "clearEnd": "Clear",
+    "spent": "Spent",
+    "inForecast": "In forecast",
+    "forecastHint": "Include in forecast: in the months it covers, the Forecast's everyday spending follows this budget.",
+    "includeInForecastFor": "Include {{name}} in the forecast",
+    "categoryCount_one": "{{count}} category",
+    "categoryCount_other": "{{count}} categories"
   },
   "goals": {
     "title": "Doelen",
@@ -1580,7 +1587,22 @@
     "autoGenerateHelp": "Maak een transactie aan elke keer dat deze rekening moet worden betaald. Schakel uit om te wachten op de werkelijke afschrijving (bijvoorbeeld via banksynchronisatie) en toon deze tot die tijd alleen als aankomend.",
     "fxEstimate": "Schatting gebaseerd op de laatste wisselkoers ({{rate}}). Het eindbedrag kan veranderen.",
     "confirmDeleteTitle": "Terugkerende transactie verwijderen?",
-    "confirmDeleteDescription": "De terugkerende definitie \"{{description}}\" wordt permanent verwijderd. Bestaande transacties blijven bestaan, maar verliezen hun koppeling met de terugkerende transactie. Deze actie kan niet ongedaan worden gemaakt."
+    "confirmDeleteDescription": "De terugkerende definitie \"{{description}}\" wordt permanent verwijderd. Bestaande transacties blijven bestaan, maar verliezen hun koppeling met de terugkerende transactie. Deze actie kan niet ongedaan worden gemaakt.",
+    "transfer": "Transfer between my accounts",
+    "transferTo": "Transfer to",
+    "fromAccount": "From account",
+    "transferRowNote": "Transfer: {{from}} → {{to}}",
+    "transferAutoGenerateHelp": "A transfer between your own accounts is only forecast: no transaction is generated. The bank's transfer is linked to it when it arrives.",
+    "ends": "Ends",
+    "endsNever": "Never",
+    "endsOnDate": "On a date",
+    "endsAfter": "After a number of payments",
+    "endDateLabel": "End date",
+    "endsAfterCount": "Number of payments",
+    "endsLastPayment": "Last payment on {{date}}",
+    "untilDate": "until {{date}}",
+    "leftCount": "{{count}} left",
+    "endedOn": "ended {{date}}"
   },
   "forecast": {
     "section": "Analysis",
@@ -1741,8 +1763,7 @@
     },
     "tabs": {
       "expected": "Expected transactions",
-      "scenarios": "Scenarios",
-      "budgets": "Budgets"
+      "scenarios": "Scenarios"
     },
     "recurringBadge": "Recurring",
     "showAllExpected": "Show all {{count}}",
@@ -1754,33 +1775,16 @@
     "accountViewHint": "The line, its history and every payment keep to the accounts you pick. A transfer between two of them cancels out.",
     "allCashAccounts": "All cash accounts",
     "someAccounts": "{{count}} of {{total}} accounts",
-    "itemKind": "Kind",
-    "itemKinds": {
-      "one_off": "One-off payment",
-      "repeating": "Repeating payment"
-    },
     "transfer": "Transfer between my accounts",
     "transferTo": "Transfer to",
     "fromAccount": "From account",
     "matchHintTransfer": "When a bank transfer between these two accounts arrives, within 5% of the amount and 10 days of the date, the payment is marked as arrived and leaves the forecast.",
-    "seriesMatchHint": "Each payment is matched on its own. It is kept as a recurring item that belongs to the plan, so it stays off the Recurring page.",
-    "seriesSummary": "{{frequency}}, {{from}} – {{to}}",
-    "seriesSummaryOpen": "{{frequency}}, from {{from}}",
-    "seriesArrived": "{{matched}}/{{total}} arrived",
-    "seriesArrivedOpen": "{{matched}} arrived",
-    "pickAccount": "Pick an account",
-    "budgetsTitle": "Budgets in the forecast",
-    "budgetsHint": "Pick the budgets the forecast follows. For a chosen budget, a month's amount is everything that category or group spends: recurring and expected transactions categorised there count toward it, and only the rest replaces the everyday spending estimate. Budgets you don't pick don't change the forecast.",
-    "budgetsNone": "No budgets yet.",
-    "manageBudgets": "Set up budgets",
-    "categoryBudgets": "Category budgets",
-    "budgetGroups": "Budget groups",
     "budgetsNeedSpending": "Budgets apply to everyday spending: switch it on to see them in the forecast.",
-    "budgetName": "Budget",
-    "budgetMonth": "Month",
-    "budgetAmount": "Budget",
-    "budgetCommitted": "Already planned",
-    "budgetRemainder": "Left for everyday spending"
+    "budgetBadge": "Budget",
+    "budgetRowDetail": "Budget {{amount}}, {{committed}} of it already in recurring and expected transactions",
+    "allAccounts": "All accounts",
+    "repeatingHint": "Repeats? Add it as a recurring transaction, with an end date or a number of payments.",
+    "repeatingLink": "Recurring"
   },
   "rules": {
     "searchPlaceholder": "Regels zoeken...",

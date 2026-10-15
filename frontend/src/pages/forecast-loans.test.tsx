@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
   forecast: {
     get: vi.fn(),
     items: { list: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+    budgetChoices: { get: vi.fn(), set: vi.fn() },
     scenarios: { list: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
   },
   recurring: { list: vi.fn() },
@@ -128,6 +129,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   api.forecast.get.mockResolvedValue(response())
   api.forecast.items.list.mockResolvedValue([])
+  api.forecast.budgetChoices.get.mockResolvedValue({ category_ids: [], budget_group_ids: [] })
   api.forecast.items.create.mockResolvedValue({})
   api.forecast.scenarios.list.mockResolvedValue([scenario])
   api.recurring.list.mockResolvedValue(recurring)
