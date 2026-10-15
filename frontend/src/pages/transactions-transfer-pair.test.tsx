@@ -180,3 +180,31 @@ describe('transactions list, mobile', () => {
     expect(screen.queryByText('From everyday')).toBeNull()
   }, 30_000)
 })
+
+describe('date range on arrival (fork)', () => {
+  it('a plain visit opens on the current month', async () => {
+    renderWithProviders(<TransactionsPage />, { route: '/transactions', path: '/transactions' })
+    await waitFor(() => expect(api.transactions.list).toHaveBeenCalled())
+    const args = api.transactions.list.mock.calls.at(-1)![0]
+    expect(args.from).toBeTruthy()
+    expect(args.to).toBeTruthy()
+  })
+
+  it('a link that narrows by category opens without a date range', async () => {
+    renderWithProviders(<TransactionsPage />, { route: '/transactions?category_id=cat-1', path: '/transactions' })
+    await waitFor(() => expect(api.transactions.list).toHaveBeenCalled())
+    const args = api.transactions.list.mock.calls.at(-1)![0]
+    expect(args.category_ids).toEqual(['cat-1'])
+    expect(args.from).toBeUndefined()
+    expect(args.to).toBeUndefined()
+  })
+
+  it('a link that brings its own dates keeps them', async () => {
+    renderWithProviders(<TransactionsPage />, {
+      route: '/transactions?category_id=cat-1&from=2025-01-01&to=2025-12-31', path: '/transactions',
+    })
+    await waitFor(() => expect(api.transactions.list).toHaveBeenCalled())
+    const args = api.transactions.list.mock.calls.at(-1)![0]
+    expect([args.from, args.to]).toEqual(['2025-01-01', '2025-12-31'])
+  })
+})

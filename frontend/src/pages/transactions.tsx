@@ -95,6 +95,16 @@ function parseHashtags(notes: string | null): string[] {
 
 const HIDE_IGNORED_STORAGE_KEY = 'securo.transactions.hideIgnored'
 
+// URL parameters that already narrow the list to something specific.
+const CONTEXT_FILTER_PARAMS = [
+  'account_id', 'category_id', 'uncategorized', 'q', 'payee_id', 'group_id',
+  'type', 'status', 'min_amount', 'max_amount', 'tags', 'highlight',
+] as const
+
+function hasContextFilters(params: URLSearchParams): boolean {
+  return CONTEXT_FILTER_PARAMS.some((key) => !!params.get(key))
+}
+
 export default function TransactionsPage() {
   const { t, i18n } = useTranslation()
   const { collapsed: sidebarCollapsed } = useSidebarState()
@@ -130,15 +140,20 @@ export default function TransactionsPage() {
   // Seed the date range from the URL, or default to the current month on first
   // open (no ?from/?to). Done in the initializer so it survives effect re-runs
   // (e.g. React StrictMode's double-invoke in development).
+  // Fork (owner 2026-10-15): a link that already narrows the list (a category,
+  // payee, account, search...) opens without a date range unless it brings one;
+  // the current month is only the default for a plain visit.
   const [filterFrom, setFilterFrom] = useState<string>(() => {
     const f = searchParams.get('from')
     const t = searchParams.get('to')
-    return f || t ? (f ?? '') : monthRange(currentMonth()).from
+    if (f || t) return f ?? ''
+    return hasContextFilters(searchParams) ? '' : monthRange(currentMonth()).from
   })
   const [filterTo, setFilterTo] = useState<string>(() => {
     const f = searchParams.get('from')
     const t = searchParams.get('to')
-    return f || t ? (t ?? '') : monthRange(currentMonth()).to
+    if (f || t) return t ?? ''
+    return hasContextFilters(searchParams) ? '' : monthRange(currentMonth()).to
   })
   // Month reflected by the stepper: the active range when it spans exactly one
   // full month, otherwise the current month (custom ranges still navigable).
