@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.app_clock import app_today
 from app.models.account import Account
-from app.models.asset import Asset
+from app.models.asset import USER_GROUP_METADATA_KEY, Asset
 from app.models.asset_transaction import AssetTransaction
 from app.models.asset_value import AssetValue
 from app.models.category import Category
@@ -727,6 +727,10 @@ async def update_asset(
     update_data = data.model_dump(exclude_unset=True)
     if "group_id" in update_data:
         await ensure_group_in_workspace(session, update_data["group_id"], workspace_id)
+        # Fork: a synced holding the user files in another wallet stays there;
+        # holdings sync would otherwise move it back on every run.
+        if asset.source != "manual" and update_data["group_id"] != asset.group_id:
+            asset.external_metadata = {**(asset.external_metadata or {}), USER_GROUP_METADATA_KEY: True}
     # Prevent changing valuation_method on existing assets
     update_data.pop("valuation_method", None)
 

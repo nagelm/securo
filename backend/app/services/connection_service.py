@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.app_clock import app_today
 from app.core.config import get_settings
-from app.models.asset import Asset
+from app.models.asset import USER_GROUP_METADATA_KEY, Asset
 from app.models.asset_group import AssetGroup
 from app.models.asset_value import AssetValue
 from app.models.bank_connection import BankConnection
@@ -585,6 +585,8 @@ async def _sync_holdings(
             # updates them post-closure, but don't touch valuation.
             existing.name = holding.name
             withdrawn_metadata = dict(holding.metadata or {})
+            if (existing.external_metadata or {}).get(USER_GROUP_METADATA_KEY):
+                withdrawn_metadata[USER_GROUP_METADATA_KEY] = True
             if provider_sell_date is not None:
                 withdrawn_metadata[_PROVIDER_SELL_DATE_METADATA_KEY] = provider_sell_date
             existing.external_metadata = withdrawn_metadata or None
@@ -637,8 +639,10 @@ async def _sync_holdings(
             holding.account_external_id is None
             and asset.group_id in split_group_ids
         )
+        chosen_by_user = bool((asset.external_metadata or {}).get(USER_GROUP_METADATA_KEY))
         if (
             not hint_lost
+            and not chosen_by_user
             and (asset.group_id is None or asset.group_id in sync_owned_group_ids)
             and asset.group_id != group.id
         ):
@@ -793,7 +797,11 @@ async def _upsert_asset_from_holding(
     asset.currency = holding.currency
     asset.user_id = user_id
     # external_metadata is a snapshot blob: we want the latest every time.
+    # Fork: except the user's own wallet choice, which is not the provider's.
+    user_group = (asset.external_metadata or {}).get(USER_GROUP_METADATA_KEY)
     asset.external_metadata = holding.metadata
+    if user_group:
+        asset.external_metadata = {**(holding.metadata or {}), USER_GROUP_METADATA_KEY: True}
     previous_connection_id = asset.connection_id
     asset.connection_id = connection_id
     # Only auto-unarchive when the holding moved to a different connection

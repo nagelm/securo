@@ -765,3 +765,29 @@ async def test_without_the_partners_connection_the_payment_is_not_a_transfer(
             {"user_token_enc": encrypt(USER), "app_token_enc": encrypt(APP)}, "acc_p_chq"
         )
     assert [r.category_hint for r in rows] != ["transfers"]
+
+
+@pytest.mark.asyncio
+async def test_a_wallet_holding_the_user_moved_stays_in_its_new_wallet(session, test_user, test_workspace):
+    """Fork: the broker's cash wallet, filed by the user with the broker's
+    shares, stays there across syncs instead of going back to its own wallet."""
+    from app.schemas.asset import AssetUpdate
+    from app.services import asset_service
+
+    await nzd_user(session, test_user)
+    conn = await akahu_connection(session, test_user, test_workspace)
+    await run_sync(session, conn, test_workspace, test_user, five_bank_accounts())
+    assets = await connection_assets(session, conn)
+    shares_wallet = assets["acc_broker::EXA"].group_id
+    assert assets["acc_broker_wallet"].group_id != shares_wallet
+
+    await asset_service.update_asset(
+        session, assets["acc_broker_wallet"].id, test_workspace.id, test_user.id, AssetUpdate(group_id=shares_wallet)
+    )
+    await session.commit()
+    await run_sync(session, conn, test_workspace, test_user, five_bank_accounts())
+
+    assets = await connection_assets(session, conn)
+    assert assets["acc_broker_wallet"].group_id == shares_wallet
+    # Holdings the user never moved still follow the sync.
+    assert assets["acc_ks"].group_id != shares_wallet

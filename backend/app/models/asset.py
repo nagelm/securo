@@ -15,6 +15,11 @@ if TYPE_CHECKING:
     from app.models.asset_value import AssetValue
 
 
+# Fork: set in a synced asset's external_metadata once the user moves it to a
+# wallet themselves; holdings sync then leaves its wallet alone.
+USER_GROUP_METADATA_KEY = "_securo_group_chosen"
+
+
 class Asset(Base):
     __tablename__ = "assets"
     __table_args__ = (
