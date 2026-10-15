@@ -374,6 +374,23 @@ async def detect_transfer_pairs(
             session, workspace_id, tx_id, decision, movement, NODE
         )
 
+    # Fork: pairs made in this pass can settle a row that was ambiguous only
+    # because of them (two identical payments on one day, one of which just
+    # paired on a stronger rule). Look at those rows again, as
+    # recheck_after_link does after a link made by hand; a new pair also
+    # retires the question just asked about it.
+    if paired:
+        freed = [
+            tx_id
+            for tx_id, (_decision, _movement, tx) in decisions.items()
+            if tx_id not in paired
+            and tx.transfer_pair_id is None
+            and (new_ids is None or tx_id in new_ids)
+            and any(other.id in paired for other in neighbours(tx))
+        ]
+        if freed:
+            pairs_created += await detect_transfer_pairs(session, workspace_id, candidate_ids=freed)
+
     return pairs_created
 
 
