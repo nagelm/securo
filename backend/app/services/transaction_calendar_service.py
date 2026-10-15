@@ -31,7 +31,7 @@ from app.services.recurring_transaction_service import (
     LOAN_PAYMENT,
     adjust_weekend_date,
     get_occurrences_in_range,
-    recurring_loan_legs,
+    recurring_legs,
 )
 
 
@@ -493,7 +493,8 @@ async def _project_recurring_items(
     for rec in recurring_rows:
         if rec.account_id is None:
             continue
-        if rec.kind == LOAN_PAYMENT:
+        # Fork: a standard transfer is projected leg by leg too.
+        if rec.kind == LOAN_PAYMENT or rec.transfer_account_id is not None:
             carried_delta += await _project_loan_payment_items(
                 session, rec, primary_currency, start, end, account_ids, items, deltas
             )
@@ -576,7 +577,7 @@ async def _project_loan_payment_items(
     )
     carried = 0.0
     before = _count_occurrences_before(rec, start)
-    for leg in recurring_loan_legs(rec):
+    for leg in recurring_legs(rec):
         if account_ids is not None and leg.account_id not in account_ids:
             continue
         account = await session.get(Account, leg.account_id)

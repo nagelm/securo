@@ -21,9 +21,9 @@ the item is matched to it and drops out: from the sync and import paths
 after new rows land, and again whenever a forecast is computed, so a missed
 hook only delays the match.
 
-Fork: an expected payment can also repeat (``repeating``, with a frequency
-and a start and end date). Each occurrence projects and is matched like a
-one-off, on its own (``ForecastItemMatch``); a matched one stops projecting.
+Fork: the plan's repeating payments are recurring items with ``plan`` set
+(``RecurringTransaction``), projected with the other recurring payments;
+``link_plan_payments`` links their bank rows occurrence by occurrence.
 
 Fork: the spending estimate follows the canonical Budgets: in a month
 where a category has a budget, the category projects its budget instead of
@@ -43,7 +43,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Callable, Iterable, Optional, cast
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -52,7 +52,7 @@ from app.core.config import get_settings
 from app.models.account import Account
 from app.models.bank_connection import BankConnection
 from app.models.category import Category
-from app.models.forecast import ForecastBudgetChoice, ForecastItem, ForecastItemMatch, ForecastScenario
+from app.models.forecast import ForecastBudgetChoice, ForecastItem, ForecastScenario
 from app.models.recurring_transaction import RecurringTransaction
 from app.models.transaction import Transaction
 from app.models.user import User
@@ -161,42 +161,10 @@ async def _paired_into(session: AsyncSession, tx: Transaction, account_id: uuid.
     return found is not None
 
 
-def series_dates(item: ForecastItem, first: date, last: date) -> list[date]:
-    """Fork: a repeating item's payment dates in ``[first, last]``.
-
-    The recurring schedules' own helper, asked a year at a time because it
-    stops after 200 dates."""
-    from app.services.recurring_transaction_service import get_occurrences_in_range
-
-    out: list[date] = []
-    lo = first
-    while lo <= last:
-        hi = min(lo + timedelta(days=366), last + timedelta(days=1))
-        out += get_occurrences_in_range(
-            start=cast(date, item.start_date),
-            frequency=cast(str, item.frequency),
-            end_date=item.end_date,
-            range_start=lo,
-            range_end=hi,
-        )
-        lo = hi
-    return out
-
-
 def _series_window(frequency: Optional[str]) -> int:
     """Fork: how far a bank row may be from a repeating payment's date. Less
     than half the gap between payments, so a row can't fit its neighbour."""
     return {"weekly": 3, "biweekly": 6}.get(frequency or "", MATCH_WINDOW_DAYS)
-
-
-async def _matched_occurrences(session: AsyncSession, workspace_id: uuid.UUID) -> set[tuple[uuid.UUID, date]]:
-    """Fork: (item, occurrence date) of every saved series match."""
-    rows = await session.execute(
-        select(ForecastItemMatch.item_id, ForecastItemMatch.occurrence_date)
-        .join(ForecastItem, ForecastItem.id == ForecastItemMatch.item_id)
-        .where(ForecastItem.workspace_id == workspace_id)
-    )
-    return {(item_id, occurrence) for item_id, occurrence in rows.all()}
 
 
 async def match_expected_payments(
@@ -215,40 +183,29 @@ async def match_expected_payments(
     the closest amount. Flushes, never commits. Called by sync
     and import only; reads use ``pending_expected_matches``.
 
-    Fork: each occurrence of a repeating expected payment is matched on its
-    own and saved as a ``ForecastItemMatch``; one dated before the series
-    was created may match a row stored before then (its money was already
-    in the bank when the series was entered).
+    Fork: then links the rows of the Forecast plan's recurring items
+    (``link_plan_payments``), counted in the total.
     """
     found = await _find_expected_matches(session, workspace_id, transactions)
-    for item, occurrence, tx_id in found:
-        if occurrence is None:
-            item.matched_transaction_id = tx_id
-        else:
-            session.add(ForecastItemMatch(item_id=item.id, occurrence_date=occurrence, transaction_id=tx_id))
+    for item, tx_id in found:
+        item.matched_transaction_id = tx_id
     if found:
         await session.flush()
-    return len(found)
+    return len(found) + await link_plan_payments(session, workspace_id, transactions)
 
 
-async def pending_expected_matches(
-    session: AsyncSession, workspace_id: uuid.UUID
-) -> set[tuple[uuid.UUID, Optional[date]]]:
-    """(item id, occurrence date) of expected payments whose bank row has
-    arrived but isn't saved as a match yet; the date is None for a one-off.
-    Read-only: a forecast or report leaves them out without writing, so
-    viewing never changes data (a viewer can't write anyway)."""
-    return {
-        (item.id, occurrence)
-        for item, occurrence, _ in await _find_expected_matches(session, workspace_id, None)
-    }
+async def pending_expected_matches(session: AsyncSession, workspace_id: uuid.UUID) -> set[uuid.UUID]:
+    """Ids of expected payments whose bank row has arrived but isn't saved
+    as a match yet. Read-only: a forecast or report leaves them out without
+    writing, so viewing never changes data (a viewer can't write anyway)."""
+    return {item.id for item, _ in await _find_expected_matches(session, workspace_id, None)}
 
 
 async def _find_expected_matches(
     session: AsyncSession,
     workspace_id: uuid.UUID,
     transactions: Optional[Iterable[Transaction]],
-) -> list[tuple[ForecastItem, Optional[date], uuid.UUID]]:
+) -> list[tuple[ForecastItem, uuid.UUID]]:
     candidates = list(transactions) if transactions is not None else None
     if candidates is not None and not candidates:
         return []
@@ -261,22 +218,11 @@ async def _find_expected_matches(
                     ForecastItem.workspace_id == workspace_id,
                     ForecastItem.scenario_id.is_(None),
                     ForecastItem.account_id.is_not(None),
-                    or_(
-                        and_(
-                            ForecastItem.kind == "one_off",
-                            ForecastItem.matched_transaction_id.is_(None),
-                            ForecastItem.date.is_not(None),
-                        ),
-                        # Fork: series with a payment due by now (or soon).
-                        and_(
-                            ForecastItem.kind == "repeating",
-                            ForecastItem.start_date.is_not(None),
-                            ForecastItem.frequency.is_not(None),
-                            ForecastItem.start_date <= today + timedelta(days=MATCH_WINDOW_DAYS),
-                        ),
-                    ),
+                    ForecastItem.kind == "one_off",
+                    ForecastItem.matched_transaction_id.is_(None),
+                    ForecastItem.date.is_not(None),
                 )
-                .order_by(ForecastItem.date, ForecastItem.start_date, ForecastItem.created_at)
+                .order_by(ForecastItem.date, ForecastItem.created_at)
             )
         ).scalars()
     )
@@ -291,36 +237,10 @@ async def _find_expected_matches(
                 )
             )
         ).scalars()
-    ) | set(
-        (
-            await session.execute(
-                select(ForecastItemMatch.transaction_id)
-                .join(ForecastItem, ForecastItem.id == ForecastItemMatch.item_id)
-                .where(ForecastItem.workspace_id == workspace_id)
-            )
-        ).scalars()
     )
-    matched = await _matched_occurrences(session, workspace_id)
-    found: list[tuple[ForecastItem, Optional[date], uuid.UUID]] = []
+    found: list[tuple[ForecastItem, uuid.UUID]] = []
     for item in items:
-        # The payments to settle: a one-off's date, or each unmatched date of
-        # a series up to the last one a bank row could already be for.
-        if item.kind == "one_off":
-            window = MATCH_WINDOW_DAYS
-            dates: list[Optional[date]] = [None]
-            first = last = cast(date, item.date)
-        else:
-            window = _series_window(item.frequency)
-            due = [
-                d for d in series_dates(
-                    item, cast(date, item.start_date), min(item.end_date or date.max, today + timedelta(days=window))
-                )
-                if (item.id, d) not in matched
-            ]
-            if not due:
-                continue
-            dates = list(due)
-            first, last = due[0], due[-1]
+        when = cast(date, item.date)
         if candidates is not None:
             pool = candidates
         else:
@@ -331,39 +251,182 @@ async def _find_expected_matches(
                             Transaction.workspace_id == workspace_id,
                             Transaction.account_id == item.account_id,
                             Transaction.type == item.type,
-                            Transaction.date >= first - timedelta(days=window),
-                            Transaction.date <= last + timedelta(days=window),
+                            Transaction.date >= when - timedelta(days=MATCH_WINDOW_DAYS),
+                            Transaction.date <= when + timedelta(days=MATCH_WINDOW_DAYS),
                         )
                     )
                 ).scalars()
             )
-        created = _utc(item.created_at)
-        for occurrence in dates:
-            when = occurrence or cast(date, item.date)
-            # A series date already past when the series was entered may be
-            # a row stored before then.
-            check_stored = occurrence is None or created is None or occurrence >= created.date()
+        fits = [tx for tx in pool if tx.id not in taken and _is_match(item, tx, today)]
+        if item.transfer_account_id is not None:
+            to_account = item.transfer_account_id
+            fits = [tx for tx in fits if await _paired_into(session, tx, to_account)]
+        if not fits:
+            continue
+        expected = abs(Decimal(item.amount or 0))
+        best = min(
+            fits,
+            key=lambda tx: (
+                -token_overlap(item.description, tx.description),
+                abs((tx.date - when).days),
+                abs(abs(Decimal(tx.amount)) - expected),
+            ),
+        )
+        found.append((item, best.id))
+        taken.add(best.id)
+    return found
+
+
+async def link_plan_payments(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    transactions: Optional[Iterable[Transaction]] = None,
+    *,
+    recurring_ids: Optional[list[uuid.UUID]] = None,
+) -> int:
+    """Fork: link bank rows to the Forecast plan's recurring items
+    (``RecurringTransaction.plan``), occurrence by occurrence, through
+    ``Transaction.recurring_transaction_id``. Returns how many rows it linked.
+
+    Each due occurrence (from the item's start to its end, up to today plus
+    the window) with no row linked near it takes the best unlinked row on the
+    item's account in the same direction, within the window (3 days for a
+    weekly item, 6 fortnightly, 10 otherwise), exact in amount or within 5%
+    with a word in common, as an expected payment is matched. A transfer
+    (``transfer_account_id``) is settled only by the debit leg of a bank
+    transfer pair into that account. A row stored before the item was created
+    only settles an occurrence dated before then. The item's
+    ``next_occurrence`` moves past the occurrences that arrived. Flushes,
+    never commits; with ``transactions`` only those rows are candidates.
+    """
+    from app.services.recurring_match_service import carry_payee
+    from app.services.recurring_transaction_service import _advance_date, plan_occurrences
+
+    candidates = list(transactions) if transactions is not None else None
+    if candidates is not None and not candidates:
+        return 0
+    today = app_today()
+    stmt = select(RecurringTransaction).where(
+        RecurringTransaction.workspace_id == workspace_id,
+        RecurringTransaction.plan.is_(True),
+        RecurringTransaction.account_id.is_not(None),
+        RecurringTransaction.start_date <= today + timedelta(days=MATCH_WINDOW_DAYS),
+    )
+    if recurring_ids is not None:
+        stmt = stmt.where(RecurringTransaction.id.in_(recurring_ids))
+    linked = 0
+    for rec in (await session.execute(stmt.order_by(RecurringTransaction.created_at))).scalars():
+        window = _series_window(rec.frequency)
+        last = min(rec.end_date or date.max, today + timedelta(days=window))
+        dates = plan_occurrences(rec, rec.start_date, last)
+        if not dates:
+            continue
+        arrived = sorted(
+            (
+                await session.execute(
+                    select(Transaction.date).where(
+                        Transaction.recurring_transaction_id == rec.id, Transaction.source != "recurring",
+                    )
+                )
+            ).scalars()
+        )
+        due: list[date] = []
+        for d in dates:
+            near = next((a for a in arrived if abs((a - d).days) <= window), None)
+            if near is None:
+                due.append(d)
+            else:
+                arrived.remove(near)
+        if not due:
+            continue
+        if candidates is not None:
+            pool = candidates
+        else:
+            pool = list(
+                (
+                    await session.execute(
+                        select(Transaction).where(
+                            Transaction.workspace_id == workspace_id,
+                            Transaction.account_id == rec.account_id,
+                            Transaction.type == rec.type,
+                            Transaction.recurring_transaction_id.is_(None),
+                            Transaction.date >= due[0] - timedelta(days=window),
+                            Transaction.date <= due[-1] + timedelta(days=window),
+                        )
+                    )
+                ).scalars()
+            )
+        created = _utc(rec.created_at)
+        settled: list[date] = []
+        for occurrence in due:
+            check_stored = created is None or occurrence >= created.date()
             fits = [
                 tx for tx in pool
-                if tx.id not in taken and _is_match(item, tx, today, when, window, check_stored)
+                if tx.recurring_transaction_id is None
+                and _plan_row_fits(rec, tx, today, occurrence, window, check_stored, created)
             ]
-            if item.transfer_account_id is not None:
-                to_account = item.transfer_account_id
+            if rec.transfer_account_id is not None:
+                to_account = rec.transfer_account_id
                 fits = [tx for tx in fits if await _paired_into(session, tx, to_account)]
             if not fits:
                 continue
-            expected = abs(Decimal(item.amount or 0))
+            expected = abs(Decimal(rec.amount or 0))
             best = min(
                 fits,
                 key=lambda tx: (
-                    -token_overlap(item.description, tx.description),
-                    abs((tx.date - when).days),
+                    -token_overlap(rec.description, tx.description),
+                    abs((tx.date - occurrence).days),
                     abs(abs(Decimal(tx.amount)) - expected),
                 ),
             )
-            found.append((item, occurrence, best.id))
-            taken.add(best.id)
-    return found
+            best.recurring_transaction_id = rec.id
+            carry_payee(rec, best)
+            settled.append(occurrence)
+            linked += 1
+        if settled:
+            # Past the occurrences that arrived, so they don't project again.
+            intended = rec.day_of_month or rec.start_date.day
+            while rec.next_occurrence <= max(settled):
+                rec.next_occurrence = _advance_date(rec.next_occurrence, rec.frequency, intended_day=intended)
+            if rec.end_date and rec.next_occurrence > rec.end_date:
+                rec.is_active = False
+    if linked:
+        await session.flush()
+    return linked
+
+
+def _plan_row_fits(
+    rec: RecurringTransaction,
+    tx: Transaction,
+    today: date,
+    when: date,
+    window: int,
+    check_stored: bool,
+    created: Optional[datetime],
+) -> bool:
+    """Fork: whether ``tx`` is the bank row of plan item ``rec``'s payment on
+    ``when`` (the expected-payment rules of ``_is_match``)."""
+    if tx.account_id != rec.account_id or tx.type != rec.type:
+        return False
+    if rec.transfer_account_id is not None and tx.transfer_pair_id is None:
+        return False
+    stored = _utc(tx.created_at)
+    if check_stored and (stored is None or (created is not None and stored < created)):
+        return False
+    if (tx.currency or "") != rec.currency:
+        return False
+    if tx.status != "posted" or tx.date > today or tx.source in _NOT_REAL_SOURCES:
+        return False
+    if abs((tx.date - when).days) > window:
+        return False
+    expected = abs(Decimal(rec.amount or 0))
+    actual = abs(Decimal(tx.amount or 0))
+    if actual == expected:
+        return True
+    return (
+        abs(actual - expected) <= expected * MATCH_AMOUNT_TOLERANCE
+        and token_overlap(rec.description, tx.description) > 0
+    )
 
 
 async def expected_payment_projections(
@@ -383,58 +446,33 @@ async def expected_payment_projections(
     account counts unless the report is narrowed to particular accounts.
     A transfer gives one row per leg in scope (see ``_legs``).
 
-    Fork: a repeating expected payment gives one row per unmatched
-    occurrence up to ``end``; like a one-off, an occurrence still unmatched
-    after its date lands tomorrow.
+    Fork: the Forecast plan's repeating payments are recurring items
+    (``RecurringTransaction.plan``), projected with the other recurring
+    payments.
     """
     arrived = await pending_expected_matches(session, workspace_id)
-    matched = await _matched_occurrences(session, workspace_id) | {
-        (item_id, occurrence) for item_id, occurrence in arrived if occurrence is not None
-    }
     stmt = select(ForecastItem).where(
         ForecastItem.workspace_id == workspace_id,
         ForecastItem.scenario_id.is_(None),
-        or_(
-            and_(
-                ForecastItem.kind == "one_off",
-                ForecastItem.matched_transaction_id.is_(None),
-                ForecastItem.date.is_not(None),
-                ForecastItem.date <= end,
-            ),
-            and_(
-                ForecastItem.kind == "repeating",
-                ForecastItem.start_date.is_not(None),
-                ForecastItem.frequency.is_not(None),
-                ForecastItem.start_date <= end,
-            ),
-        ),
+        ForecastItem.kind == "one_off",
+        ForecastItem.matched_transaction_id.is_(None),
+        ForecastItem.date.is_not(None),
+        ForecastItem.date <= end,
     )
     in_scope = _scope_test(account_ids, narrowed)
     tomorrow = today + timedelta(days=1)
     out: list[dict] = []
     for item in (await session.execute(stmt)).scalars():
-        legs = _legs(item, in_scope)
-        if not legs:
+        if item.id in arrived:
             continue
-        if item.kind == "one_off":
-            if (item.id, None) in arrived:
-                continue
-            dates = [cast(date, item.date)]
-        else:
-            last = min(item.end_date, end) if item.end_date else end
-            dates = [
-                d for d in series_dates(item, cast(date, item.start_date), last)
-                if (item.id, d) not in matched
-            ]
-        for d in dates:
-            for leg_type in legs:
-                out.append({
-                    "date": max(d, tomorrow),
-                    "amount": float(abs(item.amount or 0)),
-                    "currency": item.currency,
-                    "type": leg_type,
-                    "category_id": item.category_id,
-                })
+        for leg_type in _legs(item, in_scope):
+            out.append({
+                "date": max(cast(date, item.date), tomorrow),
+                "amount": float(abs(item.amount or 0)),
+                "currency": item.currency,
+                "type": leg_type,
+                "category_id": item.category_id,
+            })
     return out
 
 
@@ -632,8 +670,9 @@ def _validate_item(values: dict) -> None:
     """What each kind needs. Raises ValueError with a readable message."""
     kind = values["kind"]
     amount = values.get("amount")
-    if values.get("scenario_id") is None and kind not in ("one_off", "repeating"):
-        raise ValueError("An expected payment is a one-off or repeating payment")
+    if values.get("scenario_id") is None and kind != "one_off":
+        # Fork: a repeating one is a plan recurring item (the recurring API).
+        raise ValueError("An expected payment is a one-off payment")
     start, end = values.get("start_date"), values.get("end_date")
     if start and end and end < start:
         raise ValueError("End date is before the start date")
@@ -736,7 +775,6 @@ async def create_item(
         await match_expected_payments(session, workspace_id)
     await session.commit()
     await session.refresh(item)
-    await session.refresh(item, ["matches"])
     return item
 
 
@@ -766,24 +804,13 @@ async def update_item(
         setattr(item, field, value)
     # An edited payment is a new promise; let the matcher look again.
     if item.scenario_id is None and {
-        "amount", "date", "account_id", "transfer_account_id", "type", "currency", "start_date", "frequency",
+        "amount", "date", "account_id", "transfer_account_id", "type", "currency",
     } & changes.keys():
         item.matched_transaction_id = None
-        await session.execute(delete(ForecastItemMatch).where(ForecastItemMatch.item_id == item.id))
-        await session.flush()
-        await match_expected_payments(session, workspace_id)
-    elif item.scenario_id is None and "end_date" in changes and item.end_date is not None:
-        # Fork: a series cut short keeps the matches up to its new end.
-        await session.execute(
-            delete(ForecastItemMatch).where(
-                ForecastItemMatch.item_id == item.id, ForecastItemMatch.occurrence_date > item.end_date
-            )
-        )
         await session.flush()
         await match_expected_payments(session, workspace_id)
     await session.commit()
     await session.refresh(item)
-    await session.refresh(item, ["matches"])
     return item
 
 
@@ -1200,40 +1227,31 @@ async def loan_repayment_projections(
     loans = [loan for loan in await _open_loans(session, workspace_id, today) if loan.base is not None]
     if not loans:
         return []
-    scheduled = set(
-        (
-            await session.execute(
-                select(RecurringTransaction.transfer_account_id).where(
-                    RecurringTransaction.workspace_id == workspace_id,
-                    RecurringTransaction.is_active.is_(True),
-                    RecurringTransaction.transfer_account_id.in_([loan.account.id for loan in loans]),
-                )
-            )
-        ).scalars()
-    )
-    # Fork: a repeating expected transfer into the loan (a plan's repayments)
-    # stands in for the loan card's repayments over the dates it covers.
-    planned: dict[uuid.UUID, list[tuple[date, Optional[date]]]] = {}
-    for item in (
+    # A recurring payment into the loan (a loan payment schedule, a plain
+    # recurring transfer, or a plan item) stands in for the loan card's
+    # repayments over the dates it covers, from its start to its end. Fork:
+    # bounded, so the card's repayments resume after a schedule ends.
+    covered_by: dict[uuid.UUID, list[tuple[date, Optional[date]]]] = {}
+    for loan_id, start, last in (
         await session.execute(
-            select(ForecastItem).where(
-                ForecastItem.workspace_id == workspace_id,
-                ForecastItem.scenario_id.is_(None),
-                ForecastItem.kind == "repeating",
-                ForecastItem.transfer_account_id.in_([loan.account.id for loan in loans]),
-                ForecastItem.start_date.is_not(None),
+            select(
+                RecurringTransaction.transfer_account_id,
+                RecurringTransaction.start_date,
+                RecurringTransaction.end_date,
+            ).where(
+                RecurringTransaction.workspace_id == workspace_id,
+                RecurringTransaction.is_active.is_(True),
+                RecurringTransaction.transfer_account_id.in_([loan.account.id for loan in loans]),
             )
         )
-    ).scalars():
-        planned.setdefault(cast(uuid.UUID, item.transfer_account_id), []).append(
-            (cast(date, item.start_date), item.end_date)
-        )
+    ).all():
+        covered_by.setdefault(cast(uuid.UUID, loan_id), []).append((start, last))
     category_id = await find_default_category(session, workspace_id, LOAN_REPAYMENTS_KEY)
     out: list[dict] = []
     for loan in loans:
-        if loan.account.id in scheduled or loan.base is None:
+        if loan.base is None:
             continue
-        covered = planned.get(loan.account.id, [])
+        covered = covered_by.get(loan.account.id, [])
         for period in loan.base.periods:
             if period.date > end:
                 break
@@ -1623,7 +1641,8 @@ def _recurring_payments(
     totals: dict[tuple[uuid.UUID, date, str, str], float] = {}
     for p in projections:
         rec_id = p.get("recurring_transaction_id")
-        if rec_id is None or rec_id not in by_id:
+        # Fork: plan items are listed with the expected payments instead.
+        if rec_id is None or rec_id not in by_id or by_id[rec_id].plan:
             continue
         key = (rec_id, p["date"], p["type"], p["currency"])
         totals[key] = totals.get(key, 0.0) + float(p["amount"])

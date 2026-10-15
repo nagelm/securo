@@ -30,7 +30,7 @@ from app.services.admin_service import get_credit_card_accounting_mode
 from app.services.recurring_transaction_service import (
     LOAN_PAYMENT,
     get_occurrences_in_range,
-    recurring_loan_legs,
+    recurring_legs,
 )
 from app.services.asset_service import get_asset_values_at, linked_holdings_values
 from app.services.fx_rate_service import _resolve_rate, convert
@@ -187,8 +187,9 @@ async def _get_recurring_projections(
         for occ_date in occurrences:
             if (rec.id, occ_date) in materialized_occurrences:
                 continue
-            if rec.kind == LOAN_PAYMENT:
-                for leg in recurring_loan_legs(rec):
+            # Fork: a standard transfer is projected leg by leg too.
+            if rec.kind == LOAN_PAYMENT or rec.transfer_account_id is not None:
+                for leg in recurring_legs(rec):
                     if account_ids is not None and leg.account_id not in account_ids:
                         continue
                     leaves_scope = keep_external and (

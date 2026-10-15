@@ -25,7 +25,9 @@ class RecurringTransactionCreate(BaseModel):
     category_id: Optional[uuid.UUID] = None
     payee_id: Optional[uuid.UUID] = None  # Fork: validated to the workspace
     skip_first: bool = False  # Set true when first occurrence already created as a transaction
-    auto_generate: bool = True  # Materialize occurrences; when false, wait for the real charge
+    # Materialize occurrences; when false, wait for the real charge. Fork: a
+    # plan item or a transfer defaults to false.
+    auto_generate: bool = True
     # A loan payment: `account_id` pays the loan `transfer_account_id`;
     # `amount` is the whole payment and `interest_amount` its fixed interest
     # share, booked in `interest_category_id`. The service validates them.
@@ -33,6 +35,10 @@ class RecurringTransactionCreate(BaseModel):
     transfer_account_id: Optional[uuid.UUID] = None
     interest_amount: Optional[Decimal] = None
     interest_category_id: Optional[uuid.UUID] = None
+    # Fork: part of the Forecast plan, not a genuinely regular payment. A
+    # `standard` item may name `transfer_account_id`: a transfer from
+    # `account_id` to that other own account.
+    plan: bool = False
 
 
 class RecurringTransactionUpdate(BaseModel):
@@ -51,10 +57,12 @@ class RecurringTransactionUpdate(BaseModel):
     is_active: Optional[bool] = None
     auto_generate: Optional[bool] = None
     # The kind of a schedule never changes; a loan payment's loan and
-    # interest split can.
+    # interest split can. Fork: so can a standard item's transfer account
+    # (null makes it a plain payment again).
     transfer_account_id: Optional[uuid.UUID] = None
     interest_amount: Optional[Decimal] = None
     interest_category_id: Optional[uuid.UUID] = None
+    plan: Optional[bool] = None
 
 
 class RecurringTransactionRead(BaseModel):
@@ -86,5 +94,11 @@ class RecurringTransactionRead(BaseModel):
     payee_name: Optional[str] = None
     payee_logo_url: Optional[str] = None
     payee_icon: Optional[str] = None
+    # Fork: a Forecast plan item, and its progress: the bank rows linked to
+    # it from its start (and to its end), and how many payments it makes
+    # from start to end (None when open-ended). Filled for plan items only.
+    plan: bool = False
+    arrived_count: Optional[int] = None
+    occurrence_count: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)

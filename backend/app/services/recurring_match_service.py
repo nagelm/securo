@@ -39,7 +39,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional, TypeVar
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.recurring_transaction import RecurringTransaction
@@ -289,6 +289,12 @@ async def find_bill_for_incoming(
             RecurringTransaction.amount == amount,
             RecurringTransaction.currency == currency,
             RecurringTransaction.type == tx_type,
+            # Fork: a standard transfer is settled only by a leg of a bank
+            # transfer pair, once paired (forecast_service.link_plan_payments).
+            or_(
+                RecurringTransaction.kind != "standard",
+                RecurringTransaction.transfer_account_id.is_(None),
+            ),
         )
     )
     charge = Movement(

@@ -95,11 +95,50 @@ def recurring_loan_legs(recurring: RecurringTransaction) -> list[RecurringLoanLe
     return legs
 
 
+def recurring_legs(recurring: RecurringTransaction) -> list[RecurringLoanLeg]:
+    """Fork: the rows one occurrence stands for when it is more than one row:
+    a loan payment's legs, or a standard transfer's two legs (out of
+    ``account_id``, into ``transfer_account_id``, both transfers). Empty for
+    a plain payment."""
+    if recurring.kind == LOAN_PAYMENT:
+        return recurring_loan_legs(recurring)
+    if recurring.account_id is None or recurring.transfer_account_id is None:
+        return []
+    total = Decimal(str(recurring.amount))
+    return [
+        RecurringLoanLeg("cash", recurring.account_id, "debit", total, None, True),
+        RecurringLoanLeg("to", recurring.transfer_account_id, "credit", total, None, True),
+    ]
+
+
+_INTEREST_FIELDS = ("interest_amount", "interest_category_id")
+
+
 def _reject_loan_fields(values: dict[str, Any]) -> None:
-    if any(values.get(field) is not None for field in _LOAN_FIELDS):
+    # Fork: a standard item may be a transfer (transfer_account_id), but only
+    # a loan payment has an interest split.
+    if any(values.get(field) is not None for field in _INTEREST_FIELDS):
         raise ValueError(
             "Only a loan payment has a loan, an interest amount or an interest category"
         )
+
+
+async def _check_transfer(
+    session: AsyncSession, workspace_id: uuid.UUID, values: dict[str, Any]
+) -> None:
+    """Fork: a standard transfer moves money out of ``account_id`` into
+    another of the workspace's accounts."""
+    to_account = values.get("transfer_account_id")
+    if to_account is None:
+        return
+    try:
+        await _verify_account_in_workspace(session, workspace_id, to_account)
+    except ValueError:
+        raise ValueError("Transfer account not found")
+    if to_account == values.get("account_id"):
+        raise ValueError("A transfer needs two different accounts")
+    if values.get("type") != "debit":
+        raise ValueError("A transfer is money out of the from-account (type debit)")
 
 
 async def _loan_payment_values(
@@ -176,18 +215,24 @@ async def _load_payee_display(session: AsyncSession, recurring: RecurringTransac
 
 
 async def get_recurring_transactions(
-    session: AsyncSession, workspace_id: uuid.UUID
+    session: AsyncSession, workspace_id: uuid.UUID, plan: Optional[bool] = None
 ) -> list[RecurringTransaction]:
-    result = await session.execute(
+    """Fork: ``plan`` keeps to Forecast plan items (True) or to the
+    genuinely regular payments (False); None lists both."""
+    stmt = (
         select(RecurringTransaction)
         .where(RecurringTransaction.workspace_id == workspace_id)
         .options(selectinload(RecurringTransaction.payee_entity))
         .order_by(RecurringTransaction.next_occurrence)
     )
+    if plan is not None:
+        stmt = stmt.where(RecurringTransaction.plan.is_(plan))
+    result = await session.execute(stmt)
     items = list(result.scalars().all())
     # Fork: each row is drawn with its payee's icon or logo.
     for recurring in items:
         apply_payee_display(recurring)
+    await fill_plan_progress(session, items)
     return items
 
 
@@ -214,6 +259,13 @@ async def create_recurring_transaction(
         values.update(await _loan_payment_values(session, workspace_id, values))
     else:
         _reject_loan_fields(values)
+        await _check_transfer(session, workspace_id, values)
+        # Fork: a transfer only forecasts (generating would write one leg);
+        # a plan item does too unless asked otherwise.
+        if values["transfer_account_id"] is not None or (
+            data.plan and "auto_generate" not in data.model_fields_set
+        ):
+            values["auto_generate"] = False
     next_occ = data.start_date
     if data.skip_first:
         next_occ = _advance_date(
@@ -241,6 +293,7 @@ async def create_recurring_transaction(
         transfer_account_id=values["transfer_account_id"],
         interest_amount=values["interest_amount"],
         interest_category_id=values["interest_category_id"],
+        plan=data.plan,
     )
     session.add(recurring)
     await session.flush()
@@ -248,10 +301,73 @@ async def create_recurring_transaction(
         session, user_id, recurring,
         date_field="start_date",
     )
+    await _link_plan(session, recurring)
     await session.commit()
     await session.refresh(recurring)
     await _load_payee_display(session, recurring)
+    await fill_plan_progress(session, [recurring])
     return recurring
+
+
+async def _link_plan(session: AsyncSession, recurring: RecurringTransaction) -> None:
+    """Fork: a plan item whose bank rows have already landed is linked to
+    them at once (as the Forecast's expected payments are)."""
+    if recurring.plan:
+        from app.services.forecast_service import link_plan_payments
+
+        await link_plan_payments(session, recurring.workspace_id, recurring_ids=[recurring.id])
+
+
+def plan_occurrences(recurring: RecurringTransaction, first: date, last: date) -> list[date]:
+    """Fork: a schedule's payment dates in ``[first, last]``, asked a year at
+    a time because ``get_occurrences_in_range`` stops after 200 dates."""
+    out: list[date] = []
+    lo = first
+    while lo <= last:
+        hi = min(lo + timedelta(days=366), last + timedelta(days=1))
+        out += get_occurrences_in_range(
+            start=recurring.start_date,
+            frequency=recurring.frequency,
+            end_date=recurring.end_date,
+            range_start=lo,
+            range_end=hi,
+            intended_day=recurring.day_of_month or recurring.start_date.day,
+            weekend_adjustment=recurring.weekend_adjustment,
+        )
+        lo = hi
+    return out
+
+
+# How far a linked bank row may sit outside a plan item's start and end and
+# still count toward its progress.
+_PROGRESS_SLACK_DAYS = 10
+
+
+async def fill_plan_progress(session: AsyncSession, items: list[RecurringTransaction]) -> None:
+    """Fork: set ``arrived_count`` (bank rows linked to the item, from its
+    start to its end) and ``occurrence_count`` (payments from start to end;
+    None when open-ended) on each plan item."""
+    plan = [r for r in items if r.plan]
+    if not plan:
+        return
+    rows = await session.execute(
+        select(Transaction.recurring_transaction_id, Transaction.date).where(
+            Transaction.recurring_transaction_id.in_([r.id for r in plan]),
+            Transaction.source != "recurring",
+        )
+    )
+    dates: dict[uuid.UUID, list[date]] = {}
+    for rec_id, when in rows.all():
+        dates.setdefault(rec_id, []).append(when)
+    slack = timedelta(days=_PROGRESS_SLACK_DAYS)
+    for r in plan:
+        r.arrived_count = sum(
+            1 for d in dates.get(r.id, [])
+            if r.start_date - slack <= d and (r.end_date is None or d <= r.end_date + slack)
+        )
+        r.occurrence_count = (
+            len(plan_occurrences(r, r.start_date, r.end_date)) if r.end_date is not None else None
+        )
 
 
 async def update_recurring_transaction(
@@ -290,6 +406,13 @@ async def update_recurring_transaction(
         update_data.update(await _loan_payment_values(session, workspace_id, merged))
     else:
         _reject_loan_fields(update_data)
+        merged = {
+            field: update_data.get(field, getattr(recurring, field))
+            for field in ("account_id", "transfer_account_id", "type")
+        }
+        await _check_transfer(session, workspace_id, merged)
+        if merged["transfer_account_id"] is not None:
+            update_data["auto_generate"] = False  # Fork: a transfer only forecasts
 
     schedule_changed = any(
         key in update_data and update_data[key] != getattr(recurring, key)
@@ -308,9 +431,12 @@ async def update_recurring_transaction(
             floor=previous_next_occurrence,
         )
 
+    await session.flush()
+    await _link_plan(session, recurring)
     await session.commit()
     await session.refresh(recurring)
     await _load_payee_display(session, recurring)
+    await fill_plan_progress(session, [recurring])
     return recurring
 
 

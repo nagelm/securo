@@ -165,22 +165,23 @@ async def test_a_plain_recurring_transfer_into_the_loan_counts_as_its_schedule(s
     assert await loan_repayment_projections(session, test_workspace.id, today, _add_months(today, MONTHS)) == []
 
 
-async def test_a_planned_repeating_transfer_into_the_loan_replaces_its_repayments(
+async def test_a_plan_transfer_into_the_loan_replaces_its_repayments_until_it_ends(
     session, test_user, test_workspace,
 ):
-    """Fork: over the dates a plan's repeating transfer into the loan covers,
-    the loan card's own repayments are not projected as well."""
-    from app.models.forecast import ForecastItem
+    """Fork: over the dates a plan recurring transfer into the loan covers
+    (its start to its end), the loan card's own repayments are not projected
+    as well; after it ends they are again."""
+    from app.models.recurring_transaction import RecurringTransaction
     from app.services.forecast_service import loan_repayment_projections
 
     today = app_today()
     checking = await _account(session, test_user.id)
     loan = await _loan(session, test_user.id)
-    last = today + timedelta(days=60)
-    session.add(ForecastItem(
-        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id, kind="repeating",
-        description="Plan: loan", amount=Decimal("400"), currency="BRL", type="debit",
-        frequency="weekly", start_date=today + timedelta(days=1), end_date=last,
+    first, last = today + timedelta(days=1), today + timedelta(days=60)
+    session.add(RecurringTransaction(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id, kind="standard", plan=True,
+        description="Plan: loan", amount=Decimal("400"), currency="BRL", type="debit", frequency="weekly",
+        start_date=first, end_date=last, next_occurrence=first, is_active=True, auto_generate=False,
         account_id=checking.id, transfer_account_id=loan.id,
     ))
     await session.commit()
@@ -188,6 +189,10 @@ async def test_a_planned_repeating_transfer_into_the_loan_replaces_its_repayment
     rows = await loan_repayment_projections(session, test_workspace.id, today, _add_months(today, MONTHS))
     _, base = _base_schedule()
     assert [r["date"] for r in rows] == [d for d in _in_horizon(p.date for p in base.periods) if d > last]
+    # The plan's own payments leave cash on their dates.
+    result = await _forecast(session, test_user, test_workspace)
+    weeks = len([d for d in _in_horizon(p.date for p in base.periods) if d <= last])
+    assert weeks > 0 and result.recurring_payments == []
 
 
 async def test_a_loan_without_details_adds_no_repayments(session, test_user, test_workspace):
@@ -535,4 +540,4 @@ async def test_api_loan_change_needs_a_scenario(client, auth_headers, session, t
         "kind": "loan_change", "account_id": str(loan.id), "change_mode": "lump_sum", "amount": "100",
         "start_date": "2030-01-01",
     }, headers=auth_headers)
-    assert resp.status_code == 400 and resp.json()["detail"] == "An expected payment is a one-off or repeating payment"
+    assert resp.status_code == 400 and resp.json()["detail"] == "An expected payment is a one-off payment"

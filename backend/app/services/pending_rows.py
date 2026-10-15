@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.app_clock import app_today
 from app.models.account import Account
-from app.models.forecast import ForecastItem, ForecastItemMatch
+from app.models.forecast import ForecastItem
 from app.models.transaction import Transaction
 from app.models.transaction_attachment import TransactionAttachment
 from app.models.transaction_split import TransactionSplit
@@ -133,12 +133,10 @@ async def _hand_over(
         .where(ForecastItem.matched_transaction_id == stale.id)
         .values(matched_transaction_id=settled.id)
     )
-    # Fork: and a repeating expected payment's matched occurrence.
-    await session.execute(
-        update(ForecastItemMatch)
-        .where(ForecastItemMatch.transaction_id == stale.id)
-        .values(transaction_id=settled.id)
-    )
+    # Fork: and a Forecast plan item's link (the plan's repeating payments
+    # are recurring items, linked through recurring_transaction_id).
+    if settled.recurring_transaction_id is None and stale.recurring_transaction_id is not None:
+        settled.recurring_transaction_id = stale.recurring_transaction_id
 
 
 async def _unpair(session: AsyncSession, stale: Transaction) -> None:

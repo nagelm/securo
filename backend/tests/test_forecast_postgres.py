@@ -127,7 +127,6 @@ _LATER = [_load(name) for name in (
 
 async def test_migration_downgrades_and_upgrades(session):
     assert {"forecast_scenarios", "forecast_items"} <= await _tables(session)
-    await _run(session, "downgrade", _LATER[1])  # its table refers to forecast_items
     await _run(session, "downgrade")
     assert not {"forecast_scenarios", "forecast_items"} & await _tables(session)
     await _run(session, "upgrade")
@@ -143,7 +142,6 @@ async def test_migrated_tables_take_the_app_rows(session, test_user, test_worksp
 
     from app.models.forecast import ForecastItem, ForecastScenario
 
-    await _run(session, "downgrade", _LATER[1])  # its table refers to forecast_items
     await _run(session, "downgrade")
     await _run(session, "upgrade")
     await _run(session, "upgrade", _F011)  # the ORM is at head, so the later columns too

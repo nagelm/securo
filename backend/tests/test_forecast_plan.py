@@ -1,5 +1,5 @@
 """Fork: the Forecast page as a household plan. Expected transfers between
-own accounts, repeating expected payments, the account view and the
+own accounts, plan recurring items (the plan's repeating payments), the account view and the
 chosen canonical budgets. Every figure and name is made up.
 
 Runs on SQLite here and again on PostgreSQL from test_forecast_postgres.py.
@@ -11,7 +11,6 @@ from decimal import Decimal
 import pytest
 
 from app.core.app_clock import app_today
-from app.models.forecast import ForecastItem
 from app.models.transaction import Transaction
 from app.schemas.forecast import ForecastBudgetChoices
 from app.services import forecast_service
@@ -112,7 +111,7 @@ async def test_expected_transfer_matches_the_debit_leg_of_a_bank_transfer(sessio
     assert await forecast_service.match_expected_payments(session, test_workspace.id) == 0
 
     debit_leg = await _pair(session, test_user.id, joint.id, savings.id, 300, today)
-    assert await forecast_service.pending_expected_matches(session, test_workspace.id) == {(item.id, None)}
+    assert await forecast_service.pending_expected_matches(session, test_workspace.id) == {item.id}
     assert await forecast_service.match_expected_payments(session, test_workspace.id) == 1
     await session.refresh(item)
     assert item.matched_transaction_id == debit_leg.id
@@ -143,159 +142,191 @@ async def test_api_expected_transfer(client, auth_headers, session, test_user, t
 
 
 # ---------------------------------------------------------------------------
-# 2. repeating expected payments
+# 2. plan recurring items (the plan's repeating payments)
 # ---------------------------------------------------------------------------
 
 
-async def _series(session, user_id, workspace_id, account_id, start, end, amount="100", **values):
-    values.setdefault("type", "debit")
-    values.setdefault("description", "Allowance")
-    item = ForecastItem(
-        user_id=user_id, workspace_id=workspace_id, kind="repeating", currency="BRL", frequency="weekly",
-        amount=Decimal(amount), start_date=start, end_date=end, account_id=account_id, **values,
+async def _plan(session, user, workspace, account_id, start, end, amount="100", **values):
+    """A Forecast plan item: a weekly recurring item with ``plan`` set,
+    made through the recurring service as the API makes it."""
+    from app.schemas.recurring_transaction import RecurringTransactionCreate
+    from app.services.recurring_transaction_service import create_recurring_transaction
+
+    data = RecurringTransactionCreate(
+        description=values.pop("description", "Allowance"), amount=Decimal(amount), currency="BRL",
+        type=values.pop("type", "debit"), frequency=values.pop("frequency", "weekly"), start_date=start,
+        end_date=end, account_id=account_id, plan=True, **values,
     )
-    session.add(item)
-    await session.commit()
-    return item
+    return await create_recurring_transaction(session, workspace.id, user.id, data)
 
 
-async def test_repeating_expected_payment_projects_each_occurrence(session, test_user, test_workspace):
+async def _linked(session, rec_id) -> list[uuid.UUID]:
+    from sqlalchemy import select
+
+    rows = await session.execute(
+        select(Transaction.id).where(Transaction.recurring_transaction_id == rec_id).order_by(Transaction.date)
+    )
+    return list(rows.scalars())
+
+
+async def test_plan_item_projects_each_occurrence(session, test_user, test_workspace):
     today = app_today()
     joint = await _account(session, test_user.id)
     first = today + timedelta(days=1)
-    await _series(session, test_user.id, test_workspace.id, joint.id, first, first + timedelta(days=21))
+    rec = await _plan(session, test_user, test_workspace, joint.id, first, first + timedelta(days=21))
+    assert rec.auto_generate is False and rec.plan is True
 
     result = await _forecast(session, test_user, test_workspace)
 
     assert result.summary.end_balance == pytest.approx(600)
+    # Listed with the expected payments, not with the recurring payments.
+    assert result.recurring_payments == []
     report = await get_cash_flow_report(session, test_workspace.id, test_user.id, months=MONTHS, interval="daily")
     assert report.summary.primary_value == pytest.approx(600)
 
 
-async def test_overdue_occurrences_are_still_expected_tomorrow(session, test_user, test_workspace):
+async def test_each_occurrence_of_a_plan_item_is_linked_on_its_own(session, test_user, test_workspace):
+    from app.services.recurring_transaction_service import get_recurring_transactions
+
     today = app_today()
     joint = await _account(session, test_user.id)
-    await _series(session, test_user.id, test_workspace.id, joint.id,
-                  today - timedelta(days=14), today + timedelta(days=7))
-
-    result = await _forecast(session, test_user, test_workspace)
-
-    # today-14, today-7 and today land tomorrow; today+7 on its date.
-    assert result.summary.end_balance == pytest.approx(600)
-    assert result.summary.lowest_date == today + timedelta(days=7)
-
-
-async def test_each_occurrence_is_matched_on_its_own(session, test_user, test_workspace):
-    today = app_today()
-    joint = await _account(session, test_user.id)
-    item = await _series(session, test_user.id, test_workspace.id, joint.id,
-                         today - timedelta(days=14), today + timedelta(days=7))
+    rec = await _plan(session, test_user, test_workspace, joint.id,
+                      today - timedelta(days=14), today + timedelta(days=7))
     first = await _tx(session, test_user.id, joint.id, 100, "debit", today - timedelta(days=13),
                       description="ALLOWANCE")
     second = await _tx(session, test_user.id, joint.id, 100, "debit", today - timedelta(days=7),
                        description="ALLOWANCE")
-
-    # Viewing leaves the arrived occurrences out without saving anything.
-    viewed = await _forecast(session, test_user, test_workspace)
-    assert viewed.summary.end_balance == pytest.approx(1000 - 200 - 200)
-    assert await forecast_service.pending_expected_matches(session, test_workspace.id) == {
-        (item.id, today - timedelta(days=14)), (item.id, today - timedelta(days=7)),
-    }
+    # Not it: another direction, and an amount too far off.
+    await _tx(session, test_user.id, joint.id, 100, "credit", today - timedelta(days=7))
+    await _tx(session, test_user.id, joint.id, 180, "debit", today, description="ALLOWANCE")
 
     assert await forecast_service.match_expected_payments(session, test_workspace.id) == 2
     await session.commit()
-    await session.refresh(item, ["matches"])
-    assert [(m.occurrence_date, m.transaction_id) for m in item.matches] == [
-        (today - timedelta(days=14), first.id), (today - timedelta(days=7), second.id),
-    ]
-    assert item.occurrence_count == 4
-    # Nothing more to match, and the matched occurrences stay out of the line.
+    assert await _linked(session, rec.id) == [first.id, second.id]
+    [listed] = await get_recurring_transactions(session, test_workspace.id, plan=True)
+    assert (listed.arrived_count, listed.occurrence_count) == (2, 4)
+    # Nothing more to link; the next payment still to come projects.
     assert await forecast_service.match_expected_payments(session, test_workspace.id) == 0
     result = await _forecast(session, test_user, test_workspace)
-    assert result.summary.end_balance == pytest.approx(600)
+    assert result.summary.end_balance == pytest.approx(1000 - 200 + 100 - 180 - 100)
 
 
-async def test_a_series_date_past_when_it_was_entered_may_match_an_older_row(session, test_user, test_workspace):
-    """The money for a date already past when the series was entered was in
+async def test_a_plan_date_past_when_it_was_entered_may_link_an_older_row(session, test_user, test_workspace):
+    """The money for a date already past when the item was entered was in
     the bank before then; a date still to come needs a row stored later."""
     today = app_today()
     joint = await _account(session, test_user.id)
-    # Dates today-5 and today+2 (a weekly series matches within 3 days).
-    item = await _series(session, test_user.id, test_workspace.id, joint.id,
-                         today - timedelta(days=5), today + timedelta(days=2))
-    await session.refresh(item)
-    created = item.created_at
+    # Dates today-5 and today+2 (a weekly item links within 3 days).
+    rec = await _plan(session, test_user, test_workspace, joint.id,
+                      today - timedelta(days=5), today + timedelta(days=2))
+    await session.refresh(rec)
+    created = rec.created_at
     past = await _tx(session, test_user.id, joint.id, 100, "debit", today - timedelta(days=5))
     past.created_at = created - timedelta(days=4)
     early = await _tx(session, test_user.id, joint.id, 100, "debit", today)
     early.created_at = created - timedelta(hours=1)
     await session.commit()
 
-    assert await forecast_service.pending_expected_matches(session, test_workspace.id) == {
-        (item.id, today - timedelta(days=5)),
-    }
+    assert await forecast_service.link_plan_payments(session, test_workspace.id) == 1
+    assert await _linked(session, rec.id) == [past.id]
     early.created_at = created + timedelta(hours=1)
     await session.commit()
-    assert await forecast_service.pending_expected_matches(session, test_workspace.id) == {
-        (item.id, today - timedelta(days=5)), (item.id, today + timedelta(days=2)),
-    }
+    assert await forecast_service.link_plan_payments(session, test_workspace.id) == 1
+    assert await _linked(session, rec.id) == [past.id, early.id]
 
 
-async def test_repeating_transfer_between_cash_accounts_leaves_the_line_unchanged(
-    session, test_user, test_workspace,
-):
+async def test_plan_transfer_between_cash_accounts_leaves_the_line_unchanged(session, test_user, test_workspace):
     today = app_today()
     joint = await _account(session, test_user.id)
     savings = await _account(session, test_user.id)
-    item = await _series(session, test_user.id, test_workspace.id, joint.id,
-                         today - timedelta(days=7), today + timedelta(days=14), transfer_account_id=savings.id)
+    rec = await _plan(session, test_user, test_workspace, joint.id,
+                      today - timedelta(days=7), today + timedelta(days=14), transfer_account_id=savings.id)
 
     result = await _forecast(session, test_user, test_workspace)
     assert result.summary.end_balance == pytest.approx(2000)
-    only_joint = await get_cash_flow_report(
-        session, test_workspace.id, test_user.id, months=MONTHS, interval="daily", account_ids=[joint.id],
+    # One account's view sees its leg of each payment still to come.
+    only_joint = await _forecast(session, test_user, test_workspace, account_ids=[joint.id])
+    assert only_joint.summary.end_balance == pytest.approx(1000 - 2 * 100)
+    only_savings = await get_cash_flow_report(
+        session, test_workspace.id, test_user.id, months=MONTHS, interval="daily", account_ids=[savings.id],
     )
-    assert only_joint.summary.primary_value == pytest.approx(1000 - 4 * 100)
+    assert only_savings.summary.primary_value == pytest.approx(1000 + 2 * 100)
 
+    # Only the debit leg of a bank transfer pair into savings settles it.
+    await _tx(session, test_user.id, joint.id, 100, "debit", today - timedelta(days=7))
     leg = await _pair(session, test_user.id, joint.id, savings.id, 100, today - timedelta(days=7))
     assert await forecast_service.match_expected_payments(session, test_workspace.id) == 1
     await session.commit()
-    await session.refresh(item, ["matches"])
-    assert [(m.occurrence_date, m.transaction_id) for m in item.matches] == [(today - timedelta(days=7), leg.id)]
+    assert await _linked(session, rec.id) == [leg.id]
 
 
-async def test_api_repeating_expected_payment(client, auth_headers, session, test_user, test_workspace):
+async def test_plan_transfer_into_a_loan_leaves_cash(session, test_user, test_workspace):
     today = app_today()
     joint = await _account(session, test_user.id)
+    loan = await _account(session, test_user.id, opening=0, type_="loan")
+    await _plan(session, test_user, test_workspace, joint.id, today + timedelta(days=1), today + timedelta(days=8),
+                transfer_account_id=loan.id)
+
+    result = await _forecast(session, test_user, test_workspace)
+
+    assert result.summary.end_balance == pytest.approx(800)
+
+
+async def test_api_plan_item(client, auth_headers, session, test_user, test_workspace):
+    today = app_today()
+    joint = await _account(session, test_user.id)
+    savings = await _account(session, test_user.id)
     start = today - timedelta(days=7)
-    resp = await client.post("/api/forecast/items", json={
-        "kind": "repeating", "amount": "100", "type": "debit", "frequency": "weekly", "description": "Allowance",
+    # Already in the bank: the first payment, as a transfer pair.
+    leg = await _pair(session, test_user.id, joint.id, savings.id, 100, start, description="Allowance")
+    body = {
+        "description": "Allowance", "amount": "100", "currency": "BRL", "type": "debit", "frequency": "weekly",
         "start_date": str(start), "end_date": str(start + timedelta(days=21)), "account_id": str(joint.id),
-    }, headers=auth_headers)
+        "transfer_account_id": str(savings.id), "plan": True,
+    }
+    resp = await client.post("/api/recurring-transactions", json=body, headers=auth_headers)
     assert resp.status_code == 201, resp.text
-    body = resp.json()
-    item_url = f"/api/forecast/items/{body['id']}"
-    assert (body["kind"], body["occurrence_count"], body["matches"]) == ("repeating", 4, [])
+    item = resp.json()
+    assert (item["plan"], item["auto_generate"], item["transfer_account_id"]) == (True, False, str(savings.id))
+    assert (item["arrived_count"], item["occurrence_count"]) == (1, 4)
+    assert await _linked(session, uuid.UUID(item["id"])) == [leg.id]
 
-    tx = await _tx(session, test_user.id, joint.id, 100, "debit", start, description="Allowance")
-    resp = await client.patch(item_url, json={"description": "Allowance"}, headers=auth_headers)
-    assert resp.json()["matches"] == []  # the wording isn't a reason to look again
-    resp = await client.patch(item_url, json={"end_date": str(start + timedelta(days=14))}, headers=auth_headers)
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["occurrence_count"] == 3
-    assert resp.json()["matches"] == [{"occurrence_date": str(start), "transaction_id": str(tx.id)}]
-    resp = await client.patch(item_url, json={"end_date": str(start + timedelta(days=1))}, headers=auth_headers)
-    assert resp.json()["matches"] == [{"occurrence_date": str(start), "transaction_id": str(tx.id)}]
-    resp = await client.patch(item_url, json={"amount": "250"}, headers=auth_headers)
-    assert resp.json()["matches"] == []  # a new amount is a new promise
+    # The Recurring page lists the regular payments only.
+    regular = (await client.get("/api/recurring-transactions", params={"plan": "false"}, headers=auth_headers)).json()
+    plan = (await client.get("/api/recurring-transactions", params={"plan": "true"}, headers=auth_headers)).json()
+    assert regular == [] and [i["id"] for i in plan] == [item["id"]]
+    assert len((await client.get("/api/recurring-transactions", headers=auth_headers)).json()) == 1
 
-    resp = await client.get("/api/forecast/items", params={"expected": "true"}, headers=auth_headers)
-    assert [(i["id"], i["occurrence_count"]) for i in resp.json()] == [(body["id"], 1)]
+    resp = await client.patch(f"/api/recurring-transactions/{item['id']}",
+                              json={"end_date": str(start + timedelta(days=14))}, headers=auth_headers)
+    assert resp.status_code == 200 and resp.json()["occurrence_count"] == 3
+    resp = await client.patch(f"/api/recurring-transactions/{item['id']}",
+                              json={"transfer_account_id": None}, headers=auth_headers)
+    assert resp.status_code == 200 and resp.json()["transfer_account_id"] is None
 
-    resp = await client.post("/api/forecast/items", json={
-        "kind": "repeating", "amount": "100", "type": "debit", "start_date": str(start),
+    for payload, message in [
+        ({**body, "transfer_account_id": str(joint.id)}, "A transfer needs two different accounts"),
+        ({**body, "type": "credit"}, "A transfer is money out of the from-account (type debit)"),
+        ({**body, "transfer_account_id": str(uuid.uuid4())}, "Transfer account not found"),
+        ({**body, "interest_amount": "5"},
+         "Only a loan payment has a loan, an interest amount or an interest category"),
+    ]:
+        resp = await client.post("/api/recurring-transactions", json={**payload, "description": "Other"},
+                                 headers=auth_headers)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["detail"] == message
+
+    # A plan item that is not a transfer may still ask to generate rows.
+    resp = await client.post("/api/recurring-transactions", json={
+        **body, "description": "Pocket money", "transfer_account_id": None, "auto_generate": True,
     }, headers=auth_headers)
-    assert resp.status_code == 400 and resp.json()["detail"] == "Frequency and start date are required"
+    assert resp.status_code == 201 and resp.json()["auto_generate"] is True
+
+    # The forecast API has no repeating expected payments any more.
+    resp = await client.post("/api/forecast/items", json={
+        "kind": "repeating", "amount": "100", "type": "debit", "frequency": "weekly", "start_date": str(start),
+    }, headers=auth_headers)
+    assert resp.status_code == 400 and resp.json()["detail"] == "An expected payment is a one-off payment"
 
 
 # ---------------------------------------------------------------------------
