@@ -165,6 +165,31 @@ async def test_a_plain_recurring_transfer_into_the_loan_counts_as_its_schedule(s
     assert await loan_repayment_projections(session, test_workspace.id, today, _add_months(today, MONTHS)) == []
 
 
+async def test_a_planned_repeating_transfer_into_the_loan_replaces_its_repayments(
+    session, test_user, test_workspace,
+):
+    """Fork: over the dates a plan's repeating transfer into the loan covers,
+    the loan card's own repayments are not projected as well."""
+    from app.models.forecast import ForecastItem
+    from app.services.forecast_service import loan_repayment_projections
+
+    today = app_today()
+    checking = await _account(session, test_user.id)
+    loan = await _loan(session, test_user.id)
+    last = today + timedelta(days=60)
+    session.add(ForecastItem(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id, kind="repeating",
+        description="Plan: loan", amount=Decimal("400"), currency="BRL", type="debit",
+        frequency="weekly", start_date=today + timedelta(days=1), end_date=last,
+        account_id=checking.id, transfer_account_id=loan.id,
+    ))
+    await session.commit()
+
+    rows = await loan_repayment_projections(session, test_workspace.id, today, _add_months(today, MONTHS))
+    _, base = _base_schedule()
+    assert [r["date"] for r in rows] == [d for d in _in_horizon(p.date for p in base.periods) if d > last]
+
+
 async def test_a_loan_without_details_adds_no_repayments(session, test_user, test_workspace):
     await _account(session, test_user.id)
     await _loan(session, test_user.id, details={"type": "REVOLVING"})

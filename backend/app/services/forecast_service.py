@@ -1105,14 +1105,34 @@ async def loan_repayment_projections(
             )
         ).scalars()
     )
+    # Fork: a repeating expected transfer into the loan (a plan's repayments)
+    # stands in for the loan card's repayments over the dates it covers.
+    planned: dict[uuid.UUID, list[tuple[date, Optional[date]]]] = {}
+    for item in (
+        await session.execute(
+            select(ForecastItem).where(
+                ForecastItem.workspace_id == workspace_id,
+                ForecastItem.scenario_id.is_(None),
+                ForecastItem.kind == "repeating",
+                ForecastItem.transfer_account_id.in_([loan.account.id for loan in loans]),
+                ForecastItem.start_date.is_not(None),
+            )
+        )
+    ).scalars():
+        planned.setdefault(cast(uuid.UUID, item.transfer_account_id), []).append(
+            (cast(date, item.start_date), item.end_date)
+        )
     category_id = await find_default_category(session, workspace_id, LOAN_REPAYMENTS_KEY)
     out: list[dict] = []
     for loan in loans:
         if loan.account.id in scheduled or loan.base is None:
             continue
+        covered = planned.get(loan.account.id, [])
         for period in loan.base.periods:
             if period.date > end:
                 break
+            if any(start <= period.date and (last is None or period.date <= last) for start, last in covered):
+                continue
             if period.date > today and period.repayment:
                 out.append({
                     "date": period.date,
