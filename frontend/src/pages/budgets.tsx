@@ -222,8 +222,11 @@ function BudgetRow({
         {/* Narrow screens: the progress sits under the name. */}
         <div className="mt-1.5 sm:hidden">{bar}</div>
       </td>
-      <td className="py-3 pr-4 hidden sm:table-cell">{bar}</td>
-      <td className="py-3 text-sm font-semibold tabular-nums text-foreground">{mask(formatCurrency(limit, currency, locale))}</td>
+      {/* A fixed-width box: the name cell takes the rest (w-full), which would squeeze the bar to nothing. */}
+      <td className="py-3 pr-4 hidden sm:table-cell">
+        <div className="w-56">{bar}</div>
+      </td>
+      <td className="py-3 pr-2 text-sm font-semibold tabular-nums text-foreground whitespace-nowrap">{mask(formatCurrency(limit, currency, locale))}</td>
       <td className="py-3 text-center">
         <Switch
           checked={inForecast}
