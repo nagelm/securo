@@ -109,8 +109,25 @@ async def _tables(session: AsyncSession) -> set[str]:
     return {r[0] for r in rows}
 
 
+def _load(name: str):
+    path = _PATH.with_name(f"{name}.py")
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# Fork: the later forecast revisions, so the ORM's schema (head) can be
+# taken down to before f010 and rebuilt.
+_LATER = [_load(name) for name in (
+    "f014_forecast_transfers", "f015_forecast_item_matches", "f016_forecast_budgets",
+)]
+
+
 async def test_migration_downgrades_and_upgrades(session):
     assert {"forecast_scenarios", "forecast_items"} <= await _tables(session)
+    await _run(session, "downgrade", _LATER[1])  # its table refers to forecast_items
     await _run(session, "downgrade")
     assert not {"forecast_scenarios", "forecast_items"} & await _tables(session)
     await _run(session, "upgrade")
@@ -126,9 +143,12 @@ async def test_migrated_tables_take_the_app_rows(session, test_user, test_worksp
 
     from app.models.forecast import ForecastItem, ForecastScenario
 
+    await _run(session, "downgrade", _LATER[1])  # its table refers to forecast_items
     await _run(session, "downgrade")
     await _run(session, "upgrade")
     await _run(session, "upgrade", _F011)  # the ORM is at head, so the later columns too
+    for later in _LATER:
+        await _run(session, "upgrade", later)
     scenario = ForecastScenario(
         user_id=test_user.id, workspace_id=test_workspace.id, name="S", color="#000000",
     )

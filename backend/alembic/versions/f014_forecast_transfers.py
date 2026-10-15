@@ -10,7 +10,8 @@ An expected payment can be a transfer between own accounts: the new
 deletes the item, as `account_id` already does.
 
 Downgrade deletes the transfer items (without the column they would read as
-a plain payment out of the from-account), then drops the column.
+a plain payment out of the from-account), then drops the column (and with
+it its foreign key).
 """
 from typing import Sequence, Union
 
@@ -30,7 +31,7 @@ def upgrade() -> None:
         sa.Column(
             "transfer_account_id",
             postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("accounts.id", ondelete="CASCADE", name="fk_forecast_items_transfer_account_id"),
+            sa.ForeignKey("accounts.id", ondelete="CASCADE"),
             nullable=True,
         ),
     )
@@ -38,5 +39,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("DELETE FROM forecast_items WHERE transfer_account_id IS NOT NULL")
-    op.drop_constraint("fk_forecast_items_transfer_account_id", "forecast_items", type_="foreignkey")
     op.drop_column("forecast_items", "transfer_account_id")
