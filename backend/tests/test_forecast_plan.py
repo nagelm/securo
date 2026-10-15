@@ -295,3 +295,142 @@ async def test_api_repeating_expected_payment(client, auth_headers, session, tes
         "kind": "repeating", "amount": "100", "type": "debit", "start_date": str(start),
     }, headers=auth_headers)
     assert resp.status_code == 400 and resp.json()["detail"] == "Frequency and start date are required"
+
+
+# ---------------------------------------------------------------------------
+# 3. the account view
+# ---------------------------------------------------------------------------
+
+
+async def test_account_view_sees_one_leg_of_an_expected_transfer(session, test_user, test_workspace):
+    """The double-counting fix: the all-accounts line is unchanged by a
+    transfer between two of its accounts; a one-account view sees its leg."""
+    today = app_today()
+    joint = await _account(session, test_user.id)
+    savings = await _account(session, test_user.id)
+    before = await _forecast(session, test_user, test_workspace)
+    await _expected(session, test_user.id, test_workspace.id, amount=Decimal("300"), type="debit",
+                    date=today + timedelta(days=5), account_id=joint.id, transfer_account_id=savings.id)
+
+    everything = await _forecast(session, test_user, test_workspace)
+    assert [p.value for p in everything.base] == [p.value for p in before.base]
+    assert set(everything.account_ids) == {joint.id, savings.id}
+
+    only_joint = await _forecast(session, test_user, test_workspace, account_ids=[joint.id])
+    assert only_joint.account_ids == [joint.id]
+    assert only_joint.starting_balance == pytest.approx(1000)
+    assert only_joint.summary.end_balance == pytest.approx(700)
+    only_savings = await _forecast(session, test_user, test_workspace, account_ids=[savings.id])
+    assert only_savings.summary.end_balance == pytest.approx(1300)
+
+
+async def test_account_view_history_estimate_and_recurring_keep_to_its_accounts(session, test_user, test_workspace):
+    from tests.test_forecast import _recurring, _spending_history
+
+    today = app_today()
+    joint = await _account(session, test_user.id)
+    savings = await _account(session, test_user.id)
+    await _spending_history(session, test_user.id, joint.id)
+    await _recurring(session, test_user.id, joint.id, 500, "credit", today + timedelta(days=1))
+
+    everything = await _forecast(session, test_user, test_workspace, include_spending=True)
+    only_savings = await _forecast(session, test_user, test_workspace, include_spending=True,
+                                   account_ids=[savings.id])
+    only_joint = await _forecast(session, test_user, test_workspace, include_spending=True, account_ids=[joint.id])
+
+    assert len(everything.spending_estimates) == 1 and everything.recurring_payments
+    assert only_savings.spending_estimates == [] and only_savings.recurring_payments == []
+    # Savings opened today with 1000 and nothing else moves it.
+    assert {p.value for p in only_savings.actuals[:-1]} == {0}
+    assert {p.value for p in only_savings.base} == {1000}
+    assert only_joint.spending_estimates == everything.spending_estimates
+    assert len(only_joint.recurring_payments) == len(everything.recurring_payments)
+    # The two views' histories add up to the whole.
+    assert [p.value for p in only_joint.actuals] == [
+        pytest.approx(e.value - s.value) for e, s in zip(everything.actuals, only_savings.actuals)
+    ]
+    assert only_joint.actuals[-1].value == only_joint.starting_balance
+
+
+async def test_account_view_leaves_out_payments_with_no_account(session, test_user, test_workspace):
+    today = app_today()
+    joint = await _account(session, test_user.id)
+    await _expected(session, test_user.id, test_workspace.id, amount=Decimal("200"), type="debit",
+                    date=today + timedelta(days=5))
+    await _scenario(
+        session, test_user.id, test_workspace.id,
+        {"kind": "one_off", "amount": Decimal("50"), "type": "debit", "date": today + timedelta(days=3)},
+        {"kind": "one_off", "amount": Decimal("70"), "type": "debit", "date": today + timedelta(days=3),
+         "account_id": joint.id},
+    )
+
+    everything = await _forecast(session, test_user, test_workspace)
+    only_joint = await _forecast(session, test_user, test_workspace, account_ids=[joint.id])
+
+    assert everything.summary.end_balance == pytest.approx(800)
+    assert everything.scenarios[0].difference == pytest.approx(-120)
+    assert only_joint.summary.end_balance == pytest.approx(1000)
+    assert only_joint.scenarios[0].difference == pytest.approx(-70)
+
+
+async def test_account_view_keeps_to_the_cash_accounts(session, test_user, test_workspace):
+    joint = await _account(session, test_user.id)
+    loan = await _account(session, test_user.id, opening=0, type_="loan")
+
+    result = await _forecast(session, test_user, test_workspace, account_ids=[joint.id, loan.id])
+
+    assert result.account_ids == [joint.id]
+    assert result.starting_balance == pytest.approx(1000)
+
+
+async def test_api_account_view(client, auth_headers, session, test_user, test_workspace):
+    joint = await _account(session, test_user.id)
+    savings = await _account(session, test_user.id, opening=250)
+
+    resp = await client.get("/api/forecast", params={"months": 3, "include_spending": "false"}, headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["starting_balance"] == pytest.approx(1250)
+    resp = await client.get("/api/forecast", params=[
+        ("months", "3"), ("include_spending", "false"), ("account_ids", str(savings.id)),
+    ], headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["starting_balance"] == pytest.approx(250)
+    assert resp.json()["account_ids"] == [str(savings.id)]
+    resp = await client.get("/api/forecast", params=[
+        ("months", "3"), ("account_ids", str(savings.id)), ("account_ids", str(joint.id)),
+    ], headers=auth_headers)
+    assert set(resp.json()["account_ids"]) == {str(savings.id), str(joint.id)}
+
+
+async def test_account_view_counts_a_loan_change_on_the_account_that_pays_the_loan(
+    session, test_user, test_workspace,
+):
+    from app.models.recurring_transaction import RecurringTransaction
+    from tests.test_forecast_loans import REPAYMENT, _base_schedule, _in_horizon, _loan
+
+    today = app_today()
+    joint = await _account(session, test_user.id)
+    savings = await _account(session, test_user.id)
+    loan = await _loan(session, test_user.id)
+    first = today + timedelta(days=3)
+    session.add(RecurringTransaction(
+        id=uuid.uuid4(), user_id=test_user.id, account_id=joint.id, transfer_account_id=loan.id,
+        kind="loan_payment", description="Home loan", amount=Decimal(str(REPAYMENT)), currency="BRL",
+        type="debit", frequency="weekly", start_date=first, next_occurrence=first, is_active=True,
+    ))
+    await session.commit()
+    await _scenario(session, test_user.id, test_workspace.id, {
+        "kind": "loan_change", "account_id": loan.id, "change_mode": "amount",
+        "amount": Decimal("600"), "start_date": today,
+    })
+    _, base = _base_schedule()
+    weeks = len(_in_horizon(p.date for p in base.periods))
+
+    only_joint = await _forecast(session, test_user, test_workspace, account_ids=[joint.id])
+    only_savings = await _forecast(session, test_user, test_workspace, account_ids=[savings.id])
+
+    assert only_joint.scenarios[0].difference == pytest.approx(-(600 - REPAYMENT) * weeks, abs=0.01)
+    assert only_savings.scenarios[0].difference == 0
+    assert only_savings.summary.end_balance == pytest.approx(1000)
+    # The loan's own chart doesn't depend on the view.
+    assert only_savings.loans[0].scenarios[0].repayment == 600

@@ -828,8 +828,12 @@ async def _scenario_deltas(
     recurring_by_id: dict[uuid.UUID, RecurringTransaction],
     estimates: dict[uuid.UUID, float],
     include_spending: bool,
+    narrowed: bool = False,
 ) -> dict[date, float]:
-    """The change a scenario makes to the base line, per day (primary currency)."""
+    """The change a scenario makes to the base line, per day (primary currency).
+
+    Fork: in an account view (``narrowed``) a payment with no account is
+    left out, as expected payments are."""
     from app.services.recurring_transaction_service import get_occurrences_in_range
     from app.services.report_service import _spread_monthly
 
@@ -843,7 +847,7 @@ async def _scenario_deltas(
     def window(item: ForecastItem) -> tuple[date, date]:
         return max(cast(date, item.start_date), first), min(item.end_date or end, end)
 
-    in_scope = _scope_test(account_ids, False)
+    in_scope = _scope_test(account_ids, narrowed)
     for item in scenario.items:
         if item.kind == "loan_change":
             continue  # projected per loan in compute_forecast
@@ -1150,10 +1154,17 @@ async def compute_forecast(
     interval: str = "monthly",
     scenario_ids: Optional[list[uuid.UUID]] = None,
     include_spending: bool = True,
+    account_ids: Optional[list[uuid.UUID]] = None,
 ) -> ForecastResponse:
     """Base line and one line per scenario from today to ``months`` ahead.
 
     ``scenario_ids`` picks the scenarios; by default the enabled ones.
+
+    Fork: ``account_ids`` is an account view: the line, its history, the
+    spending estimate, recurring and expected payments and scenario changes
+    keep to those of the cash-flow accounts. Rows with no account (invoices,
+    repayments of loans no schedule pays, payments with no account) are left
+    out of it, as Reports → Cash Flow leaves them out under a filter.
     """
     from app.services.dashboard_service import _get_recurring_projections
     from app.services.report_service import (
@@ -1169,7 +1180,8 @@ async def compute_forecast(
     end = _add_months(today, months)
     primary_currency = await _primary_currency(session, user_id)
     to_primary = _make_to_primary(session, primary_currency)
-    account_ids = await cash_flow_account_ids(session, workspace_id)
+    narrowed = account_ids is not None
+    account_ids = await cash_flow_account_ids(session, workspace_id, account_ids)
 
     estimates = await _get_category_spending_estimate(
         session, workspace_id, today, to_primary, account_ids
@@ -1188,6 +1200,7 @@ async def compute_forecast(
 
     report = await get_cash_flow_report(
         session, workspace_id, user_id, months, "daily", primary_currency,
+        account_ids=account_ids if narrowed else None,
         extra_projections=extra,
     )
     daily: dict[date, float] = {}
@@ -1238,6 +1251,23 @@ async def compute_forecast(
     estimate_by_cat = {e["category_id"]: e["monthly_amount"] for e in estimates}
     account_set = set(account_ids)
     loans = await _open_loans(session, workspace_id, today)
+    # Fork: in an account view a loan change moves cash only when the
+    # account paying the loan (by a recurring schedule) is in it.
+    payers: dict[uuid.UUID, uuid.UUID] = {}
+    if narrowed and loans:
+        payers = {
+            loan_id: payer
+            for loan_id, payer in (
+                await session.execute(
+                    select(RecurringTransaction.transfer_account_id, RecurringTransaction.account_id).where(
+                        RecurringTransaction.workspace_id == workspace_id,
+                        RecurringTransaction.is_active.is_(True),
+                        RecurringTransaction.transfer_account_id.in_([loan.account.id for loan in loans]),
+                    )
+                )
+            ).all()
+            if loan_id is not None and payer in account_set
+        }
     loan_forecasts = [
         LoanForecast(
             account_id=loan.account.id,
@@ -1272,6 +1302,7 @@ async def compute_forecast(
             recurring_by_id=recurring_by_id,
             estimates=estimate_by_cat,
             include_spending=include_spending,
+            narrowed=narrowed,
         )
         for loan, forecast, schedules in zip(loans, loan_forecasts, loan_schedules):
             changes = _loan_changes(scenario, loan.account.id, today)
@@ -1279,6 +1310,8 @@ async def compute_forecast(
                 continue
             schedule = project_loan(loan.terms, changes)
             for d, value in cash_difference(loan.base, schedule).items():
+                if narrowed and loan.account.id not in payers:
+                    break
                 if today < d <= end:
                     deltas[d] = deltas.get(d, 0.0) + await to_primary(
                         Decimal(str(value)), loan.account.currency
@@ -1323,6 +1356,7 @@ async def compute_forecast(
         end_date=end,
         starting_balance=round(starting, 2),
         include_spending=include_spending,
+        account_ids=account_ids,
         base=_points(daily, today, end, interval),
         actuals=[ForecastPoint(date=d, value=actual[d]) for d in history],
         summary=base_summary,

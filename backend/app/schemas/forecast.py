@@ -216,6 +216,9 @@ class ForecastResponse(BaseModel):
     end_date: _Date
     starting_balance: float
     include_spending: bool
+    # Fork: the accounts the line covers (the cash-flow accounts, or the
+    # account view's share of them).
+    account_ids: list[uuid.UUID] = []
     # The real cash-and-cards balance from (today − horizon) to today, at the
     # same interval; its last point is today at ``starting_balance``.
     actuals: list[ForecastPoint] = []

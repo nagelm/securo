@@ -33,12 +33,14 @@ async def get_forecast(
     interval: str = Query("monthly", pattern="^(daily|weekly|monthly)$"),
     scenario_ids: Optional[list[uuid.UUID]] = Query(None),
     include_spending: bool = Query(True),
+    # Fork: an account view; by default all cash and card accounts.
+    account_ids: Optional[list[uuid.UUID]] = Query(None),
     ctx: WorkspaceContext = Depends(current_workspace),
     session: AsyncSession = Depends(get_async_session),
 ):
     return await forecast_service.compute_forecast(
         session, ctx.workspace.id, ctx.user_id, months, interval,
-        scenario_ids=scenario_ids, include_spending=include_spending,
+        scenario_ids=scenario_ids, include_spending=include_spending, account_ids=account_ids,
     )
 
 
