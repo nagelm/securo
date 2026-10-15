@@ -42,9 +42,10 @@ export const navItems: NavItem[] = [
   { type: 'link', key: 'accounts', path: '/accounts', icon: Building2, module: 'accounts' },
   { type: 'link', key: 'import', path: '/import', icon: Upload, module: 'import' },
   { type: 'separator', labelKey: 'nav.groupAnalysis' },
-  // Fork: Insights reads the same data as Reports, so it shares that module.
-  { type: 'link', key: 'insights', path: '/insights', icon: Lightbulb, module: 'reports' },
   { type: 'link', key: 'reports', path: '/reports', icon: BarChart3, module: 'reports' },
+  // Fork: Insights reads the same data as Reports, so it shares that module
+  // (owner 2026-10-15: below Reports).
+  { type: 'link', key: 'insights', path: '/insights', icon: Lightbulb, module: 'reports' },
   { type: 'link', key: 'assets', path: '/assets', icon: Landmark, module: 'assets' },
   // Fork (owner 2026-10-14): Forecast is analysis; it reads the recurring
   // module's schedules, so it shares that module with the Recurring link.
