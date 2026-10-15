@@ -8,7 +8,10 @@ a loan's rate or repayments, ``loan_change``). Both are read by
 `forecast_service`, which lays them over the cash-flow projection.
 
 Fork: a repeating expected payment is matched occurrence by occurrence;
-`ForecastItemMatch` holds the bank row that settled each one.
+`ForecastItemMatch` holds the bank row that settled each one. A ``budget``
+item (no scenario) is a plan for everyday spending: ``amount`` per
+``frequency`` period from ``start_date`` to ``end_date``, out of
+``account_id`` (optional), for ``category_id`` (optional: all spending).
 """
 import uuid
 from datetime import date as _date, datetime
@@ -33,7 +36,7 @@ from sqlalchemy.sql import func
 from app.core.database import Base
 
 FORECAST_ITEM_KINDS = (
-    "one_off", "repeating", "recurring_change", "income_change", "spending_change", "loan_change",
+    "one_off", "repeating", "recurring_change", "income_change", "spending_change", "loan_change", "budget",
 )
 FORECAST_CHANGE_MODES = ("amount", "pause", "stop", "percent", "rate", "lump_sum")
 
@@ -65,7 +68,7 @@ class ForecastItem(Base):
     __table_args__ = (
         CheckConstraint(
             "kind IN ('one_off', 'repeating', 'recurring_change', 'income_change', 'spending_change',"
-            " 'loan_change')",
+            " 'loan_change', 'budget')",
             name="ck_forecast_items_kind",
         ),
         CheckConstraint(

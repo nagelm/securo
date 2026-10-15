@@ -7,7 +7,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 ForecastItemKind = Literal[
-    "one_off", "repeating", "recurring_change", "income_change", "spending_change", "loan_change"
+    "one_off", "repeating", "recurring_change", "income_change", "spending_change", "loan_change", "budget"
 ]
 ForecastChangeMode = Literal["amount", "pause", "stop", "percent", "rate", "lump_sum"]
 ForecastFrequency = Literal["weekly", "biweekly", "monthly", "quarterly", "semiannual", "yearly"]

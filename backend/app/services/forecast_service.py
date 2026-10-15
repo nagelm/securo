@@ -25,6 +25,12 @@ Fork: an expected payment can also repeat (``repeating``, with a frequency
 and a start and end date). Each occurrence projects and is matched like a
 one-off, on its own (``ForecastItemMatch``); a matched one stops projecting.
 
+Fork: a budget (kind ``budget``, no scenario) is the plan for everyday
+spending: ``amount`` per weekly, fortnightly or monthly period, from
+``start_date`` to ``end_date``. It projects as debits on that schedule and
+switches the history-based spending estimate off over its dates, for every
+category or, with ``category_id``, for that one. Budgets are not matched.
+
 Fork: an expected payment with ``transfer_account_id`` is a transfer between
 own accounts, projected as a debit on ``account_id`` and a credit on the
 to-account on the same date. Only the legs on accounts in scope count, so in
@@ -78,6 +84,8 @@ from app.services.text_similarity import token_overlap
 
 MATCH_AMOUNT_TOLERANCE = Decimal("0.05")
 MATCH_WINDOW_DAYS = 10
+# Fork: how often a budget's amount is spent.
+BUDGET_FREQUENCIES = ("weekly", "biweekly", "monthly")
 # Rows that are not money arriving from the bank or the user's own books.
 _NOT_REAL_SOURCES = ("opening_balance", "recurring")
 
@@ -624,8 +632,8 @@ def _validate_item(values: dict) -> None:
     """What each kind needs. Raises ValueError with a readable message."""
     kind = values["kind"]
     amount = values.get("amount")
-    if values.get("scenario_id") is None and kind not in ("one_off", "repeating"):
-        raise ValueError("An expected payment is a one-off or repeating payment")
+    if values.get("scenario_id") is None and kind not in ("one_off", "repeating", "budget"):
+        raise ValueError("An expected payment is a one-off or repeating payment, or a budget")
     start, end = values.get("start_date"), values.get("end_date")
     if start and end and end < start:
         raise ValueError("End date is before the start date")
@@ -639,6 +647,17 @@ def _validate_item(values: dict) -> None:
             raise ValueError("A transfer needs two different accounts")
         if values.get("type") != "debit":
             raise ValueError("A transfer is money out of the from-account (type debit)")
+    if kind == "budget":
+        # Fork: a plan for everyday spending, part of the base forecast.
+        if values.get("scenario_id") is not None:
+            raise ValueError("A budget is part of the plan, not of a scenario")
+        if amount is None or amount <= 0:
+            raise ValueError("Amount must be greater than zero")
+        if values.get("type") != "debit":
+            raise ValueError("A budget is money out (type debit)")
+        if values.get("frequency") not in BUDGET_FREQUENCIES or start is None:
+            raise ValueError("A budget needs a weekly, fortnightly or monthly frequency and a start date")
+        return
     if kind in ("one_off", "repeating"):
         if amount is None or amount <= 0:
             raise ValueError("Amount must be greater than zero")
@@ -708,8 +727,8 @@ async def create_item(
     session: AsyncSession, workspace_id: uuid.UUID, user_id: uuid.UUID, data: ForecastItemCreate
 ) -> ForecastItem:
     values = data.model_dump()
-    if values.get("transfer_account_id") is not None and values.get("type") is None:
-        values["type"] = "debit"  # Fork: a transfer leaves the from-account
+    if values.get("type") is None and (values.get("transfer_account_id") is not None or values["kind"] == "budget"):
+        values["type"] = "debit"  # Fork: a transfer leaves the from-account; a budget is spent
     account = await _check_refs(session, workspace_id, values)
     _validate_item(values)
     if values["kind"] == "loan_change":
@@ -829,6 +848,7 @@ async def _scenario_deltas(
     estimates: dict[uuid.UUID, float],
     include_spending: bool,
     narrowed: bool = False,
+    budgeted: Optional[Callable[[date, Optional[uuid.UUID]], bool]] = None,
 ) -> dict[date, float]:
     """The change a scenario makes to the base line, per day (primary currency).
 
@@ -918,8 +938,62 @@ async def _scenario_deltas(
             change = max(change, -monthly)  # spending can't go below nothing
             start, stop = window(item)
             for d, daily in _spread_monthly(change, start, stop):
-                add(d, -daily)
+                # Fork: a budget switches the estimate off, and its change too.
+                if budgeted is None or not budgeted(d, item.category_id):
+                    add(d, -daily)
     return deltas
+
+
+async def _plan_budgets(
+    session: AsyncSession, workspace_id: uuid.UUID, account_ids: list[uuid.UUID], narrowed: bool
+) -> list[ForecastItem]:
+    """Fork: the budgets in scope (on an account in it, or on none unless
+    the forecast is an account view)."""
+    in_scope = _scope_test(account_ids, narrowed)
+    rows = await session.execute(
+        select(ForecastItem).where(
+            ForecastItem.workspace_id == workspace_id,
+            ForecastItem.scenario_id.is_(None),
+            ForecastItem.kind == "budget",
+            ForecastItem.start_date.is_not(None),
+            ForecastItem.frequency.is_not(None),
+        )
+    )
+    return [item for item in rows.scalars() if in_scope(item.account_id)]
+
+
+def _budgeted(budgets: list[ForecastItem], end: date) -> Callable[[date, Optional[uuid.UUID]], bool]:
+    """Fork: whether a budget covers a day's spending in a category, so the
+    spending estimate is switched off there. A budget with no category
+    covers every category over its dates; several cover their union."""
+    spans = [
+        (cast(date, b.start_date), b.end_date or end, b.category_id) for b in budgets
+    ]
+
+    def covered(d: date, category_id: Optional[uuid.UUID]) -> bool:
+        return any(
+            start <= d <= stop and (cat is None or cat == category_id) for start, stop, cat in spans
+        )
+
+    return covered
+
+
+def _budget_projections(budgets: list[ForecastItem], today: date, end: date) -> list[dict]:
+    """Fork: each budget's amount on each of its dates after today, as
+    cash-flow projection dicts (money out)."""
+    out: list[dict] = []
+    for item in budgets:
+        last = min(item.end_date, end) if item.end_date else end
+        for d in series_dates(item, cast(date, item.start_date), last):
+            if d > today:
+                out.append({
+                    "date": d,
+                    "amount": float(abs(item.amount or 0)),
+                    "currency": item.currency,
+                    "type": "debit",
+                    "category_id": item.category_id,
+                })
+    return out
 
 
 def _history_dates(start: date, today: date, interval: str) -> list[date]:
@@ -1186,10 +1260,15 @@ async def compute_forecast(
     estimates = await _get_category_spending_estimate(
         session, workspace_id, today, to_primary, account_ids
     )
-    extra: list[dict] = []
+    # Fork: plan budgets project on their schedule and switch the estimate off.
+    budgets = await _plan_budgets(session, workspace_id, account_ids, narrowed)
+    budgeted = _budgeted(budgets, end)
+    extra: list[dict] = _budget_projections(budgets, today, end)
     if include_spending:
         for est in estimates:
             for d, amount in _spread_monthly(est["monthly_amount"], today + timedelta(days=1), end):
+                if budgeted(d, est["category_id"]):
+                    continue
                 extra.append({
                     "date": d,
                     "amount": amount,
@@ -1303,6 +1382,7 @@ async def compute_forecast(
             estimates=estimate_by_cat,
             include_spending=include_spending,
             narrowed=narrowed,
+            budgeted=budgeted,
         )
         for loan, forecast, schedules in zip(loans, loan_forecasts, loan_schedules):
             changes = _loan_changes(scenario, loan.account.id, today)

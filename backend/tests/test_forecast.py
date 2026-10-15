@@ -627,7 +627,7 @@ async def test_api_crud_and_forecast(client, auth_headers, session, test_user, t
 
 @pytest.mark.parametrize("payload,message", [
     ({"kind": "income_change", "change_mode": "amount", "amount": "1", "start_date": "2030-01-01"},
-     "An expected payment is a one-off or repeating payment"),
+     "An expected payment is a one-off or repeating payment, or a budget"),
     ({"kind": "one_off", "amount": "0", "type": "debit", "date": "2030-01-01"}, "Amount must be greater than zero"),
     ({"kind": "one_off", "amount": "5", "date": "2030-01-01"}, "Type is required"),
 ])
