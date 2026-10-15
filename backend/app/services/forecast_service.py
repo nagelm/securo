@@ -20,12 +20,18 @@ arrives (same account and direction, amount within 5%, date within 10 days)
 the item is matched to it and drops out: from the sync and import paths
 after new rows land, and again whenever a forecast is computed, so a missed
 hook only delays the match.
+
+Fork: an expected payment with ``transfer_account_id`` is a transfer between
+own accounts, projected as a debit on ``account_id`` and a credit on the
+to-account on the same date. Only the legs on accounts in scope count, so in
+the all-accounts line the two cancel (and are left out); it is matched by
+the debit leg of a bank transfer pair between the same two accounts.
 """
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Iterable, Optional, cast
+from typing import Callable, Iterable, Optional, cast
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -86,6 +92,10 @@ def _utc(value: Optional[datetime]) -> Optional[datetime]:
 def _is_match(item: ForecastItem, tx: Transaction, today: date) -> bool:
     if tx.account_id != item.account_id or tx.type != item.type:
         return False
+    # Fork: a transfer is settled only by a leg of a bank transfer pair; the
+    # other leg's account is checked by the caller (`_paired_into`).
+    if item.transfer_account_id is not None and tx.transfer_pair_id is None:
+        return False
     # An expectation is for a payment still to come: a row stored before the
     # item was created belongs to something else (an earlier occurrence, an
     # unrelated payment of a similar amount). A row with no created_at is old.
@@ -112,6 +122,22 @@ def _is_match(item: ForecastItem, tx: Transaction, today: date) -> bool:
         abs(actual - expected) <= expected * MATCH_AMOUNT_TOLERANCE
         and token_overlap(item.description, tx.description) > 0
     )
+
+
+async def _paired_into(session: AsyncSession, tx: Transaction, account_id: uuid.UUID) -> bool:
+    """Fork: whether ``tx``'s transfer partner is on ``account_id``."""
+    found = (
+        await session.execute(
+            select(Transaction.id)
+            .where(
+                Transaction.transfer_pair_id == tx.transfer_pair_id,
+                Transaction.id != tx.id,
+                Transaction.account_id == account_id,
+            )
+            .limit(1)
+        )
+    ).first()
+    return found is not None
 
 
 async def match_expected_payments(
@@ -201,6 +227,9 @@ async def _find_expected_matches(
                 )
             ).scalars()
         fits = [tx for tx in pool if tx.id not in taken and _is_match(item, tx, today)]
+        if item.transfer_account_id is not None:
+            to_account = item.transfer_account_id
+            fits = [tx for tx in fits if await _paired_into(session, tx, to_account)]
         if not fits:
             continue
         expected = abs(Decimal(item.amount or 0))
@@ -232,6 +261,7 @@ async def expected_payment_projections(
     tomorrow. One on an account outside ``account_ids`` (a loan, an
     investment, or outside a Collection filter) is left out; one with no
     account counts unless the report is narrowed to particular accounts.
+    A transfer gives one row per leg in scope (see ``_legs``).
     """
     arrived = await pending_expected_matches(session, workspace_id)
     stmt = select(ForecastItem).where(
@@ -242,27 +272,47 @@ async def expected_payment_projections(
         ForecastItem.date.is_not(None),
         ForecastItem.date <= end,
     )
-    in_scope = ForecastItem.account_id.in_(account_ids) if account_ids else None
-    if narrowed:
-        if in_scope is None:
-            return []
-        stmt = stmt.where(in_scope)
-    elif in_scope is not None:
-        stmt = stmt.where(or_(ForecastItem.account_id.is_(None), in_scope))
-    else:
-        stmt = stmt.where(ForecastItem.account_id.is_(None))
+    in_scope = _scope_test(account_ids, narrowed)
     tomorrow = today + timedelta(days=1)
     return [
         {
             "date": max(cast(date, item.date), tomorrow),
             "amount": float(abs(item.amount or 0)),
             "currency": item.currency,
-            "type": item.type or "debit",
+            "type": leg_type,
             "category_id": item.category_id,
         }
         for item in (await session.execute(stmt)).scalars()
         if item.id not in arrived
+        for leg_type in _legs(item, in_scope)
     ]
+
+
+def _scope_test(account_ids: Iterable[uuid.UUID], narrowed: bool) -> Callable[[Optional[uuid.UUID]], bool]:
+    """Whether a row on an account (None: no account) is in scope."""
+    scope = set(account_ids)
+
+    def in_scope(account_id: Optional[uuid.UUID]) -> bool:
+        return account_id in scope if account_id is not None else not narrowed
+
+    return in_scope
+
+
+def _legs(item: ForecastItem, in_scope: Callable[[Optional[uuid.UUID]], bool]) -> list[str]:
+    """Fork: the direction of each side of an item that is in scope.
+
+    A plain payment has one side. A transfer has a debit on ``account_id``
+    and a credit on ``transfer_account_id``; with both in scope they net to
+    nothing, so neither is returned (the money stays in the line).
+    """
+    if item.transfer_account_id is None:
+        return [item.type or "debit"] if in_scope(item.account_id) else []
+    legs = [
+        leg_type
+        for account_id, leg_type in ((item.account_id, "debit"), (item.transfer_account_id, "credit"))
+        if in_scope(account_id)
+    ]
+    return [] if len(legs) == 2 else legs
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +437,23 @@ async def _check_refs(session: AsyncSession, workspace_id: uuid.UUID, values: di
         ).scalar_one_or_none()
         if account is None:
             raise ValueError("Account not found")
+    # Fork: a transfer's to-account belongs to the workspace too.
+    if values.get("transfer_account_id") is not None:
+        found = (
+            await session.execute(
+                select(Account.id)
+                .outerjoin(BankConnection)
+                .where(
+                    Account.id == values["transfer_account_id"],
+                    or_(
+                        Account.workspace_id == workspace_id,
+                        BankConnection.workspace_id == workspace_id,
+                    ),
+                )
+            )
+        ).scalar_one_or_none()
+        if found is None:
+            raise ValueError("Transfer account not found")
     if values.get("category_id") is not None:
         found = (
             await session.execute(
@@ -420,6 +487,16 @@ def _validate_item(values: dict) -> None:
     start, end = values.get("start_date"), values.get("end_date")
     if start and end and end < start:
         raise ValueError("End date is before the start date")
+    # Fork: a transfer leaves one own account for another.
+    if values.get("transfer_account_id") is not None:
+        if kind not in ("one_off", "repeating"):
+            raise ValueError("Only a payment can be a transfer")
+        if values.get("account_id") is None:
+            raise ValueError("A transfer needs the account it leaves")
+        if values["transfer_account_id"] == values["account_id"]:
+            raise ValueError("A transfer needs two different accounts")
+        if values.get("type") != "debit":
+            raise ValueError("A transfer is money out of the from-account (type debit)")
     if kind in ("one_off", "repeating"):
         if amount is None or amount <= 0:
             raise ValueError("Amount must be greater than zero")
@@ -489,6 +566,8 @@ async def create_item(
     session: AsyncSession, workspace_id: uuid.UUID, user_id: uuid.UUID, data: ForecastItemCreate
 ) -> ForecastItem:
     values = data.model_dump()
+    if values.get("transfer_account_id") is not None and values.get("type") is None:
+        values["type"] = "debit"  # Fork: a transfer leaves the from-account
     account = await _check_refs(session, workspace_id, values)
     _validate_item(values)
     if values["kind"] == "loan_change":
@@ -522,8 +601,8 @@ async def update_item(
         column: getattr(item, column)
         for column in (
             "scenario_id", "kind", "amount", "type", "date", "start_date", "end_date", "frequency",
-            "account_id", "category_id", "recurring_transaction_id", "change_mode", "percent",
-            "recalculate_repayment",
+            "account_id", "transfer_account_id", "category_id", "recurring_transaction_id", "change_mode",
+            "percent", "recalculate_repayment",
         )
     }
     merged.update(changes)
@@ -535,7 +614,9 @@ async def update_item(
             continue
         setattr(item, field, value)
     # An edited payment is a new promise; let the matcher look again.
-    if item.scenario_id is None and {"amount", "date", "account_id", "type", "currency"} & changes.keys():
+    if item.scenario_id is None and {
+        "amount", "date", "account_id", "transfer_account_id", "type", "currency",
+    } & changes.keys():
         item.matched_transaction_id = None
         await session.flush()
         await match_expected_payments(session, workspace_id)
@@ -608,16 +689,23 @@ async def _scenario_deltas(
     def window(item: ForecastItem) -> tuple[date, date]:
         return max(cast(date, item.start_date), first), min(item.end_date or end, end)
 
+    in_scope = _scope_test(account_ids, False)
     for item in scenario.items:
         if item.kind == "loan_change":
             continue  # projected per loan in compute_forecast
-        if item.account_id is not None and item.account_id not in account_ids:
+        sign = 0.0
+        if item.kind in ("one_off", "repeating"):
+            # Fork: a transfer counts by its legs in scope.
+            sign = sum(_sign(leg) for leg in _legs(item, in_scope))
+            if not sign:
+                continue
+        elif item.account_id is not None and item.account_id not in account_ids:
             continue  # a loan, an investment, a closed account: not cash
         if item.kind == "one_off":
             if item.date is not None:
-                add(item.date, _sign(item.type) * await to_primary(Decimal(item.amount or 0), item.currency))
+                add(item.date, sign * await to_primary(Decimal(item.amount or 0), item.currency))
         elif item.kind == "repeating":
-            amount = _sign(item.type) * await to_primary(Decimal(item.amount or 0), item.currency)
+            amount = sign * await to_primary(Decimal(item.amount or 0), item.currency)
             for d in get_occurrences_in_range(
                 start=cast(date, item.start_date),
                 frequency=cast(str, item.frequency),

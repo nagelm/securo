@@ -2,7 +2,8 @@
 
 `ForecastScenario` is a named "what if" set; `ForecastItem` is either an
 expected payment (``scenario_id`` NULL, kind ``one_off``: real money that is
-not in the bank yet) or one change inside a scenario (including a change to
+not in the bank yet; with ``transfer_account_id`` a transfer between own
+accounts) or one change inside a scenario (including a change to
 a loan's rate or repayments, ``loan_change``). Both are read by
 `forecast_service`, which lays them over the cash-flow projection.
 """
@@ -87,6 +88,11 @@ class ForecastItem(Base):
     end_date: Mapped[Optional[_date]] = mapped_column(Date, nullable=True)
     frequency: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     account_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True
+    )
+    # Fork: an expected transfer between own accounts: money leaves
+    # `account_id` (type debit) and lands here on the same date.
+    transfer_account_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True
     )
     category_id: Mapped[Optional[uuid.UUID]] = mapped_column(

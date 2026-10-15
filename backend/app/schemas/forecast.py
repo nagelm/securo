@@ -51,6 +51,8 @@ class ForecastItemCreate(BaseModel):
     end_date: Optional[_Date] = None
     frequency: Optional[ForecastFrequency] = None
     account_id: Optional[uuid.UUID] = None
+    # Fork: an expected transfer's to-account (``account_id`` is the from-account).
+    transfer_account_id: Optional[uuid.UUID] = None
     category_id: Optional[uuid.UUID] = None
     recurring_transaction_id: Optional[uuid.UUID] = None
     change_mode: Optional[ForecastChangeMode] = None
@@ -68,6 +70,7 @@ class ForecastItemUpdate(BaseModel):
     end_date: Optional[_Date] = None
     frequency: Optional[ForecastFrequency] = None
     account_id: Optional[uuid.UUID] = None
+    transfer_account_id: Optional[uuid.UUID] = None
     category_id: Optional[uuid.UUID] = None
     recurring_transaction_id: Optional[uuid.UUID] = None
     change_mode: Optional[ForecastChangeMode] = None
@@ -88,6 +91,7 @@ class ForecastItemRead(BaseModel):
     end_date: Optional[_Date] = None
     frequency: Optional[str] = None
     account_id: Optional[uuid.UUID] = None
+    transfer_account_id: Optional[uuid.UUID] = None
     category_id: Optional[uuid.UUID] = None
     recurring_transaction_id: Optional[uuid.UUID] = None
     change_mode: Optional[str] = None
