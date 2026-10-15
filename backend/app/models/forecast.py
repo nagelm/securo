@@ -8,10 +8,7 @@ a loan's rate or repayments, ``loan_change``). Both are read by
 `forecast_service`, which lays them over the cash-flow projection.
 
 Fork: a repeating expected payment is matched occurrence by occurrence;
-`ForecastItemMatch` holds the bank row that settled each one. A ``budget``
-item (no scenario) is a plan for everyday spending: ``amount`` per
-``frequency`` period from ``start_date`` to ``end_date``, out of
-``account_id`` (optional), for ``category_id`` (optional: all spending).
+`ForecastItemMatch` holds the bank row that settled each one.
 """
 import uuid
 from datetime import date as _date, datetime
@@ -36,7 +33,7 @@ from sqlalchemy.sql import func
 from app.core.database import Base
 
 FORECAST_ITEM_KINDS = (
-    "one_off", "repeating", "recurring_change", "income_change", "spending_change", "loan_change", "budget",
+    "one_off", "repeating", "recurring_change", "income_change", "spending_change", "loan_change",
 )
 FORECAST_CHANGE_MODES = ("amount", "pause", "stop", "percent", "rate", "lump_sum")
 
@@ -68,7 +65,7 @@ class ForecastItem(Base):
     __table_args__ = (
         CheckConstraint(
             "kind IN ('one_off', 'repeating', 'recurring_change', 'income_change', 'spending_change',"
-            " 'loan_change', 'budget')",
+            " 'loan_change')",
             name="ck_forecast_items_kind",
         ),
         CheckConstraint(
@@ -178,5 +175,36 @@ class ForecastItemMatch(Base):
     # The bank row going (deleted) makes the occurrence expected again.
     transaction_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("transactions.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ForecastBudgetChoice(Base):
+    """Fork: a budget the Forecast applies to its spending estimate (f018).
+
+    Opt-in per workspace: one row per chosen category budget (by
+    ``category_id``, so it follows the budgets' month-to-month resolution)
+    or chosen budget group (``budget_group_id``). Unchosen budgets have no
+    effect on the forecast."""
+
+    __tablename__ = "forecast_budget_choices"
+    __table_args__ = (
+        CheckConstraint(
+            "(category_id IS NULL) <> (budget_group_id IS NULL)",
+            name="ck_forecast_budget_choices_one_target",
+        ),
+        UniqueConstraint("workspace_id", "category_id", name="uq_forecast_budget_choices_category"),
+        UniqueConstraint("workspace_id", "budget_group_id", name="uq_forecast_budget_choices_group"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    category_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("categories.id", ondelete="CASCADE"), nullable=True
+    )
+    budget_group_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("budget_groups.id", ondelete="CASCADE"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

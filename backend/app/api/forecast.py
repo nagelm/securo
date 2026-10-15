@@ -14,6 +14,7 @@ from app.core.workspace_context import (
     current_writable_workspace,
 )
 from app.schemas.forecast import (
+    ForecastBudgetChoices,
     ForecastItemCreate,
     ForecastItemRead,
     ForecastItemUpdate,
@@ -42,6 +43,27 @@ async def get_forecast(
         session, ctx.workspace.id, ctx.user_id, months, interval,
         scenario_ids=scenario_ids, include_spending=include_spending, account_ids=account_ids,
     )
+
+
+@router.get("/budget-choices", response_model=ForecastBudgetChoices)
+async def get_budget_choices(
+    ctx: WorkspaceContext = Depends(current_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Fork: the budgets the forecast applies (none by default)."""
+    return await forecast_service.get_budget_choices(session, ctx.workspace.id)
+
+
+@router.put("/budget-choices", response_model=ForecastBudgetChoices)
+async def set_budget_choices(
+    data: ForecastBudgetChoices,
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        return await forecast_service.set_budget_choices(session, ctx.workspace.id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.get("/scenarios", response_model=list[ForecastScenarioRead])

@@ -25,11 +25,10 @@ Fork: an expected payment can also repeat (``repeating``, with a frequency
 and a start and end date). Each occurrence projects and is matched like a
 one-off, on its own (``ForecastItemMatch``); a matched one stops projecting.
 
-Fork: a budget (kind ``budget``, no scenario) is the plan for everyday
-spending: ``amount`` per weekly, fortnightly or monthly period, from
-``start_date`` to ``end_date``. It projects as debits on that schedule and
-switches the history-based spending estimate off over its dates, for every
-category or, with ``category_id``, for that one. Budgets are not matched.
+Fork: the spending estimate follows the canonical Budgets: in a month
+where a category has a budget, the category projects its budget instead of
+its estimate, and a budget group's cap scales its members' estimates (see
+``_budgeted_spending``).
 
 Fork: an expected payment with ``transfer_account_id`` is a transfer between
 own accounts, projected as a debit on ``account_id`` and a credit on the
@@ -37,6 +36,7 @@ to-account on the same date. Only the legs on accounts in scope count, so in
 the all-accounts line the two cancel (and are left out); it is matched by
 the debit leg of a bank transfer pair between the same two accounts.
 """
+import calendar
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -52,11 +52,13 @@ from app.core.config import get_settings
 from app.models.account import Account
 from app.models.bank_connection import BankConnection
 from app.models.category import Category
-from app.models.forecast import ForecastItem, ForecastItemMatch, ForecastScenario
+from app.models.forecast import ForecastBudgetChoice, ForecastItem, ForecastItemMatch, ForecastScenario
 from app.models.recurring_transaction import RecurringTransaction
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.schemas.forecast import (
+    ForecastBudgetChoices,
+    ForecastBudgetUse,
     ForecastItemCreate,
     ForecastItemUpdate,
     ForecastLineSummary,
@@ -84,8 +86,6 @@ from app.services.text_similarity import token_overlap
 
 MATCH_AMOUNT_TOLERANCE = Decimal("0.05")
 MATCH_WINDOW_DAYS = 10
-# Fork: how often a budget's amount is spent.
-BUDGET_FREQUENCIES = ("weekly", "biweekly", "monthly")
 # Rows that are not money arriving from the bank or the user's own books.
 _NOT_REAL_SOURCES = ("opening_balance", "recurring")
 
@@ -632,8 +632,8 @@ def _validate_item(values: dict) -> None:
     """What each kind needs. Raises ValueError with a readable message."""
     kind = values["kind"]
     amount = values.get("amount")
-    if values.get("scenario_id") is None and kind not in ("one_off", "repeating", "budget"):
-        raise ValueError("An expected payment is a one-off or repeating payment, or a budget")
+    if values.get("scenario_id") is None and kind not in ("one_off", "repeating"):
+        raise ValueError("An expected payment is a one-off or repeating payment")
     start, end = values.get("start_date"), values.get("end_date")
     if start and end and end < start:
         raise ValueError("End date is before the start date")
@@ -647,17 +647,6 @@ def _validate_item(values: dict) -> None:
             raise ValueError("A transfer needs two different accounts")
         if values.get("type") != "debit":
             raise ValueError("A transfer is money out of the from-account (type debit)")
-    if kind == "budget":
-        # Fork: a plan for everyday spending, part of the base forecast.
-        if values.get("scenario_id") is not None:
-            raise ValueError("A budget is part of the plan, not of a scenario")
-        if amount is None or amount <= 0:
-            raise ValueError("Amount must be greater than zero")
-        if values.get("type") != "debit":
-            raise ValueError("A budget is money out (type debit)")
-        if values.get("frequency") not in BUDGET_FREQUENCIES or start is None:
-            raise ValueError("A budget needs a weekly, fortnightly or monthly frequency and a start date")
-        return
     if kind in ("one_off", "repeating"):
         if amount is None or amount <= 0:
             raise ValueError("Amount must be greater than zero")
@@ -727,8 +716,8 @@ async def create_item(
     session: AsyncSession, workspace_id: uuid.UUID, user_id: uuid.UUID, data: ForecastItemCreate
 ) -> ForecastItem:
     values = data.model_dump()
-    if values.get("type") is None and (values.get("transfer_account_id") is not None or values["kind"] == "budget"):
-        values["type"] = "debit"  # Fork: a transfer leaves the from-account; a budget is spent
+    if values.get("transfer_account_id") is not None and values.get("type") is None:
+        values["type"] = "debit"  # Fork: a transfer leaves the from-account
     account = await _check_refs(session, workspace_id, values)
     _validate_item(values)
     if values["kind"] == "loan_change":
@@ -938,62 +927,179 @@ async def _scenario_deltas(
             change = max(change, -monthly)  # spending can't go below nothing
             start, stop = window(item)
             for d, daily in _spread_monthly(change, start, stop):
-                # Fork: a budget switches the estimate off, and its change too.
+                # Fork: where a budget sets the category's spending, the
+                # estimate's change does not apply.
                 if budgeted is None or not budgeted(d, item.category_id):
                     add(d, -daily)
     return deltas
 
 
-async def _plan_budgets(
-    session: AsyncSession, workspace_id: uuid.UUID, account_ids: list[uuid.UUID], narrowed: bool
-) -> list[ForecastItem]:
-    """Fork: the budgets in scope (on an account in it, or on none unless
-    the forecast is an account view)."""
-    in_scope = _scope_test(account_ids, narrowed)
-    rows = await session.execute(
-        select(ForecastItem).where(
-            ForecastItem.workspace_id == workspace_id,
-            ForecastItem.scenario_id.is_(None),
-            ForecastItem.kind == "budget",
-            ForecastItem.start_date.is_not(None),
-            ForecastItem.frequency.is_not(None),
-        )
-    )
-    return [item for item in rows.scalars() if in_scope(item.account_id)]
+def _month_starts(first: date, last: date) -> list[date]:
+    out: list[date] = []
+    m = first.replace(day=1)
+    while m <= last:
+        out.append(m)
+        m = (m + timedelta(days=32)).replace(day=1)
+    return out
 
 
-def _budgeted(budgets: list[ForecastItem], end: date) -> Callable[[date, Optional[uuid.UUID]], bool]:
-    """Fork: whether a budget covers a day's spending in a category, so the
-    spending estimate is switched off there. A budget with no category
-    covers every category over its dates; several cover their union."""
-    spans = [
-        (cast(date, b.start_date), b.end_date or end, b.category_id) for b in budgets
-    ]
+@dataclass
+class _BudgetUse:
+    category_id: Optional[uuid.UUID]
+    budget_group_id: Optional[uuid.UUID]
+    month: date
+    amount: float
+    committed: float
+    remainder: float
+
+
+def _budgeted_spending(
+    estimates: list[dict],
+    budgets: list,
+    groups: list,
+    chosen_categories: set[uuid.UUID],
+    chosen_groups: set[uuid.UUID],
+    today: date,
+    end: date,
+    committed: dict[tuple[uuid.UUID, date], float],
+    narrowed: bool,
+) -> tuple[list[tuple[uuid.UUID, date, float]], Callable[[date, Optional[uuid.UUID]], bool], list[_BudgetUse]]:
+    """Fork: the everyday spending per category and day after today, with the
+    chosen canonical Budgets laid over the history-based estimate, month by
+    month. A budget is the whole of what its category (or group) spends that
+    month, so what recurring and expected payments categorised there already
+    project (``committed``, per category and month start) counts toward it:
+
+    - a chosen category budget replaces the category's estimate with
+      max(0, budget - committed);
+    - a chosen group's cap, less its members' chosen budgets and the
+      committed payments of its other members, is shared by those other
+      members in proportion to their estimates (evenly when those are all
+      zero), never below nothing;
+    - every other category keeps its estimate, and payments in categories
+      outside chosen budgets stay as they are.
+
+    Monthly amounts are spread evenly over the month's days still to come (in
+    the current month a share of the budget by the days left), as
+    ``_spread_monthly`` spreads the estimate. In an account view
+    (``narrowed``) a budget applies only to the categories the view's
+    estimate has: a budget names no account. Returns the days' amounts,
+    whether a budget sets a category's spending on a day (a scenario's
+    spending change leaves those days alone), and each chosen budget's use
+    per month.
+    """
+    from app.services.budget_service import resolve_budgets
+
+    first = today + timedelta(days=1)
+    estimate = {e["category_id"]: float(e["monthly_amount"]) for e in estimates}
+
+    def eligible(cat: uuid.UUID) -> bool:
+        return cat in estimate or not narrowed
+
+    out: list[tuple[uuid.UUID, date, float]] = []
+    uses: list[_BudgetUse] = []
+    budgeted: set[tuple[uuid.UUID, date]] = set()
+    for month in _month_starts(first, end):
+        days_in_month = calendar.monthrange(month.year, month.month)[1]
+        lo = max(month, first)
+        hi = min(month.replace(day=days_in_month), end)
+        days = (hi - lo).days + 1
+        if days <= 0:
+            continue
+        share = days / days_in_month
+        monthly = {cat: amount * share for cat, amount in estimate.items()}
+        own = {
+            b.category_id: float(b.amount)
+            for b in resolve_budgets(budgets, month).values()
+            if b.category_id in chosen_categories and eligible(b.category_id)
+        }
+        for cat, amount in own.items():
+            taken = committed.get((cat, month), 0.0)
+            monthly[cat] = max(amount * share - taken, 0.0)
+            budgeted.add((cat, month))
+            uses.append(_BudgetUse(cat, None, month, amount, round(taken, 2), round(monthly[cat], 2)))
+        for group in groups:
+            if group.id not in chosen_groups or not group.applies_to(month):
+                continue
+            members = group.category_ids
+            rest = [c for c in members if c not in own and eligible(c)]
+            taken = sum(committed.get((c, month), 0.0) for c in rest)
+            remainder = max(
+                float(group.amount) * share - sum(own.get(c, 0.0) * share for c in members) - taken, 0.0
+            )
+            total = sum(estimate.get(c, 0.0) for c in rest)
+            for c in rest:
+                monthly[c] = remainder * estimate.get(c, 0.0) / total if total > 0 else remainder / len(rest)
+                budgeted.add((c, month))
+            uses.append(_BudgetUse(None, group.id, month, float(group.amount), round(taken, 2), round(remainder, 2)))
+        for cat, amount in monthly.items():
+            if amount <= 0:
+                continue
+            per_day = amount / days
+            d = lo
+            while d <= hi:
+                out.append((cat, d, per_day))
+                d += timedelta(days=1)
 
     def covered(d: date, category_id: Optional[uuid.UUID]) -> bool:
-        return any(
-            start <= d <= stop and (cat is None or cat == category_id) for start, stop, cat in spans
+        return category_id is not None and (category_id, d.replace(day=1)) in budgeted
+
+    return out, covered, uses
+
+
+async def get_budget_choices(session: AsyncSession, workspace_id: uuid.UUID) -> ForecastBudgetChoices:
+    """Fork: the budgets the workspace's forecast applies."""
+    rows = (
+        await session.execute(
+            select(ForecastBudgetChoice).where(ForecastBudgetChoice.workspace_id == workspace_id)
+            .order_by(ForecastBudgetChoice.created_at)
         )
+    ).scalars().all()
+    return ForecastBudgetChoices(
+        category_ids=[r.category_id for r in rows if r.category_id is not None],
+        budget_group_ids=[r.budget_group_id for r in rows if r.budget_group_id is not None],
+    )
 
-    return covered
 
+async def set_budget_choices(
+    session: AsyncSession, workspace_id: uuid.UUID, data: ForecastBudgetChoices
+) -> ForecastBudgetChoices:
+    """Fork: replace the chosen budgets. Each must be the workspace's own: a
+    category with a budget, or a budget group."""
+    from app.models.budget import Budget
+    from app.models.budget_group import BudgetGroup
 
-def _budget_projections(budgets: list[ForecastItem], today: date, end: date) -> list[dict]:
-    """Fork: each budget's amount on each of its dates after today, as
-    cash-flow projection dicts (money out)."""
-    out: list[dict] = []
-    for item in budgets:
-        last = min(item.end_date, end) if item.end_date else end
-        for d in series_dates(item, cast(date, item.start_date), last):
-            if d > today:
-                out.append({
-                    "date": d,
-                    "amount": float(abs(item.amount or 0)),
-                    "currency": item.currency,
-                    "type": "debit",
-                    "category_id": item.category_id,
-                })
-    return out
+    category_ids = list(dict.fromkeys(data.category_ids))
+    group_ids = list(dict.fromkeys(data.budget_group_ids))
+    if category_ids:
+        found = set(
+            (
+                await session.execute(
+                    select(Budget.category_id).where(
+                        Budget.workspace_id == workspace_id, Budget.category_id.in_(category_ids)
+                    )
+                )
+            ).scalars()
+        )
+        if found != set(category_ids):
+            raise ValueError("Budget not found")
+    if group_ids:
+        found = set(
+            (
+                await session.execute(
+                    select(BudgetGroup.id).where(BudgetGroup.workspace_id == workspace_id, BudgetGroup.id.in_(group_ids))
+                )
+            ).scalars()
+        )
+        if found != set(group_ids):
+            raise ValueError("Budget group not found")
+    await session.execute(delete(ForecastBudgetChoice).where(ForecastBudgetChoice.workspace_id == workspace_id))
+    session.add_all(
+        [ForecastBudgetChoice(workspace_id=workspace_id, category_id=c) for c in category_ids]
+        + [ForecastBudgetChoice(workspace_id=workspace_id, budget_group_id=g) for g in group_ids]
+    )
+    await session.commit()
+    return await get_budget_choices(session, workspace_id)
 
 
 def _history_dates(start: date, today: date, interval: str) -> list[date]:
@@ -1249,6 +1355,7 @@ async def compute_forecast(
     scenario_ids: Optional[list[uuid.UUID]] = None,
     include_spending: bool = True,
     account_ids: Optional[list[uuid.UUID]] = None,
+    budget_choices: Optional[ForecastBudgetChoices] = None,
 ) -> ForecastResponse:
     """Base line and one line per scenario from today to ``months`` ahead.
 
@@ -1259,13 +1366,16 @@ async def compute_forecast(
     keep to those of the cash-flow accounts. Rows with no account (invoices,
     repayments of loans no schedule pays, payments with no account) are left
     out of it, as Reports → Cash Flow leaves them out under a filter.
+
+    Fork: ``budget_choices`` overrides the workspace's chosen budgets (see
+    ``_budgeted_spending``); by default the saved choice.
     """
+    from app.services.budget_service import load_budget_plan
     from app.services.dashboard_service import _get_recurring_projections
     from app.services.report_service import (
         _add_months,
         _get_category_spending_estimate,
         _make_to_primary,
-        _spread_monthly,
         cash_flow_account_ids,
         get_cash_flow_report,
     )
@@ -1280,22 +1390,59 @@ async def compute_forecast(
     estimates = await _get_category_spending_estimate(
         session, workspace_id, today, to_primary, account_ids
     )
-    # Fork: plan budgets project on their schedule and switch the estimate off.
-    budgets = await _plan_budgets(session, workspace_id, account_ids, narrowed)
-    budgeted = _budgeted(budgets, end)
-    extra: list[dict] = _budget_projections(budgets, today, end)
+    # Fork: the chosen canonical Budgets set the spending of the months they
+    # cover, counting the recurring and expected payments already in them.
+    if budget_choices is None:
+        budget_choices = await get_budget_choices(session, workspace_id)
+    chosen_categories = set(budget_choices.category_ids)
+    chosen_groups = set(budget_choices.budget_group_ids)
+    budgets, groups = await load_budget_plan(session, workspace_id)
+    committed: dict[tuple[uuid.UUID, date], float] = {}
+    if chosen_categories or chosen_groups:
+        for proj in [
+            *await _get_recurring_projections(
+                session, workspace_id, today + timedelta(days=1), end + timedelta(days=1), account_ids,
+                external_transfers=True,
+            ),
+            *await expected_payment_projections(
+                session, workspace_id, today, end, account_ids, narrowed=narrowed
+            ),
+        ]:
+            if proj["type"] == "debit" and proj["category_id"] is not None and today < proj["date"] <= end:
+                key = (proj["category_id"], proj["date"].replace(day=1))
+                committed[key] = committed.get(key, 0.0) + await to_primary(
+                    Decimal(str(proj["amount"])), proj["currency"]
+                )
+    spending, budgeted, uses = _budgeted_spending(
+        estimates, budgets, groups, chosen_categories, chosen_groups, today, end, committed, narrowed
+    )
+    extra: list[dict] = []
     if include_spending:
-        for est in estimates:
-            for d, amount in _spread_monthly(est["monthly_amount"], today + timedelta(days=1), end):
-                if budgeted(d, est["category_id"]):
-                    continue
-                extra.append({
-                    "date": d,
-                    "amount": amount,
-                    "currency": primary_currency,
-                    "type": "debit",
-                    "category_id": est["category_id"],
-                })
+        for category_id, d, amount in spending:
+            extra.append({
+                "date": d,
+                "amount": amount,
+                "currency": primary_currency,
+                "type": "debit",
+                "category_id": category_id,
+            })
+    budget_uses: list[ForecastBudgetUse] = []
+    if include_spending and uses:
+        rows = await session.execute(
+            select(Category.id, Category.name).where(
+                Category.id.in_([u.category_id for u in uses if u.category_id])
+            )
+        )
+        names: dict[uuid.UUID, str] = {cat_id: name for cat_id, name in rows.all()}
+        names.update({g.id: g.name for g in groups})
+        budget_uses = [
+            ForecastBudgetUse(
+                category_id=u.category_id, budget_group_id=u.budget_group_id,
+                name=names.get(u.category_id or u.budget_group_id, ""),
+                month=u.month, amount=u.amount, committed=u.committed, remainder=u.remainder,
+            )
+            for u in uses
+        ]
 
     report = await get_cash_flow_report(
         session, workspace_id, user_id, months, "daily", primary_currency,
@@ -1464,6 +1611,7 @@ async def compute_forecast(
         spending_estimates=[SpendingEstimate(**e) for e in estimates],
         loans=loan_forecasts,
         recurring_payments=_recurring_payments(recurring_projections, recurring_by_id),
+        budget_uses=budget_uses,
     )
 
 

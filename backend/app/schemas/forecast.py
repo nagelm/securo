@@ -7,7 +7,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 ForecastItemKind = Literal[
-    "one_off", "repeating", "recurring_change", "income_change", "spending_change", "loan_change", "budget"
+    "one_off", "repeating", "recurring_change", "income_change", "spending_change", "loan_change"
 ]
 ForecastChangeMode = Literal["amount", "pause", "stop", "percent", "rate", "lump_sum"]
 ForecastFrequency = Literal["weekly", "biweekly", "monthly", "quarterly", "semiannual", "yearly"]
@@ -145,6 +145,29 @@ class SpendingEstimate(BaseModel):
     monthly_amount: float
 
 
+class ForecastBudgetChoices(BaseModel):
+    """Fork: the budgets the forecast applies (opt-in, none by default):
+    category budgets by category, budget groups by group."""
+
+    category_ids: list[uuid.UUID] = []
+    budget_group_ids: list[uuid.UUID] = []
+
+
+class ForecastBudgetUse(BaseModel):
+    """Fork: one chosen budget in one month of the forecast. ``committed`` is
+    what recurring and expected payments categorised there already project
+    from tomorrow; ``remainder`` what is left for everyday spending (both
+    for the days still to come in the month)."""
+
+    category_id: Optional[uuid.UUID] = None
+    budget_group_id: Optional[uuid.UUID] = None
+    name: str
+    month: _Date
+    amount: float
+    committed: float
+    remainder: float
+
+
 class LoanPoint(BaseModel):
     """A loan's balance owed at ``date`` and what the repayments since the
     previous point paid in interest and in principal (lump sums included)."""
@@ -228,3 +251,5 @@ class ForecastResponse(BaseModel):
     spending_estimates: list[SpendingEstimate]
     loans: list[LoanForecast] = []
     recurring_payments: list[ForecastRecurringPayment] = []
+    # Fork: the chosen budgets, month by month (empty unless some are chosen).
+    budget_uses: list[ForecastBudgetUse] = []

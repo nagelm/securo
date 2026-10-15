@@ -1,6 +1,6 @@
 """Fork: the Forecast page as a household plan. Expected transfers between
-own accounts, repeating expected payments, the account view and plan
-budgets. Every figure and name is made up.
+own accounts, repeating expected payments, the account view and the
+chosen canonical budgets. Every figure and name is made up.
 
 Runs on SQLite here and again on PostgreSQL from test_forecast_postgres.py.
 """
@@ -13,8 +13,8 @@ import pytest
 from app.core.app_clock import app_today
 from app.models.forecast import ForecastItem
 from app.models.transaction import Transaction
+from app.schemas.forecast import ForecastBudgetChoices
 from app.services import forecast_service
-from app.services.forecast_service import series_dates
 from app.services.report_service import _add_months, get_cash_flow_report
 from tests.test_forecast import MONTHS, _account, _expected, _forecast, _scenario, _tx
 
@@ -438,19 +438,52 @@ async def test_account_view_counts_a_loan_change_on_the_account_that_pays_the_lo
 
 
 # ---------------------------------------------------------------------------
-# 4. plan budgets
+# 4. chosen canonical budgets set the spending estimate
 # ---------------------------------------------------------------------------
 
 
-async def _budget(session, user_id, workspace_id, amount, frequency, start, end=None, **values):
-    item = ForecastItem(
-        user_id=user_id, workspace_id=workspace_id, kind="budget", currency="BRL", type="debit",
-        amount=Decimal(amount), frequency=frequency, start_date=start, end_date=end,
-        description=values.pop("description", "Everyday spending"), **values,
+async def _budget(session, user_id, workspace_id, category_id, amount, month, *, recurring=True, end_month=None,
+                  choose=True):
+    """A category budget, chosen for the forecast unless ``choose`` is off."""
+    from app.models.budget import Budget
+    from app.models.forecast import ForecastBudgetChoice
+
+    budget = Budget(
+        user_id=user_id, workspace_id=workspace_id, category_id=category_id, amount=Decimal(amount),
+        month=month, is_recurring=recurring, end_month=end_month,
     )
-    session.add(item)
+    session.add(budget)
+    if choose and not await _chosen(session, workspace_id, category_id=category_id):
+        session.add(ForecastBudgetChoice(workspace_id=workspace_id, category_id=category_id))
     await session.commit()
-    return item
+    return budget
+
+
+async def _chosen(session, workspace_id, **target) -> bool:
+    from sqlalchemy import select
+
+    from app.models.forecast import ForecastBudgetChoice
+
+    rows = await session.execute(select(ForecastBudgetChoice).filter_by(workspace_id=workspace_id, **target))
+    return rows.first() is not None
+
+
+async def _group(session, user_id, workspace_id, amount, month, *category_ids, recurring=True, end_month=None,
+                 choose=True):
+    from app.models.budget_group import BudgetGroup, BudgetGroupCategory
+    from app.models.forecast import ForecastBudgetChoice
+
+    group = BudgetGroup(
+        user_id=user_id, workspace_id=workspace_id, name="Everyday", amount=Decimal(amount), month=month,
+        is_recurring=recurring, end_month=end_month,
+        members=[BudgetGroupCategory(category_id=c) for c in category_ids],
+    )
+    session.add(group)
+    await session.flush()
+    if choose:
+        session.add(ForecastBudgetChoice(workspace_id=workspace_id, budget_group_id=group.id))
+    await session.commit()
+    return group
 
 
 async def _groceries(session, user_id, account_id):
@@ -465,150 +498,343 @@ async def _groceries(session, user_id, account_id):
     return groceries
 
 
-async def test_a_budget_replaces_the_spending_estimate_over_its_dates(session, test_user, test_workspace):
-    from tests.test_forecast import _spending_history, _spread_total
+async def _categories(session, user_id):
+    from sqlalchemy import select
 
-    today = app_today()
-    joint = await _account(session, test_user.id)
-    await _spending_history(session, test_user.id, joint.id)  # Eating out, 280 a month
-    groceries = await _groceries(session, test_user.id, joint.id)
-    without = await _forecast(session, test_user, test_workspace, include_spending=True)
-    first, last = today + timedelta(days=1), today + timedelta(days=29)
-    await _budget(session, test_user.id, test_workspace.id, "100", "weekly", first, last)
+    from app.models.category import Category
 
-    result = await _forecast(session, test_user, test_workspace, include_spending=True)
-
-    # Five weekly 100s replace both categories' estimates from first to last.
-    assert {e.category_id for e in result.spending_estimates} == {e.category_id for e in without.spending_estimates}
-    assert groceries.id in {e.category_id for e in result.spending_estimates}
-    switched_off = _spread_total(280 + 150, first, last)
-    assert result.summary.end_balance - without.summary.end_balance == pytest.approx(
-        -5 * 100 + switched_off, abs=0.05
-    )
+    return list((await session.execute(select(Category).where(Category.user_id == user_id))).scalars())
 
 
-async def test_a_category_budget_switches_off_only_that_category(session, test_user, test_workspace):
-    from tests.test_forecast import _spending_history, _spread_total
-
-    today = app_today()
-    joint = await _account(session, test_user.id)
-    eating = await _spending_history(session, test_user.id, joint.id)
-    await _groceries(session, test_user.id, joint.id)
-    without = await _forecast(session, test_user, test_workspace, include_spending=True)
-    first = today + timedelta(days=1)
-    await _budget(session, test_user.id, test_workspace.id, "200", "monthly", first, category_id=eating.id)
-
-    result = await _forecast(session, test_user, test_workspace, include_spending=True)
-
-    end = _add_months(today, MONTHS)
-    months = len(series_dates(ForecastItem(start_date=first, frequency="monthly"), first, end))
-    assert result.summary.end_balance - without.summary.end_balance == pytest.approx(
-        -200 * months + _spread_total(280, first, end), abs=0.05
-    )
+def _month_end(d):
+    return _add_months(d.replace(day=1), 1) - timedelta(days=1)
 
 
-async def test_budgets_project_with_the_estimate_off_and_cover_the_union_of_their_dates(
-    session, test_user, test_workspace,
-):
-    from tests.test_forecast import _spending_history, _spread_total
-
-    today = app_today()
-    joint = await _account(session, test_user.id)
-    await _spending_history(session, test_user.id, joint.id)
-    off = await _forecast(session, test_user, test_workspace)
-    on = await _forecast(session, test_user, test_workspace, include_spending=True)
-    a = (today + timedelta(days=1), today + timedelta(days=14))
-    b = (today + timedelta(days=8), today + timedelta(days=21))
-    await _budget(session, test_user.id, test_workspace.id, "50", "weekly", *a)
-    await _budget(session, test_user.id, test_workspace.id, "30", "weekly", *b)
-
-    budget_off = await _forecast(session, test_user, test_workspace)
-    budget_on = await _forecast(session, test_user, test_workspace, include_spending=True)
-
-    spent = 2 * 50 + 2 * 30
-    assert budget_off.summary.end_balance == pytest.approx(off.summary.end_balance - spent)
-    assert budget_on.summary.end_balance - on.summary.end_balance == pytest.approx(
-        -spent + _spread_total(280, a[0], b[1]), abs=0.05
-    )
-
-
-async def test_a_budget_switches_off_a_spending_change_over_its_dates(session, test_user, test_workspace):
-    from tests.test_forecast import _spending_history, _spread_total
-
-    today = app_today()
-    joint = await _account(session, test_user.id)
-    eating = await _spending_history(session, test_user.id, joint.id)
-    first, last = today + timedelta(days=1), today + timedelta(days=30)
-    await _scenario(session, test_user.id, test_workspace.id, {
-        "kind": "spending_change", "category_id": eating.id, "change_mode": "percent",
-        "percent": Decimal("-50"), "start_date": first,
-    })
-    await _budget(session, test_user.id, test_workspace.id, "100", "monthly", first, last)
-
-    result = await _forecast(session, test_user, test_workspace, include_spending=True)
-
-    end = _add_months(today, MONTHS)
-    assert result.scenarios[0].difference == pytest.approx(
-        _spread_total(140, last + timedelta(days=1), end), abs=0.05
-    )
-
-
-async def test_a_budget_on_another_account_stays_out_of_an_account_view(session, test_user, test_workspace):
+async def test_budgets_feed_the_forecast_only_when_chosen(session, test_user, test_workspace):
     from tests.test_forecast import _spending_history
 
     today = app_today()
     joint = await _account(session, test_user.id)
-    savings = await _account(session, test_user.id)
+    eating = await _spending_history(session, test_user.id, joint.id)
+    groceries = await _groceries(session, test_user.id, joint.id)
+    without = await _forecast(session, test_user, test_workspace, include_spending=True)
+    budget = await _budget(session, test_user.id, test_workspace.id, eating.id, "10", today.replace(day=1),
+                           choose=False)
+    group = await _group(session, test_user.id, test_workspace.id, "10", today.replace(day=1), groceries.id,
+                         choose=False)
+
+    result = await _forecast(session, test_user, test_workspace, include_spending=True)
+
+    assert result.summary.end_balance == pytest.approx(without.summary.end_balance)
+    assert result.budget_uses == []
+    # The override parameter picks them without saving a choice.
+    chosen = await _forecast(session, test_user, test_workspace, include_spending=True,
+                             budget_choices=ForecastBudgetChoices(category_ids=[budget.category_id],
+                                                                  budget_group_ids=[group.id]))
+    assert chosen.summary.end_balance > without.summary.end_balance
+    assert {u.name for u in chosen.budget_uses} == {"Eating out", "Everyday"}
+
+
+async def test_a_chosen_budget_replaces_its_estimate_in_the_months_it_covers(session, test_user, test_workspace):
+    from tests.test_forecast import _spending_history, _spread_total
+
+    today = app_today()
+    this_month = today.replace(day=1)
+    joint = await _account(session, test_user.id)
+    eating = await _spending_history(session, test_user.id, joint.id)  # Eating out, 280 a month
+    without = await _forecast(session, test_user, test_workspace, include_spending=True)
+    off = await _forecast(session, test_user, test_workspace)
+    # This month and the next, then no longer.
+    await _budget(session, test_user.id, test_workspace.id, eating.id, "100", this_month,
+                  end_month=_add_months(this_month, 1))
+
+    result = await _forecast(session, test_user, test_workspace, include_spending=True)
+
+    first, last = today + timedelta(days=1), _month_end(_add_months(this_month, 1))
+    assert result.summary.end_balance - without.summary.end_balance == pytest.approx(
+        _spread_total(280, first, last) - _spread_total(100, first, last), abs=0.05
+    )
+    # The estimate's list is still the history; with spending off nothing changes.
+    assert result.spending_estimates == without.spending_estimates
+    assert (await _forecast(session, test_user, test_workspace)).summary.end_balance == off.summary.end_balance
+    assert [u.month for u in result.budget_uses] == [m for m in (this_month, _add_months(this_month, 1))
+                                                     if _month_end(m) > today]
+    assert {(u.amount, u.committed) for u in result.budget_uses} == {(100, 0)}
+
+
+async def test_a_one_month_budget_wins_over_the_recurring_one(session, test_user, test_workspace):
+    from tests.test_forecast import _spending_history, _spread_total
+
+    today = app_today()
+    this_month = today.replace(day=1)
+    joint = await _account(session, test_user.id)
+    eating = await _spending_history(session, test_user.id, joint.id)
+    without = await _forecast(session, test_user, test_workspace, include_spending=True)
+    next_month = _add_months(this_month, 1)
+    await _budget(session, test_user.id, test_workspace.id, eating.id, "280", this_month)
+    await _budget(session, test_user.id, test_workspace.id, eating.id, "0", next_month, recurring=False)
+
+    result = await _forecast(session, test_user, test_workspace, include_spending=True)
+
+    assert result.summary.end_balance - without.summary.end_balance == pytest.approx(
+        _spread_total(280, next_month, _month_end(next_month)), abs=0.05
+    )
+
+
+async def test_a_recurring_payment_in_a_budgeted_category_counts_toward_the_budget(
+    session, test_user, test_workspace,
+):
+    """Rent has no estimate; a recurring 1200 pays it from next month. A 1000
+    budget for it adds only this month's share: from next month the recurring
+    payment already takes more than the budget, and is not added on top."""
+    from tests.test_forecast import _spending_history, _spread_total
+
+    today = app_today()
+    this_month = today.replace(day=1)
+    joint = await _account(session, test_user.id)
     await _spending_history(session, test_user.id, joint.id)
-    before = await _forecast(session, test_user, test_workspace, include_spending=True, account_ids=[joint.id])
-    await _budget(session, test_user.id, test_workspace.id, "100", "weekly", today + timedelta(days=1),
-                  account_id=savings.id)
+    rent = next(c for c in await _categories(session, test_user.id) if c.name == "Rent")
+    without = await _forecast(session, test_user, test_workspace, include_spending=True)
+    await _budget(session, test_user.id, test_workspace.id, rent.id, "1000", this_month)
 
-    after = await _forecast(session, test_user, test_workspace, include_spending=True, account_ids=[joint.id])
-    only_savings = await _forecast(session, test_user, test_workspace, account_ids=[savings.id])
+    result = await _forecast(session, test_user, test_workspace, include_spending=True)
 
-    assert after.summary.end_balance == pytest.approx(before.summary.end_balance)
-    assert only_savings.summary.end_balance < 1000
+    assert result.summary.end_balance - without.summary.end_balance == pytest.approx(
+        -_spread_total(1000, today + timedelta(days=1), _month_end(today)), abs=0.05
+    )
+    later = [u for u in result.budget_uses if u.month > this_month and _month_end(u.month) <= result.end_date]
+    assert later and all(u.committed == 1200 and u.remainder == 0 for u in later)
 
 
-async def test_budgets_are_not_matched(session, test_user, test_workspace):
+async def test_an_expected_payment_in_a_budgeted_category_reduces_the_remainder(session, test_user, test_workspace):
+    from tests.test_forecast import _expected, _spending_history
+
+    today = app_today()
+    this_month = today.replace(day=1)
+    next_month = _add_months(this_month, 1)
+    joint = await _account(session, test_user.id)
+    eating = await _spending_history(session, test_user.id, joint.id)
+    await _budget(session, test_user.id, test_workspace.id, eating.id, "300", next_month,
+                  recurring=False)
+    before = await _forecast(session, test_user, test_workspace, include_spending=True)
+    await _expected(session, test_user.id, test_workspace.id, amount=Decimal("120"), type="debit",
+                    date=next_month + timedelta(days=9), account_id=joint.id, category_id=eating.id)
+
+    after = await _forecast(session, test_user, test_workspace, include_spending=True)
+
+    # The month still spends 300 in Eating out: the payment is part of it.
+    assert after.summary.end_balance == pytest.approx(before.summary.end_balance, abs=0.05)
+    use = next(u for u in after.budget_uses if u.month == next_month)
+    assert (use.committed, use.remainder) == (120, 180)
+
+
+async def test_payments_outside_chosen_budgets_stay_additive(session, test_user, test_workspace):
+    from tests.test_forecast import _recurring, _spending_history
+
+    today = app_today()
+    this_month = today.replace(day=1)
+    joint = await _account(session, test_user.id)
+    eating = await _spending_history(session, test_user.id, joint.id)
+    groceries = await _groceries(session, test_user.id, joint.id)
+    await _budget(session, test_user.id, test_workspace.id, eating.id, "100", this_month)
+    # A Groceries budget that is not chosen changes nothing either.
+    await _budget(session, test_user.id, test_workspace.id, groceries.id, "1", this_month, choose=False)
+    before = await _forecast(session, test_user, test_workspace, include_spending=True)
+    first = _add_months(this_month, 1) + timedelta(days=4)
+    await _recurring(session, test_user.id, joint.id, 40, "debit", first, category_id=groceries.id)
+
+    after = await _forecast(session, test_user, test_workspace, include_spending=True)
+
+    # Groceries has an active recurring debit now, so its estimate goes (as
+    # without budgets) and the payments add on top.
+    from tests.test_forecast import _count, _spread_total
+
+    end = _add_months(today, MONTHS)
+    assert after.summary.end_balance - before.summary.end_balance == pytest.approx(
+        -40 * _count(first) + _spread_total(150, today + timedelta(days=1), end), abs=0.05
+    )
+
+
+async def test_a_chosen_group_scales_its_members_to_the_cap(session, test_user, test_workspace):
+    from tests.test_forecast import _spending_history, _spread_total
+
     today = app_today()
     joint = await _account(session, test_user.id)
-    item = await _budget(session, test_user.id, test_workspace.id, "100", "weekly", today - timedelta(days=7),
-                         today + timedelta(days=7), account_id=joint.id)
-    await _tx(session, test_user.id, joint.id, 100, "debit", today, description="Everyday spending")
+    eating = await _spending_history(session, test_user.id, joint.id)  # 280
+    groceries = await _groceries(session, test_user.id, joint.id)  # 150
+    without = await _forecast(session, test_user, test_workspace, include_spending=True)
+    group = await _group(session, test_user.id, test_workspace.id, "215", today.replace(day=1), eating.id,
+                         groceries.id)
 
-    assert await forecast_service.match_expected_payments(session, test_workspace.id) == 0
-    result = await _forecast(session, test_user, test_workspace)
-    # Only the date still to come is projected; past budget dates are history.
-    assert result.summary.end_balance == pytest.approx(1000 - 100 - 100)
-    await session.refresh(item, ["matches"])
-    assert item.matches == [] and item.matched_transaction_id is None
+    result = await _forecast(session, test_user, test_workspace, include_spending=True)
+
+    first, end = today + timedelta(days=1), _add_months(today, MONTHS)
+    assert result.summary.end_balance - without.summary.end_balance == pytest.approx(
+        _spread_total(430, first, end) - _spread_total(215, first, end), abs=0.05
+    )
+    # Each keeps its share of the estimates, 280:150, halved.
+    from app.services.budget_service import load_budget_plan
+
+    budgets, groups = await load_budget_plan(session, test_workspace.id)
+    spending, budgeted, _ = forecast_service._budgeted_spending(
+        [{"category_id": eating.id, "monthly_amount": 280}, {"category_id": groceries.id, "monthly_amount": 150}],
+        budgets, groups, set(), {group.id}, today, end, {}, False,
+    )
+    per_cat = {eating.id: 0.0, groceries.id: 0.0}
+    for cat, _, amount in spending:
+        per_cat[cat] += amount
+    assert per_cat[eating.id] == pytest.approx(_spread_total(140, first, end), abs=0.05)
+    assert per_cat[groceries.id] == pytest.approx(_spread_total(75, first, end), abs=0.05)
+    assert budgeted(first, eating.id) and not budgeted(first, None)
 
 
-async def test_api_budget(client, auth_headers, session, test_user, test_workspace):
+async def test_a_group_counts_its_members_own_budgets_and_payments(session, test_user, test_workspace):
+    from tests.test_forecast import _spending_history, _spread_total
+
+    today = app_today()
+    this_month = today.replace(day=1)
+    end = _add_months(today, MONTHS)
     joint = await _account(session, test_user.id)
+    eating = await _spending_history(session, test_user.id, joint.id)
+    groceries = await _groceries(session, test_user.id, joint.id)
+    rent = next(c for c in await _categories(session, test_user.id) if c.name == "Rent")
+    without = await _forecast(session, test_user, test_workspace, include_spending=True)
+    await _budget(session, test_user.id, test_workspace.id, eating.id, "200", this_month)
+    await _group(session, test_user.id, test_workspace.id, "300", this_month, eating.id, groceries.id)
+
+    result = await _forecast(session, test_user, test_workspace, include_spending=True)
+
+    # Eating out 200 (its own budget), Groceries the 100 left of the cap.
+    first = today + timedelta(days=1)
+    assert result.summary.end_balance - without.summary.end_balance == pytest.approx(
+        _spread_total(430, first, end) - _spread_total(300, first, end), abs=0.05
+    )
+
+    # Rent joins the group: its recurring 1200 a month takes the whole cap.
+    from app.services.budget_service import load_budget_plan
+
+    from types import SimpleNamespace
+
+    budgets, groups = await load_budget_plan(session, test_workspace.id)
+    widened = SimpleNamespace(
+        id=groups[0].id, amount=groups[0].amount, category_ids=[eating.id, groceries.id, rent.id],
+        applies_to=groups[0].applies_to,
+    )
+    month = _add_months(this_month, 1)
+    spending, _, uses = forecast_service._budgeted_spending(
+        [{"category_id": eating.id, "monthly_amount": 280}, {"category_id": groceries.id, "monthly_amount": 150}],
+        budgets, [widened], {eating.id}, {widened.id}, today, end, {(rent.id, month): 1200.0}, False,
+    )
+    assert not [a for c, d, a in spending if c == groceries.id and d.replace(day=1) == month]
+    group_use = next(u for u in uses if u.budget_group_id and u.month == month)
+    assert (group_use.committed, group_use.remainder) == (1200, 0)
+
+
+async def test_a_chosen_group_with_no_estimates_spreads_its_cap_evenly(session, test_user, test_workspace):
+    from tests.test_forecast import _category
+
+    today = app_today()
+    await _account(session, test_user.id)
+    gifts = await _category(session, test_user.id, "Gifts")
+    hobbies = await _category(session, test_user.id, "Hobbies")
+    without = await _forecast(session, test_user, test_workspace, include_spending=True)
+    # One month only: next month.
+    next_month = _add_months(today.replace(day=1), 1)
+    group = await _group(session, test_user.id, test_workspace.id, "90", next_month, gifts.id, hobbies.id,
+                         recurring=False)
+
+    result = await _forecast(session, test_user, test_workspace, include_spending=True)
+
+    assert result.summary.end_balance - without.summary.end_balance == pytest.approx(-90, abs=0.05)
+    from app.services.budget_service import load_budget_plan
+
+    budgets, groups = await load_budget_plan(session, test_workspace.id)
+    spending, _, _ = forecast_service._budgeted_spending(
+        [], budgets, groups, set(), {group.id}, today, _add_months(today, MONTHS), {}, False,
+    )
+    assert sum(a for c, _, a in spending if c == gifts.id) == pytest.approx(45)
+    assert {d.replace(day=1) for _, d, _ in spending} == {next_month}
+
+
+async def test_a_chosen_budget_switches_off_a_spending_change_in_its_months(session, test_user, test_workspace):
+    from tests.test_forecast import _spending_history, _spread_total
+
+    today = app_today()
+    this_month = today.replace(day=1)
+    joint = await _account(session, test_user.id)
+    eating = await _spending_history(session, test_user.id, joint.id)
+    await _scenario(session, test_user.id, test_workspace.id, {
+        "kind": "spending_change", "category_id": eating.id, "change_mode": "percent",
+        "percent": Decimal("-50"), "start_date": today + timedelta(days=1),
+    })
+    await _budget(session, test_user.id, test_workspace.id, eating.id, "100", this_month, end_month=this_month)
+
+    result = await _forecast(session, test_user, test_workspace, include_spending=True)
+
+    end = _add_months(today, MONTHS)
+    next_month = _add_months(this_month, 1)
+    assert result.scenarios[0].difference == pytest.approx(_spread_total(140, next_month, end), abs=0.05)
+
+
+async def test_an_account_view_budgets_only_the_categories_it_spends_in(session, test_user, test_workspace):
+    from tests.test_forecast import _category, _spending_history, _spread_total
+
+    today = app_today()
+    this_month = today.replace(day=1)
+    joint = await _account(session, test_user.id)
+    savings = await _account(session, test_user.id)
+    eating = await _spending_history(session, test_user.id, joint.id)
+    gifts = await _category(session, test_user.id, "Gifts")
+    before_joint = await _forecast(session, test_user, test_workspace, include_spending=True, account_ids=[joint.id])
+    await _budget(session, test_user.id, test_workspace.id, eating.id, "100", this_month)
+    await _budget(session, test_user.id, test_workspace.id, gifts.id, "50", this_month)
+
+    only_joint = await _forecast(session, test_user, test_workspace, include_spending=True, account_ids=[joint.id])
+    only_savings = await _forecast(session, test_user, test_workspace, include_spending=True,
+                                   account_ids=[savings.id])
+    everything = await _forecast(session, test_user, test_workspace, include_spending=True)
+
+    first, end = today + timedelta(days=1), _add_months(today, MONTHS)
+    assert only_joint.summary.end_balance - before_joint.summary.end_balance == pytest.approx(
+        _spread_total(280, first, end) - _spread_total(100, first, end), abs=0.05
+    )
+    assert only_savings.summary.end_balance == pytest.approx(1000)
+    # All accounts: Gifts, with no history, is budgeted too.
+    assert everything.summary.end_balance == pytest.approx(
+        only_joint.summary.end_balance + 1000 - _spread_total(50, first, end), abs=0.05
+    )
+
+
+async def test_api_budget_choices(client, auth_headers, session, test_user, test_workspace):
+    from tests.test_forecast import _category
+
+    eating = await _category(session, test_user.id, "Eating out")
+    gifts = await _category(session, test_user.id, "Gifts")
+    await _budget(session, test_user.id, test_workspace.id, eating.id, "100", app_today().replace(day=1),
+                  choose=False)
+    group = await _group(session, test_user.id, test_workspace.id, "50", app_today().replace(day=1), gifts.id,
+                         choose=False)
+
+    resp = await client.get("/api/forecast/budget-choices", headers=auth_headers)
+    assert resp.status_code == 200 and resp.json() == {"category_ids": [], "budget_group_ids": []}
+    body = {"category_ids": [str(eating.id)], "budget_group_ids": [str(group.id)]}
+    resp = await client.put("/api/forecast/budget-choices", json=body, headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == body
+    assert (await client.get("/api/forecast/budget-choices", headers=auth_headers)).json() == body
+    # A category with no budget, or another workspace's group, is refused.
+    for payload, message in [
+        ({"category_ids": [str(gifts.id)]}, "Budget not found"),
+        ({"budget_group_ids": [str(uuid.uuid4())]}, "Budget group not found"),
+    ]:
+        resp = await client.put("/api/forecast/budget-choices", json=payload, headers=auth_headers)
+        assert resp.status_code == 400 and resp.json()["detail"] == message
+    resp = await client.put("/api/forecast/budget-choices", json={}, headers=auth_headers)
+    assert resp.json() == {"category_ids": [], "budget_group_ids": []}
+
+
+async def test_api_has_no_budget_kind(client, auth_headers):
     resp = await client.post("/api/forecast/items", json={
         "kind": "budget", "amount": "450", "frequency": "weekly", "start_date": "2030-01-01",
-        "end_date": "2030-06-30", "account_id": str(joint.id), "description": "Groceries and petrol",
     }, headers=auth_headers)
-    assert resp.status_code == 201, resp.text
-    body = resp.json()
-    assert (body["kind"], body["type"], body["currency"], body["scenario_id"]) == ("budget", "debit", "BRL", None)
-
-    scenario = (await client.post("/api/forecast/scenarios", json={"name": "S", "color": "#000000"},
-                                  headers=auth_headers)).json()
-    base = {"kind": "budget", "amount": "450", "frequency": "weekly", "start_date": "2030-01-01"}
-    for payload, message in [
-        ({**base, "scenario_id": scenario["id"]}, "A budget is part of the plan, not of a scenario"),
-        ({**base, "frequency": "yearly"},
-         "A budget needs a weekly, fortnightly or monthly frequency and a start date"),
-        ({**base, "start_date": None},
-         "A budget needs a weekly, fortnightly or monthly frequency and a start date"),
-        ({**base, "type": "credit"}, "A budget is money out (type debit)"),
-        ({**base, "amount": "0"}, "Amount must be greater than zero"),
-        ({**base, "account_id": str(joint.id), "transfer_account_id": str(joint.id)}, "Only a payment can be a transfer"),
-    ]:
-        resp = await client.post("/api/forecast/items", json=payload, headers=auth_headers)
-        assert resp.status_code == 400, resp.text
-        assert resp.json()["detail"] == message
+    assert resp.status_code == 422
