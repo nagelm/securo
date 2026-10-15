@@ -510,4 +510,4 @@ async def test_api_loan_change_needs_a_scenario(client, auth_headers, session, t
         "kind": "loan_change", "account_id": str(loan.id), "change_mode": "lump_sum", "amount": "100",
         "start_date": "2030-01-01",
     }, headers=auth_headers)
-    assert resp.status_code == 400 and resp.json()["detail"] == "An expected payment is a one-off payment"
+    assert resp.status_code == 400 and resp.json()["detail"] == "An expected payment is a one-off or repeating payment"

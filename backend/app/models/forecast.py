@@ -1,18 +1,31 @@
 """Fork: the Forecast page's own data.
 
 `ForecastScenario` is a named "what if" set; `ForecastItem` is either an
-expected payment (``scenario_id`` NULL, kind ``one_off``: real money that is
-not in the bank yet; with ``transfer_account_id`` a transfer between own
-accounts) or one change inside a scenario (including a change to
+expected payment (``scenario_id`` NULL, kind ``one_off`` or ``repeating``:
+real money that is not in the bank yet; with ``transfer_account_id`` a
+transfer between own accounts) or one change inside a scenario (including a change to
 a loan's rate or repayments, ``loan_change``). Both are read by
 `forecast_service`, which lays them over the cash-flow projection.
+
+Fork: a repeating expected payment is matched occurrence by occurrence;
+`ForecastItemMatch` holds the bank row that settled each one.
 """
 import uuid
 from datetime import date as _date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, Numeric, String
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -120,3 +133,47 @@ class ForecastItem(Base):
     )
 
     scenario: Mapped[Optional[ForecastScenario]] = relationship(back_populates="items")
+    # Fork: the matched occurrences of a repeating expected payment.
+    matches: Mapped[list["ForecastItemMatch"]] = relationship(
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+        order_by="ForecastItemMatch.occurrence_date",
+    )
+
+    @property
+    def occurrence_count(self) -> Optional[int]:
+        """Fork: how many payments a repeating expected payment makes from
+        its start to its end date; None when open-ended or not a series."""
+        if (
+            self.scenario_id is not None
+            or self.kind != "repeating"
+            or self.start_date is None
+            or self.end_date is None
+            or self.frequency is None
+        ):
+            return None
+        from app.services.forecast_service import series_dates
+
+        return len(series_dates(self, self.start_date, self.end_date))
+
+
+class ForecastItemMatch(Base):
+    """Fork: the bank row that settled one occurrence of a repeating
+    expected payment. A matched occurrence is no longer projected."""
+
+    __tablename__ = "forecast_item_matches"
+    __table_args__ = (
+        UniqueConstraint("item_id", "occurrence_date", name="uq_forecast_item_matches_occurrence"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("forecast_items.id", ondelete="CASCADE"), index=True
+    )
+    occurrence_date: Mapped[_date] = mapped_column(Date)
+    # The bank row going (deleted) makes the occurrence expected again.
+    transaction_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("transactions.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

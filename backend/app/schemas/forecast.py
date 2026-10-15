@@ -78,6 +78,15 @@ class ForecastItemUpdate(BaseModel):
     recalculate_repayment: Optional[bool] = None
 
 
+class ForecastItemMatchRead(BaseModel):
+    """Fork: one matched occurrence of a repeating expected payment."""
+
+    occurrence_date: _Date
+    transaction_id: uuid.UUID
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ForecastItemRead(BaseModel):
     id: uuid.UUID
     scenario_id: Optional[uuid.UUID] = None
@@ -98,6 +107,10 @@ class ForecastItemRead(BaseModel):
     percent: Optional[Decimal] = None
     recalculate_repayment: Optional[bool] = None
     matched_transaction_id: Optional[uuid.UUID] = None
+    # Fork: a repeating expected payment's matched occurrences, and how many
+    # payments it makes from start to end (None when open-ended).
+    matches: list[ForecastItemMatchRead] = []
+    occurrence_count: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 
