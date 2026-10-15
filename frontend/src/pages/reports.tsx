@@ -26,7 +26,8 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { DateRangePicker } from '@/components/ui/date-range-picker'
 import { PageHeader } from '@/components/page-header'
 import { CashflowSankey } from '@/components/reports/CashflowSankey'
-import { MONEY_MAP_MAX_MONTHS_BACK, moneyMapWindow } from '@/components/reports/money-map-window'
+import { moneyMapWindow } from '@/components/reports/money-map-window'
+import { MoneyMapScrubber } from '@/components/reports/MoneyMapScrubber'
 import { CategoryTrendDialog } from '@/components/reports/CategoryTrendDialog'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useSeriesToggle, type SeriesToggle } from '@/hooks/use-series-toggle'
@@ -889,6 +890,14 @@ export default function ReportsPage() {
               </div>
             </div>
           </div>
+          {!isCustomRange && (
+            <MoneyMapScrubber
+              monthsBack={mapBackDraft}
+              onChange={setMapBackDraft}
+              range={selectedRange}
+              locale={locale}
+            />
+          )}
           <div className="px-3 pb-5">
             {isLoading ? (
               <div className="px-2"><Skeleton className="h-[360px] w-full" /></div>
@@ -896,30 +905,6 @@ export default function ReportsPage() {
               <CashflowSankey composition={composition} currency={userCurrency} locale={locale} />
             )}
           </div>
-          {!isCustomRange && (() => {
-            const draftWindow = moneyMapWindow(mapBackDraft, selectedRange)
-            const fmt = (iso: string) =>
-              new Date(iso + 'T00:00:00').toLocaleDateString(locale, { month: 'short', year: 'numeric' })
-            return (
-              <div className="px-5 pb-5 flex items-center gap-3" data-testid="money-map-slider">
-                <input
-                  type="range"
-                  min={-MONEY_MAP_MAX_MONTHS_BACK}
-                  max={0}
-                  step={1}
-                  value={-mapBackDraft}
-                  onChange={(e) => setMapBackDraft(-Number(e.target.value))}
-                  aria-label={t('reports.moneyMapSlider')}
-                  className="flex-1 accent-primary"
-                />
-                <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap min-w-[10rem] text-right">
-                  {draftWindow
-                    ? t('reports.moneyMapWindow', { from: fmt(draftWindow.start), to: fmt(draftWindow.end) })
-                    : t('reports.moneyMapNow')}
-                </span>
-              </div>
-            )
-          })()}
         </div>
       )}
 

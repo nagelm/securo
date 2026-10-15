@@ -307,7 +307,7 @@ it('the money map offers 2Y, 5Y and 10Y (fork)', async () => {
   await waitFor(() => expect(api.reports.incomeExpenses.mock.calls.at(-1)?.[0]).toBe(120))
 })
 
-it('the money map slider moves the selected window back in time (fork)', async () => {
+it('the money map scrubber sits above the diagram and moves the window back in time (fork)', async () => {
   const { user } = renderWithProviders(<ReportsPage />)
   await user.click(screen.getByRole('button', { name: t('reports.moneyMap') }))
   await waitFor(() => expect(api.reports.incomeExpenses).toHaveBeenCalled())
@@ -316,7 +316,10 @@ it('the money map slider moves the selected window back in time (fork)', async (
 
   // Today is 12 Sep 2026; the Money Map opens on 3M. Three months back is
   // the three months ending 30 Jun 2026.
-  fireEvent.change(slider, { target: { value: '-3' } })
+  fireEvent.keyDown(slider, { key: 'ArrowLeft' })
+  await user.click(screen.getByRole('button', { name: t('reports.moneyMapEarlier') }))
+  await user.click(screen.getByRole('button', { name: t('reports.moneyMapEarlier') }))
+  expect(slider).toHaveAttribute('aria-valuenow', '-3')
   await waitFor(() => expect(api.reports.incomeExpenses.mock.calls.at(-1)?.slice(-2)).toEqual([
     '2026-04-01', '2026-06-30',
   ]))

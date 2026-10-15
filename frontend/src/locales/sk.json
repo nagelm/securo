@@ -2406,7 +2406,9 @@
     "trendOpenDetail": "Show the {{name}} trend in detail",
     "moneyMapSlider": "Move the window back in time",
     "moneyMapWindow": "{{from}} – {{to}}",
-    "moneyMapNow": "Latest"
+    "moneyMapNow": "Latest",
+    "moneyMapEarlier": "One month earlier",
+    "moneyMapLater": "One month later"
   },
   "payees": {
     "noPayeeFound": "Príjemca sa nenašiel.",
