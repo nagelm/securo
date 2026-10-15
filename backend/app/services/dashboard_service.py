@@ -1,4 +1,6 @@
+import bisect
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
@@ -1490,6 +1492,108 @@ async def _account_balance_at(
             )
         )
         return float(result or 0)
+
+
+async def _account_balances_at(
+    session: AsyncSession,
+    accounts: list[Account],
+    cutoffs: list[date],
+    *,
+    convert_fn: Optional[Callable[..., Awaitable[tuple[Decimal, Decimal]]]] = None,
+) -> dict[uuid.UUID, dict[date, float]]:
+    """``_account_balance_at`` (posted view) for every account at every cutoff.
+
+    Fork: a multi-point net worth trend asked for each account's balance at
+    each point, one query each. This reads every account's posted and pending
+    sums per day in one grouped query and walks the cutoffs over them, with
+    the same rules: manual accounts sum posted rows up to the cutoff (capped
+    at today); connected accounts start from the provider balance (negated
+    for a card), return it as is from today on, take a linked-holdings
+    account's past from its holdings, and otherwise subtract the posted rows
+    after the cutoff and every pending row. Ignored rows and rows in ignored
+    categories never count; a row in another currency counts its
+    ``amount_primary``. Sums are exact decimals, as the SQL ones are.
+
+    ``convert_fn`` is passed to ``linked_holdings_values``.
+    """
+    today = app_today()
+    result: dict[uuid.UUID, dict[date, float]] = {account.id: {} for account in accounts}
+    if not accounts or not cutoffs:
+        return result
+    past = sorted({cutoff for cutoff in cutoffs if cutoff < today})
+
+    posted: dict[uuid.UUID, dict[date, Decimal]] = {}
+    pending: dict[uuid.UUID, Decimal] = {}
+    if any(not account.connection_id for account in accounts) or past:
+        effective = case(
+            # _signed_balance_expr with an empty account currency uses the amount.
+            (Account.currency == "", Transaction.amount),
+            (Transaction.currency == Account.currency, Transaction.amount),
+            else_=func.coalesce(Transaction.amount_primary, Transaction.amount),
+        )
+        signed = case((Transaction.type == "credit", effective), else_=-effective)
+        rows = await session.execute(
+            select(
+                Transaction.account_id, Transaction.date, Transaction.status,
+                func.sum(signed),
+            )
+            .join(Account, Transaction.account_id == Account.id)
+            .outerjoin(Category, Transaction.category_id == Category.id)
+            .where(
+                Transaction.account_id.in_([account.id for account in accounts]),
+                Transaction.date <= today,
+                Transaction.status.in_(("posted", "pending")),
+                Transaction.is_ignored == False,
+                or_(
+                    Transaction.category_id.is_(None),
+                    Category.is_ignored == False,
+                ),
+            )
+            .group_by(Transaction.account_id, Transaction.date, Transaction.status)
+        )
+        for account_id, day, status, total in rows.all():
+            amount = total if isinstance(total, Decimal) else Decimal(str(total or 0))
+            if status == "posted":
+                by_day = posted.setdefault(account_id, {})
+                by_day[day] = by_day.get(day, Decimal("0")) + amount
+            else:
+                pending[account_id] = pending.get(account_id, Decimal("0")) + amount
+
+    for account in accounts:
+        by_day = posted.get(account.id, {})
+        days = sorted(by_day)
+        running = Decimal("0")
+        prefix = [running]
+        for day in days:
+            running += by_day[day]
+            prefix.append(running)
+
+        def posted_upto(cutoff: date) -> Decimal:
+            return prefix[bisect.bisect_right(days, cutoff)]
+
+        balances = result[account.id]
+        if account.connection_id:
+            current_bal = float(account.balance)
+            if account.type == "credit_card":
+                current_bal = -current_bal
+            held = (
+                await linked_holdings_values(session, account, past, convert_fn=convert_fn)
+                if past else None
+            )
+            total_posted = posted_upto(today)
+            pending_delta = float(pending.get(account.id, Decimal("0")) or 0)
+            for cutoff in cutoffs:
+                if cutoff >= today:
+                    balances[cutoff] = current_bal
+                elif held is not None:
+                    balances[cutoff] = float(held[cutoff])
+                else:
+                    delta_after = total_posted - posted_upto(cutoff)
+                    balances[cutoff] = current_bal - float(delta_after or 0) - pending_delta
+        else:
+            for cutoff in cutoffs:
+                balances[cutoff] = float(posted_upto(min(cutoff, today)) or 0)
+    return result
 
 
 async def _total_balance_by_currency(

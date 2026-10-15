@@ -1,3 +1,4 @@
+import bisect
 import logging
 import uuid
 from datetime import date
@@ -223,6 +224,146 @@ async def convert(
     )
     converted = amount * rate
     return converted.quantize(Decimal("0.01")), rate
+
+
+class PreloadedRates:
+    """``convert`` for many dates from one load of the stored rates.
+
+    Fork: a multi-point report converts every item at every point; asking the
+    database for each (currency, date) made the net worth report's queries
+    grow with its points. This loads the stored USD rates of the currencies
+    asked for once and resolves each rate in memory the way
+    :func:`_resolve_rate` does (exact date, then the closest before, then the
+    closest after; USD is 1; no rate means the 1:1 fallback of
+    :func:`get_rate`), so every result equals ``convert``'s. Where
+    ``_resolve_rate`` would call the provider (an exact rate missing for today,
+    or for a past date with ``fx_fetch_history_on_demand``), it calls the real
+    :func:`get_rate` and then re-reads that date's stored rates, since the
+    provider call may have stored new ones.
+
+    For the length of one request: rates stored by anyone else meanwhile are
+    not seen.
+    """
+
+    def __init__(self, session: AsyncSession, currencies: Optional[set[str]] = None):
+        self._session = session
+        self._wanted: set[str] = {c for c in (currencies or set()) if c and c != "USD"}
+        self._loaded: Optional[set[str]] = None
+        self._dates: dict[str, list[date]] = {}
+        self._rates: dict[str, list[Decimal]] = {}
+        self._memo: dict[tuple[str, str, date], Decimal] = {}
+
+    async def _ensure(self, *currencies: str) -> None:
+        missing = {c for c in currencies if c and c != "USD"} - (self._loaded or set())
+        if self._loaded is not None and not missing:
+            return
+        self._wanted |= missing
+        rows = await self._session.execute(
+            select(FxRate.quote_currency, FxRate.date, FxRate.rate)
+            .where(FxRate.base_currency == "USD", FxRate.quote_currency.in_(self._wanted))
+            .order_by(FxRate.quote_currency, FxRate.date)
+        )
+        self._dates = {c: [] for c in self._wanted}
+        self._rates = {c: [] for c in self._wanted}
+        for quote, day, rate in rows.all():
+            self._dates[quote].append(day)
+            self._rates[quote].append(rate)
+        self._loaded = set(self._wanted)
+
+    async def _reload_date(self, day: date) -> None:
+        rows = await self._session.execute(
+            select(FxRate.quote_currency, FxRate.rate).where(
+                FxRate.base_currency == "USD",
+                FxRate.quote_currency.in_(self._wanted),
+                FxRate.date == day,
+            )
+        )
+        for quote, rate in rows.all():
+            dates, rates = self._dates[quote], self._rates[quote]
+            i = bisect.bisect_left(dates, day)
+            if i < len(dates) and dates[i] == day:
+                rates[i] = rate
+            else:
+                dates.insert(i, day)
+                rates.insert(i, rate)
+
+    def _exact(self, currency: str, day: date) -> Optional[Decimal]:
+        if currency == "USD":
+            return Decimal("1")
+        dates = self._dates[currency]
+        i = bisect.bisect_left(dates, day)
+        if i < len(dates) and dates[i] == day:
+            return self._rates[currency][i]
+        return None
+
+    def _closest(self, currency: str, day: date) -> Optional[Decimal]:
+        if currency == "USD":
+            return Decimal("1")
+        dates = self._dates[currency]
+        i = bisect.bisect_right(dates, day)
+        if i > 0:
+            return self._rates[currency][i - 1]
+        if i < len(dates):
+            return self._rates[currency][i]
+        return None
+
+    async def get_rate(
+        self, from_currency: str, to_currency: str, target_date: Optional[date] = None
+    ) -> Decimal:
+        """What :func:`get_rate` returns for these arguments."""
+        if from_currency == to_currency:
+            return Decimal("1")
+        today = app_today()
+        target = min(target_date or today, today)
+        key = (from_currency, to_currency, target)
+        if key in self._memo:
+            return self._memo[key]
+        await self._ensure(from_currency, to_currency)
+
+        usd_to_source = self._exact(from_currency, target)
+        usd_to_target = self._exact(to_currency, target)
+        fetch_allowed = target == today or get_settings().fx_fetch_history_on_demand
+        if fetch_allowed and (usd_to_source is None or usd_to_target is None):
+            rate = await get_rate(self._session, from_currency, to_currency, target_date)
+            # The provider call may have stored rates for that date, which
+            # can change every answer that resolves through it.
+            await self._reload_date(target)
+            self._memo.clear()
+            return rate
+
+        if usd_to_source is None:
+            usd_to_source = self._closest(from_currency, target)
+        if usd_to_target is None:
+            usd_to_target = self._closest(to_currency, target)
+        if from_currency == "USD":
+            usd_to_source = Decimal("1")
+        if to_currency == "USD":
+            usd_to_target = Decimal("1")
+
+        if usd_to_source is None or usd_to_target is None or usd_to_source == 0:
+            logger.warning(
+                "No FX rate found for %s -> %s on %s, returning 1",
+                from_currency, to_currency, target_date or today,
+            )
+            rate = Decimal("1")
+        else:
+            rate = usd_to_target / usd_to_source
+        self._memo[key] = rate
+        return rate
+
+    async def convert(
+        self,
+        amount: Decimal,
+        from_currency: str,
+        to_currency: str,
+        target_date: Optional[date] = None,
+    ) -> tuple[Decimal, Decimal]:
+        """What :func:`convert` returns for these arguments."""
+        if from_currency == to_currency:
+            return amount, Decimal("1")
+        rate = await self.get_rate(from_currency, to_currency, target_date)
+        converted = amount * rate
+        return converted.quantize(Decimal("0.01")), rate
 
 
 async def stamp_primary_amount(

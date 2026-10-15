@@ -2,7 +2,7 @@ import logging
 import uuid
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
-from typing import Any, Optional, cast
+from typing import Any, Awaitable, Callable, Optional, cast
 
 from fastapi import HTTPException, status
 from sqlalchemy import exists, or_, select, func, desc, update
@@ -1184,7 +1184,8 @@ def counted_in_net_worth():
 
 
 async def linked_holdings_values(
-    session: AsyncSession, account: Account, dates: list[date]
+    session: AsyncSession, account: Account, dates: list[date],
+    *, convert_fn: Optional[Callable[..., Awaitable[tuple[Decimal, Decimal]]]] = None,
 ) -> Optional[dict[date, Decimal]]:
     """What the holdings an account's balance carries were worth on each date.
 
@@ -1194,6 +1195,9 @@ async def linked_holdings_values(
     history; the holdings use the same filters and fill-forward as
     ``get_asset_values_at``, so a past net worth is what it was while the
     holdings were counted themselves.
+
+    ``convert_fn(amount, from, to, date)`` stands in for ``convert`` (e.g. a
+    request's ``PreloadedRates.convert``) and must return what it would.
     """
     if account.connection_id is None or not account.external_id or not dates:
         return None
@@ -1221,7 +1225,12 @@ async def linked_holdings_values(
                 continue
             amount = Decimal(str(native))
             if asset.currency != account.currency:
-                amount, _ = await convert(session, amount, asset.currency, account.currency, day)
+                if convert_fn is not None:
+                    amount, _ = await convert_fn(amount, asset.currency, account.currency, day)
+                else:
+                    amount, _ = await convert(
+                        session, amount, asset.currency, account.currency, day
+                    )
             total += amount
         result[day] = total
     return result

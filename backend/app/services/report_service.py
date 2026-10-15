@@ -1,3 +1,4 @@
+import bisect
 import calendar
 import uuid
 from datetime import date, timedelta
@@ -25,7 +26,7 @@ from app.services._query_filters import (
 from app.services.admin_service import get_credit_card_accounting_mode
 from app.services.account_service import get_account_name
 from app.services.asset_service import counted_in_net_worth
-from app.services.fx_rate_service import convert
+from app.services.fx_rate_service import PreloadedRates, convert
 from app.schemas.report import (
     CategoryTrendItem,
     ReportBreakdown,
@@ -37,7 +38,7 @@ from app.schemas.report import (
 )
 from app.services import invoice_forecast_service
 from app.services.dashboard_service import (
-    _account_balance_at,
+    _account_balances_at,
     _counts_as_user_pnl_row,
     _get_forecast_transactions,
     _get_open_accounts,
@@ -148,51 +149,33 @@ async def _net_worth_at(
     account list for this workspace/filter pass it in, instead of re-querying
     it for every snapshot in a multi-point trend. Omit it to fetch as before.
     """
+    points = await _net_worth_series(
+        session, workspace_id, [cutoff], primary_currency, account_ids, asset_group_ids,
+        accounts=accounts,
+    )
+    return points[0]
+
+
+async def _net_worth_series(
+    session: AsyncSession, workspace_id: uuid.UUID, cutoffs: list[date],
+    primary_currency: str = "USD",
+    account_ids: Optional[list[uuid.UUID]] = None,
+    asset_group_ids: Optional[list[uuid.UUID]] = None,
+    accounts: Optional[list[Account]] = None,
+) -> list[ReportDataPoint]:
+    """Net worth snapshots at each cutoff, in order (see ``_net_worth_at``).
+
+    Fork: one snapshot per point used to cost a balance query per account, a
+    value query per asset and an FX lookup per item (about 100 queries a
+    point). This reads each table once for all the cutoffs (the accounts'
+    daily sums, the assets' value rows, the stored FX rates) and builds every
+    snapshot in memory with the same rules, so the query count does not grow
+    with the number of points.
+    """
     if accounts is None:
         accounts = await _get_open_accounts(session, workspace_id, account_ids)
 
-    accounts_total = 0.0
-    assets_total = 0.0
-    liabilities_total = 0.0
-    composition: list[ReportCompositionItem] = []
-
-    for account in accounts:
-        bal = await _account_balance_at(session, account, cutoff)
-        converted, _ = await convert(
-            session, Decimal(str(abs(bal))), account.currency, primary_currency, cutoff
-        )
-        converted_val = float(converted)
-        # Fork: a loan is a liability even when it is fully repaid or undrawn
-        # (a revolving facility at $0), and is listed with the liabilities.
-        is_debt_account = account.type in ("credit_card", "loan")
-        if is_debt_account or bal < 0:
-            liabilities_total += converted_val
-            if converted_val > 0 or is_debt_account:
-                composition.append(ReportCompositionItem(
-                    key=str(account.id),
-                    label=get_account_name(account),
-                    value=round(converted_val, 2),
-                    color=_ACCOUNT_TYPE_COLORS.get(account.type, "#6B7280"),
-                    group="liabilities",
-                ))
-        else:
-            # Fork: an investment account's value is its holdings, so it sits
-            # with the assets; Accounts is the cash in hand.
-            is_investment = account.type == "investment"
-            if is_investment:
-                assets_total += converted_val
-            else:
-                accounts_total += converted_val
-            if converted_val > 0:
-                composition.append(ReportCompositionItem(
-                    key=str(account.id),
-                    label=get_account_name(account),
-                    value=round(converted_val, 2),
-                    color=_ACCOUNT_TYPE_COLORS.get(account.type, "#6B7280"),
-                    group="assets" if is_investment else "accounts",
-                ))
-
-    # Per-asset composition at the cutoff date
+    # Per-asset composition: the assets net worth counts.
     filtered = account_ids is not None
     asset_stmt = select(Asset).where(
         Asset.workspace_id == workspace_id,
@@ -203,49 +186,111 @@ async def _net_worth_at(
         asset_stmt = asset_stmt.where(Asset.group_id.in_(asset_group_ids or []))
     # A holding an open account's balance already carries is counted there.
     asset_stmt = asset_stmt.where(counted_in_net_worth())
-    asset_result = await session.execute(asset_stmt)
-    for asset in asset_result.scalars().all():
-        val_result = await session.execute(
-            select(AssetValue.amount)
-            .where(AssetValue.asset_id == asset.id, AssetValue.date <= cutoff)
-            .order_by(desc(AssetValue.date), desc(AssetValue.id))
-            .limit(1)
+    assets = list((await session.execute(asset_stmt)).scalars().all())
+
+    # Each asset's value rows, oldest first; the value at a cutoff is the
+    # last row on or before it (latest date, then highest id).
+    value_dates: dict[uuid.UUID, list[date]] = {asset.id: [] for asset in assets}
+    value_amounts: dict[uuid.UUID, list[Decimal]] = {asset.id: [] for asset in assets}
+    if assets:
+        value_rows = await session.execute(
+            select(AssetValue.asset_id, AssetValue.date, AssetValue.amount)
+            .where(AssetValue.asset_id.in_([asset.id for asset in assets]))
+            .order_by(AssetValue.asset_id, AssetValue.date, AssetValue.id)
         )
-        val = val_result.scalar_one_or_none()
-        if val is not None:
-            amount = float(val)
-        elif asset.purchase_price is not None and (
-            asset.purchase_date is None or asset.purchase_date <= cutoff
-        ):
-            amount = float(asset.purchase_price)
-        else:
-            amount = 0.0
-        if amount > 0:
-            converted, _ = await convert(
-                session, Decimal(str(amount)), asset.currency, primary_currency, cutoff
-            )
-            converted_val = round(float(converted), 2)
-            assets_total += converted_val
-            composition.append(ReportCompositionItem(
-                key=str(asset.id),
-                label=asset.name,
-                value=converted_val,
-                color=_ASSET_TYPE_COLORS.get(asset.type, "#6B7280"),
-                group="assets",
-            ))
+        for asset_id, day, amount in value_rows.all():
+            value_dates[asset_id].append(day)
+            value_amounts[asset_id].append(amount)
 
-    net_worth = accounts_total + assets_total - liabilities_total
-
-    return ReportDataPoint(
-        date=cutoff.isoformat(),
-        value=round(net_worth, 2),
-        breakdowns={
-            "accounts": round(accounts_total, 2),
-            "assets": round(assets_total, 2),
-            "liabilities": round(liabilities_total, 2),
-        },
-        composition=composition,
+    rates = PreloadedRates(
+        session,
+        {primary_currency}
+        | {account.currency for account in accounts}
+        | {asset.currency for asset in assets},
     )
+    balances = await _account_balances_at(
+        session, accounts, cutoffs, convert_fn=rates.convert
+    )
+
+    snapshots: list[ReportDataPoint] = []
+    for cutoff in cutoffs:
+        accounts_total = 0.0
+        assets_total = 0.0
+        liabilities_total = 0.0
+        composition: list[ReportCompositionItem] = []
+
+        for account in accounts:
+            bal = balances[account.id][cutoff]
+            converted, _ = await rates.convert(
+                Decimal(str(abs(bal))), account.currency, primary_currency, cutoff
+            )
+            converted_val = float(converted)
+            # Fork: a loan is a liability even when it is fully repaid or undrawn
+            # (a revolving facility at $0), and is listed with the liabilities.
+            is_debt_account = account.type in ("credit_card", "loan")
+            if is_debt_account or bal < 0:
+                liabilities_total += converted_val
+                if converted_val > 0 or is_debt_account:
+                    composition.append(ReportCompositionItem(
+                        key=str(account.id),
+                        label=get_account_name(account),
+                        value=round(converted_val, 2),
+                        color=_ACCOUNT_TYPE_COLORS.get(account.type, "#6B7280"),
+                        group="liabilities",
+                    ))
+            else:
+                # Fork: an investment account's value is its holdings, so it sits
+                # with the assets; Accounts is the cash in hand.
+                is_investment = account.type == "investment"
+                if is_investment:
+                    assets_total += converted_val
+                else:
+                    accounts_total += converted_val
+                if converted_val > 0:
+                    composition.append(ReportCompositionItem(
+                        key=str(account.id),
+                        label=get_account_name(account),
+                        value=round(converted_val, 2),
+                        color=_ACCOUNT_TYPE_COLORS.get(account.type, "#6B7280"),
+                        group="assets" if is_investment else "accounts",
+                    ))
+
+        for asset in assets:
+            i = bisect.bisect_right(value_dates[asset.id], cutoff)
+            if i:
+                amount = float(value_amounts[asset.id][i - 1])
+            elif asset.purchase_price is not None and (
+                asset.purchase_date is None or asset.purchase_date <= cutoff
+            ):
+                amount = float(asset.purchase_price)
+            else:
+                amount = 0.0
+            if amount > 0:
+                converted, _ = await rates.convert(
+                    Decimal(str(amount)), asset.currency, primary_currency, cutoff
+                )
+                converted_val = round(float(converted), 2)
+                assets_total += converted_val
+                composition.append(ReportCompositionItem(
+                    key=str(asset.id),
+                    label=asset.name,
+                    value=converted_val,
+                    color=_ASSET_TYPE_COLORS.get(asset.type, "#6B7280"),
+                    group="assets",
+                ))
+
+        net_worth = accounts_total + assets_total - liabilities_total
+        snapshots.append(ReportDataPoint(
+            date=cutoff.isoformat(),
+            value=round(net_worth, 2),
+            breakdowns={
+                "accounts": round(accounts_total, 2),
+                "assets": round(assets_total, 2),
+                "liabilities": round(liabilities_total, 2),
+            },
+            composition=composition,
+        ))
+    return snapshots
 
 
 def _format_date_label(d: date, interval: str) -> str:
@@ -342,13 +387,20 @@ async def get_net_worth_report(
     # date, so every point below reuses it instead of re-querying it.
     accounts = await _get_open_accounts(session, workspace_id, account_ids)
 
+    # The first trend point's *actual* cutoff (`points[0]`, before its `.date`
+    # is overwritten with a formatted label) equals `start` for every
+    # interval except monthly, which snaps to month-end. Only reuse it then —
+    # an approximate match would silently swap in the wrong day's snapshot.
+    # Otherwise the baseline at `start` is computed along with the points.
+    separate_baseline = not (points and points[0] == start)
+    snapshots = await _net_worth_series(
+        session, workspace_id, points + ([start] if separate_baseline else []),
+        primary_currency, account_ids, asset_group_ids, accounts=accounts,
+    )
+
     # Compute snapshot at each date point
     trend: list[ReportDataPoint] = []
-    for point in points:
-        dp = await _net_worth_at(
-            session, workspace_id, point, primary_currency, account_ids, asset_group_ids,
-            accounts=accounts,
-        )
+    for point, dp in zip(points, snapshots):
         dp.date = _format_date_label(point, interval)
         dp.change = round(dp.value - trend[-1].value, 2) if trend else None
         trend.append(dp)
@@ -357,17 +409,7 @@ async def get_net_worth_report(
     current = trend[-1] if trend else ReportDataPoint(
         date="", value=0, breakdowns={"accounts": 0, "assets": 0, "liabilities": 0}
     )
-    # The first trend point's *actual* cutoff (`points[0]`, before its `.date`
-    # was overwritten with a formatted label) equals `start` for every
-    # interval except monthly, which snaps to month-end. Only reuse it then —
-    # an approximate match would silently swap in the wrong day's snapshot.
-    if trend and points[0] == start:
-        baseline = trend[0]
-    else:
-        baseline = await _net_worth_at(
-            session, workspace_id, start, primary_currency, account_ids, asset_group_ids,
-            accounts=accounts,
-        )
+    baseline = snapshots[-1] if separate_baseline else trend[0]
     previous = baseline if trend else current
 
     change_amount = current.value - previous.value
