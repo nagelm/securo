@@ -6,6 +6,7 @@ interface SwitchProps {
   disabled?: boolean
   id?: string
   'aria-labelledby'?: string
+  'aria-label'?: string
   className?: string
 }
 
@@ -24,6 +25,7 @@ export function Switch({
       id={id}
       aria-checked={checked}
       aria-labelledby={rest['aria-labelledby']}
+      aria-label={rest['aria-label']}
       disabled={disabled}
       onClick={() => onCheckedChange(!checked)}
       className={cn(

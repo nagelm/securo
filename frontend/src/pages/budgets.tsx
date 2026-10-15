@@ -8,6 +8,7 @@ import {
   categoryGroups as groupsApi,
   budgets as budgetsApi,
   budgetGroups as budgetGroupsApi,
+  forecast as forecastApi,
 } from '@/lib/api'
 import { extractApiError } from '@/lib/api-errors'
 import { toast } from 'sonner'
@@ -15,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { DeleteConfirmationDialog } from '@/components/delete-confirmation-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import {
   Dialog,
   DialogContent,
@@ -22,8 +24,8 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import type { Budget, BudgetGroup, BudgetGroupVsActual, Category, CategoryGroup } from '@/types'
-import { Pencil, Trash2, Plus, Repeat, CalendarIcon } from 'lucide-react'
+import type { Budget, BudgetGroup, BudgetGroupVsActual, Category, CategoryGroup, ForecastBudgetChoices } from '@/types'
+import { Pencil, Trash2, Plus, Repeat, CalendarIcon, Layers } from 'lucide-react'
 import { format } from 'date-fns'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { MonthPicker } from '@/components/ui/monthpicker'
@@ -35,6 +37,7 @@ import { useWorkspace } from '@/contexts/workspace-context'
 import { resolveDateFnsLocale } from '@/lib/date-fns-locale'
 import { findCategoryReference } from '@/lib/category-reference-utils'
 import { formatCurrency } from '@/lib/format'
+import { cn } from '@/lib/utils'
 
 function currentMonth() {
   const now = new Date()
@@ -42,12 +45,11 @@ function currentMonth() {
 }
 
 const TH = 'text-xs font-medium text-muted-foreground py-3'
-const selectClass = 'w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary'
 
-// Fork: an end month travels as the first day of the month; the form's
-// month input speaks yyyy-MM.
+// Fork: an end month travels as the first day of the month; the form keeps
+// yyyy-MM ('' = no end).
 const toMonthInput = (iso: string | null | undefined) => (iso ? iso.slice(0, 7) : '')
-const fromMonthInput = (value: FormDataEntryValue | null) => (value ? `${value as string}-01` : null)
+const fromMonthInput = (value: string) => (value ? `${value}-01` : null)
 
 function SectionCard({ children }: { children: React.ReactNode }) {
   return (
@@ -56,22 +58,252 @@ function SectionCard({ children }: { children: React.ReactNode }) {
     </div>
   )
 }
-function SectionHeader({ title, action }: { title: string; action?: React.ReactNode }) {
+function SectionHeader({ title, hint, action }: { title: string; hint?: string; action?: React.ReactNode }) {
   return (
     <div className="px-4 sm:px-5 py-4 border-b border-border flex flex-wrap items-center justify-between gap-2">
-      <p className="text-sm font-semibold text-foreground">{title}</p>
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-foreground">{title}</p>
+        {hint && <p className="text-xs text-muted-foreground mt-0.5">{hint}</p>}
+      </div>
       {action}
     </div>
   )
 }
 
-export default function BudgetsPage() {
+/**
+ * Fork: a month picker for an optional "until" month. The app's own month
+ * grid in a popover, not a native month input: Firefox and Safari show
+ * that as free text (a typed "March 2027" saved as "March 2027-01"), and
+ * Chrome reports a half-edited one as empty, which saved as "no end".
+ */
+function MonthField({
+  id,
+  value,
+  onChange,
+  min,
+}: {
+  id: string
+  value: string
+  onChange: (value: string) => void
+  min?: string
+}) {
+  const { t, i18n } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const uiLocale = i18n.resolvedLanguage ?? i18n.language
+  const dateFnsLocale = resolveDateFnsLocale(uiLocale)
+  return (
+    <div className="flex items-center gap-2">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            id={id}
+            type="button"
+            className={cn(
+              'flex-1 inline-flex items-center gap-2 border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground hover:bg-muted/50 transition-colors cursor-pointer',
+              !value && 'text-muted-foreground',
+            )}
+          >
+            <CalendarIcon className="size-3.5 text-muted-foreground shrink-0" />
+            {value ? monthLabel(value, uiLocale) : t('budgets.noEnd')}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-auto p-0">
+          <MonthPicker
+            locale={dateFnsLocale}
+            selectedMonth={value ? new Date(`${value}-01T00:00:00`) : undefined}
+            minDate={min ? new Date(`${min}-01T00:00:00`) : undefined}
+            onMonthSelect={(date) => {
+              onChange(format(date, 'yyyy-MM'))
+              setOpen(false)
+            }}
+          />
+        </PopoverContent>
+      </Popover>
+      {value && (
+        <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => onChange('')}>
+          {t('budgets.clearEnd')}
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/** Fork: spending against a limit, drawn as the dashboard draws a category's budget. */
+function SpentBar({ spent, limit, pct, label }: { spent: number; limit: number; pct: number | null; label: string }) {
+  const { t } = useTranslation()
+  const { mask } = usePrivacyMode()
+  const locale = useDisplayLocale()
+  const { user } = useAuth()
+  const currency = user?.preferences?.currency_display ?? 'USD'
+  const used = pct ?? (limit > 0 ? (spent / limit) * 100 : 0)
+  const barColor = used > 100 ? 'bg-rose-500' : used >= 80 ? 'bg-amber-400' : 'bg-emerald-500'
+  const textColor = used > 100 ? 'text-rose-500' : used >= 80 ? 'text-amber-500' : 'text-muted-foreground'
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <div
+        className="flex-1 h-1.5 bg-muted/60 rounded-full overflow-hidden"
+        role="progressbar"
+        aria-label={label}
+        aria-valuenow={Math.round(used)}
+      >
+        <div className={cn('h-full rounded-full transition-all', barColor)} style={{ width: `${Math.min(used, 100)}%` }} />
+      </div>
+      <span className={cn('text-[11px] tabular-nums font-medium shrink-0', textColor)}>
+        {mask(t('budgets.spentOf', {
+          spent: formatCurrency(spent, currency, locale),
+          cap: formatCurrency(limit, currency, locale),
+        }))}
+      </span>
+    </div>
+  )
+}
+
+/** Fork: one row of the Budgets or the Budget groups table; both draw alike. */
+function BudgetRow({
+  testId,
+  icon,
+  name,
+  extra,
+  isRecurring,
+  endMonth,
+  spent,
+  limit,
+  pct,
+  inForecast,
+  onForecastChange,
+  forecastDisabled,
+  onEdit,
+  onDelete,
+}: {
+  testId: string
+  icon: React.ReactNode
+  name: string
+  extra?: React.ReactNode
+  isRecurring: boolean
+  endMonth: string | null | undefined
+  spent: number
+  limit: number
+  pct: number | null
+  inForecast: boolean
+  onForecastChange: (on: boolean) => void
+  forecastDisabled: boolean
+  onEdit: () => void
+  onDelete: () => void
+}) {
   const { t, i18n } = useTranslation()
   const { mask } = usePrivacyMode()
+  const locale = useDisplayLocale()
   const { user } = useAuth()
   const { canWrite } = useWorkspace()
-  const userCurrency = user?.preferences?.currency_display ?? 'USD'
-  const locale = useDisplayLocale()
+  const currency = user?.preferences?.currency_display ?? 'USD'
+  const uiLocale = i18n.resolvedLanguage ?? i18n.language
+  const bar = <SpentBar spent={spent} limit={limit} pct={pct} label={name} />
+  return (
+    <tr className="border-b border-border last:border-0 hover:bg-muted transition-colors" data-testid={testId}>
+      <td className="py-3 pl-4 sm:pl-5 pr-2 text-sm font-medium text-foreground w-full max-w-0">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+          {icon}
+          <span className="truncate min-w-0">{name}</span>
+          {isRecurring && (
+            <span title={t('budgets.recurringLabel')} className="text-muted-foreground shrink-0">
+              <Repeat size={12} />
+            </span>
+          )}
+          {endMonth && (
+            <span
+              className="shrink-0 text-[11px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full"
+              data-testid="budget-until"
+            >
+              {t('budgets.untilLabel', { month: monthLabel(toMonthInput(endMonth), uiLocale) })}
+            </span>
+          )}
+          {extra}
+        </div>
+        {/* Narrow screens: the progress sits under the name. */}
+        <div className="mt-1.5 sm:hidden">{bar}</div>
+      </td>
+      <td className="py-3 pr-4 hidden sm:table-cell">{bar}</td>
+      <td className="py-3 text-sm font-semibold tabular-nums text-foreground">{mask(formatCurrency(limit, currency, locale))}</td>
+      <td className="py-3 text-center">
+        <Switch
+          checked={inForecast}
+          onCheckedChange={onForecastChange}
+          disabled={!canWrite || forecastDisabled}
+          aria-label={t('budgets.includeInForecastFor', { name })}
+          className="align-middle"
+        />
+      </td>
+      {canWrite && (
+        <td className="py-3 pr-4 sm:pr-5">
+          <div className="flex items-center justify-end gap-1">
+            <button
+              className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
+              onClick={onEdit}
+              aria-label={t('common.edit')}
+              title={t('common.edit')}
+            >
+              <Pencil size={13} />
+            </button>
+            <button
+              className="p-1.5 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-rose-50 transition-colors"
+              onClick={onDelete}
+              aria-label={t('common.delete')}
+              title={t('common.delete')}
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        </td>
+      )}
+    </tr>
+  )
+}
+
+function BudgetTableHead({ nameLabel, limitLabel }: { nameLabel: string; limitLabel: string }) {
+  const { t } = useTranslation()
+  const { canWrite } = useWorkspace()
+  return (
+    <thead>
+      <tr className="border-b border-border">
+        <th className={`${TH} pl-4 sm:pl-5 text-left`}>{nameLabel}</th>
+        <th className={`${TH} text-left w-56 hidden sm:table-cell`}>{t('budgets.spent')}</th>
+        <th className={`${TH} text-left w-24 sm:w-28`}>{limitLabel}</th>
+        <th className={`${TH} text-center w-20 sm:w-24`} title={t('budgets.forecastHint')}>{t('budgets.inForecast')}</th>
+        {canWrite && <th className={`${TH} pr-4 sm:pr-5 text-right w-20 sm:w-24`}>{t('budgets.actions')}</th>}
+      </tr>
+    </thead>
+  )
+}
+
+/** Fork: which budgets the Forecast follows (Include in forecast). */
+function useForecastChoices() {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const { data: choices } = useQuery({ queryKey: ['forecast-budget-choices'], queryFn: forecastApi.budgetChoices.get })
+  const saveMutation = useMutation({
+    mutationFn: (next: ForecastBudgetChoices) => forecastApi.budgetChoices.set(next),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(['forecast-budget-choices'], saved)
+      queryClient.invalidateQueries({ queryKey: ['forecast'] })
+    },
+    onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
+  })
+  const current = { category_ids: choices?.category_ids ?? [], budget_group_ids: choices?.budget_group_ids ?? [] }
+  const toggle = (list: string[], id: string, on: boolean) => (on ? [...new Set([...list, id])] : list.filter((x) => x !== id))
+  return {
+    pending: saveMutation.isPending || !choices,
+    hasCategory: (id: string) => current.category_ids.includes(id),
+    hasGroup: (id: string) => current.budget_group_ids.includes(id),
+    setCategory: (id: string, on: boolean) =>
+      saveMutation.mutate({ ...current, category_ids: toggle(current.category_ids, id, on) }),
+    setGroup: (id: string, on: boolean) =>
+      saveMutation.mutate({ ...current, budget_group_ids: toggle(current.budget_group_ids, id, on) }),
+  }
+}
+
+export default function BudgetsPage() {
+  const { t, i18n } = useTranslation()
+  const { canWrite } = useWorkspace()
   const queryClient = useQueryClient()
   const [selectedMonth, setSelectedMonth] = useState(currentMonth)
   const [monthCalOpen, setMonthCalOpen] = useState(false)
@@ -81,11 +313,22 @@ export default function BudgetsPage() {
   const [editing, setEditing] = useState<Budget | null>(null)
   const [deletingBudget, setDeletingBudget] = useState<Budget | null>(null)
   const [newRecurring, setNewRecurring] = useState(false)
+  const [endMonth, setEndMonth] = useState('')
+  const forecastChoices = useForecastChoices()
 
   const { data: budgetsList } = useQuery({
     queryKey: ['budgets', selectedMonth],
     queryFn: () => budgetsApi.list(monthParam),
   })
+  // Fork: each budget's spending this month (the dashboard's figures).
+  const { data: comparison } = useQuery({
+    queryKey: ['budgets', 'comparison', monthParam],
+    queryFn: () => budgetsApi.comparison(monthParam),
+  })
+  const spendingByCategory = useMemo(
+    () => new Map((comparison ?? []).map((c) => [c.category_id, c])),
+    [comparison],
+  )
 
   const { data: categoriesList } = useQuery({
     queryKey: ['categories'],
@@ -104,6 +347,13 @@ export default function BudgetsPage() {
     queryFn: groupsApi.list,
   })
 
+  // Fork: a budget's months feed the Forecast too.
+  const invalidateBudgets = () => {
+    queryClient.invalidateQueries({ queryKey: ['budgets'] })
+    queryClient.invalidateQueries({ queryKey: ['forecast'] })
+  }
+  const closeDialog = () => { setDialogOpen(false); setEditing(null) }
+
   const createMutation = useMutation({
     mutationFn: (data: {
       category_id: string
@@ -113,7 +363,7 @@ export default function BudgetsPage() {
       end_month?: string | null
     }) => budgetsApi.create(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['budgets'] })
+      invalidateBudgets()
       setDialogOpen(false)
       toast.success(t('budgets.created'))
     },
@@ -121,12 +371,15 @@ export default function BudgetsPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, ...changes }: { id: string; amount: number; end_month?: string | null }) =>
-      budgetsApi.update(id, changes),
+    mutationFn: ({ id, ...changes }: {
+      id: string
+      amount: number
+      end_month?: string | null
+      effective_month?: string
+    }) => budgetsApi.update(id, changes),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['budgets'] })
-      setDialogOpen(false)
-      setEditing(null)
+      invalidateBudgets()
+      closeDialog()
       toast.success(t('budgets.updated'))
     },
     onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
@@ -135,7 +388,7 @@ export default function BudgetsPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => budgetsApi.delete(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['budgets'] })
+      invalidateBudgets()
       setDeletingBudget(null)
       toast.success(t('budgets.deleted'))
     },
@@ -145,17 +398,6 @@ export default function BudgetsPage() {
   })
 
   const displayCategories = allCategoriesList ?? categoriesList ?? []
-
-  const getCategoryDisplay = (categoryId: string) => {
-    const category = findCategoryReference(displayCategories, categoryId)
-    if (!category) return <span>{categoryId}</span>
-    return (
-      <span className="flex items-center gap-2">
-        <CategoryIcon icon={category.icon} color={category.color} size="sm" />
-        <span>{category.name}</span>
-      </span>
-    )
-  }
 
   const uiLocale = i18n.resolvedLanguage ?? i18n.language
   const monthTitle = monthLabel(selectedMonth, uiLocale).replace(/^\w/, c => c.toUpperCase())
@@ -214,7 +456,11 @@ export default function BudgetsPage() {
           title={t('budgets.title')}
           action={
             canWrite ? (
-              <Button size="sm" className="gap-1.5 h-8" onClick={() => { setEditing(null); setNewRecurring(false); setDialogOpen(true) }}>
+              <Button
+                size="sm"
+                className="gap-1.5 h-8"
+                onClick={() => { setEditing(null); setNewRecurring(false); setEndMonth(''); setDialogOpen(true) }}
+              >
                 <Plus size={13} /> {t('budgets.add')}
               </Button>
             ) : undefined
@@ -222,57 +468,34 @@ export default function BudgetsPage() {
         />
         {budgetsList && budgetsList.length > 0 ? (
           <table className="w-full">
-            <thead>
-              <tr className="border-b border-border">
-                <th className={`${TH} pl-4 sm:pl-5 text-left`}>{t('budgets.category')}</th>
-                <th className={`${TH} text-left w-36`}>{t('budgets.amount')}</th>
-                {canWrite && <th className={`${TH} pr-4 sm:pr-5 text-right w-24`}>{t('budgets.actions')}</th>}
-              </tr>
-            </thead>
+            <BudgetTableHead nameLabel={t('budgets.category')} limitLabel={t('budgets.amount')} />
             <tbody>
-              {budgetsList.map((budget) => (
-                <tr key={budget.id} className="border-b border-border last:border-0 hover:bg-muted transition-colors">
-                  <td className="py-3 pl-4 sm:pl-5 text-sm font-medium text-foreground">
-                    <span className="flex items-center gap-1.5">
-                      {getCategoryDisplay(budget.category_id)}
-                      {budget.is_recurring && (
-                        <span title={t('budgets.recurringLabel')} className="text-muted-foreground">
-                          <Repeat size={12} />
-                        </span>
-                      )}
-                      {budget.end_month && (
-                        <span className="text-xs font-normal text-muted-foreground" data-testid="budget-until">
-                          {t('budgets.untilLabel', { month: monthLabel(toMonthInput(budget.end_month), uiLocale) })}
-                        </span>
-                      )}
-                    </span>
-                  </td>
-                  <td className="py-3 text-sm font-semibold tabular-nums text-foreground">{mask(formatCurrency(budget.amount, userCurrency, locale))}</td>
-                  {canWrite && (
-                    <td className="py-3 pr-4 sm:pr-5">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
-                          onClick={() => { setEditing(budget); setDialogOpen(true) }}
-                          aria-label={t('common.edit')}
-                          title={t('common.edit')}
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          className="p-1.5 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-rose-50 transition-colors"
-                          onClick={() => setDeletingBudget(budget)}
-                          disabled={deleteMutation.isPending}
-                          aria-label={t('common.delete')}
-                          title={t('common.delete')}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              ))}
+              {budgetsList.map((budget) => {
+                const category = findCategoryReference(displayCategories, budget.category_id)
+                const spending = spendingByCategory.get(budget.category_id)
+                return (
+                  <BudgetRow
+                    key={budget.id}
+                    testId="budget-row"
+                    icon={<CategoryIcon icon={category?.icon} color={category?.color} size="sm" />}
+                    name={category?.name ?? budget.category_id}
+                    isRecurring={budget.is_recurring}
+                    endMonth={budget.end_month}
+                    spent={Number(spending?.projected_amount ?? 0)}
+                    limit={Number(budget.amount)}
+                    pct={spending?.percentage_used ?? null}
+                    inForecast={forecastChoices.hasCategory(budget.category_id)}
+                    onForecastChange={(on) => forecastChoices.setCategory(budget.category_id, on)}
+                    forecastDisabled={forecastChoices.pending}
+                    onEdit={() => {
+                      setEditing(budget)
+                      setEndMonth(toMonthInput(budget.end_month))
+                      setDialogOpen(true)
+                    }}
+                    onDelete={() => setDeletingBudget(budget)}
+                  />
+                )
+              })}
             </tbody>
           </table>
         ) : (
@@ -280,7 +503,7 @@ export default function BudgetsPage() {
         )}
       </SectionCard>
 
-      <Dialog open={dialogOpen} onOpenChange={() => { setDialogOpen(false); setEditing(null) }}>
+      <Dialog open={dialogOpen} onOpenChange={closeDialog}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{editing ? t('budgets.edit') : t('budgets.add')}</DialogTitle>
@@ -290,20 +513,25 @@ export default function BudgetsPage() {
             onSubmit={(e) => {
               e.preventDefault()
               const formData = new FormData(e.currentTarget)
+              const amount = parseFloat(formData.get('amount') as string)
               if (editing) {
+                // Fork: a new amount from a later month starts in that month
+                // (an effective-from copy); the months before keep theirs.
+                const fromHere = editing.is_recurring && amount !== Number(editing.amount)
+                  && toMonthInput(editing.month) < selectedMonth
                 updateMutation.mutate({
                   id: editing.id,
-                  amount: parseFloat(formData.get('amount') as string),
-                  ...(editing.is_recurring ? { end_month: fromMonthInput(formData.get('end_month')) } : {}),
+                  amount,
+                  ...(editing.is_recurring ? { end_month: fromMonthInput(endMonth) } : {}),
+                  ...(fromHere ? { effective_month: monthParam } : {}),
                 })
               } else {
-                const isRecurring = formData.get('is_recurring') === 'on'
                 createMutation.mutate({
                   category_id: formData.get('category_id') as string,
-                  amount: parseFloat(formData.get('amount') as string),
+                  amount,
                   month: monthParam,
-                  is_recurring: isRecurring,
-                  ...(isRecurring ? { end_month: fromMonthInput(formData.get('end_month')) } : {}),
+                  is_recurring: newRecurring,
+                  ...(newRecurring ? { end_month: fromMonthInput(endMonth) } : {}),
                 })
               }
             }}
@@ -312,8 +540,9 @@ export default function BudgetsPage() {
             {!editing && (
               <>
                 <div className="space-y-2">
-                  <Label>{t('budgets.category')}</Label>
+                  <Label htmlFor="budget-category">{t('budgets.category')}</Label>
                   <select
+                    id="budget-category"
                     name="category_id"
                     className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     required
@@ -347,18 +576,18 @@ export default function BudgetsPage() {
             {(editing ? editing.is_recurring : newRecurring) && (
               <div className="space-y-2">
                 <Label htmlFor="budget-end-month">{t('budgets.untilOptional')}</Label>
-                <Input
+                <MonthField
                   id="budget-end-month"
-                  name="end_month"
-                  type="month"
+                  value={endMonth}
+                  onChange={setEndMonth}
                   min={editing ? toMonthInput(editing.month) : selectedMonth}
-                  defaultValue={toMonthInput(editing?.end_month)}
                 />
               </div>
             )}
             <div className="space-y-2">
-              <Label>{t('budgets.amount')}</Label>
+              <Label htmlFor="budget-amount">{t('budgets.amount')}</Label>
               <Input
+                id="budget-amount"
                 name="amount"
                 type="number"
                 step="0.01"
@@ -367,7 +596,7 @@ export default function BudgetsPage() {
               />
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); setEditing(null) }}>
+              <Button type="button" variant="outline" onClick={closeDialog}>
                 {t('common.cancel')}
               </Button>
               <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending}>
@@ -381,10 +610,10 @@ export default function BudgetsPage() {
       <BudgetGroupsSection
         month={monthParam}
         selectedMonth={selectedMonth}
-        currency={userCurrency}
         categories={categoriesList ?? []}
         displayCategories={displayCategories}
         groups={groupsList ?? []}
+        forecastChoices={forecastChoices}
       />
 
       <DeleteConfirmationDialog
@@ -411,27 +640,53 @@ export default function BudgetsPage() {
 // Fork: budget groups, one cap over several categories
 // ---------------------------------------------------------------------------
 
+/** The group's member categories: a count chip that opens the list. */
+function MemberChip({ ids, displayCategories }: { ids: string[]; displayCategories: Category[] }) {
+  const { t } = useTranslation()
+  const members = ids.map((id) => findCategoryReference(displayCategories, id))
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="shrink-0 text-[11px] font-medium text-muted-foreground bg-muted hover:bg-muted-foreground/15 px-1.5 py-0.5 rounded-full transition-colors cursor-pointer"
+          data-testid="group-member-count"
+        >
+          {t('budgets.categoryCount', { count: ids.length })}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-60 p-2">
+        <ul className="max-h-64 overflow-y-auto space-y-1" data-testid="group-members">
+          {members.map((category, index) => (
+            <li key={ids[index]} className="flex items-center gap-2 px-1 py-0.5 text-sm text-foreground">
+              <CategoryIcon icon={category?.icon} color={category?.color} size="xs" />
+              <span className="truncate">{category?.name ?? '—'}</span>
+            </li>
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 function BudgetGroupsSection({
   month,
   selectedMonth,
-  currency,
   categories,
   displayCategories,
   groups,
+  forecastChoices,
 }: {
   month: string
   selectedMonth: string
-  currency: string
   categories: Category[]
   displayCategories: Category[]
   groups: CategoryGroup[]
+  forecastChoices: ReturnType<typeof useForecastChoices>
 }) {
-  const { t, i18n } = useTranslation()
-  const { mask } = usePrivacyMode()
+  const { t } = useTranslation()
   const { canWrite } = useWorkspace()
-  const locale = useDisplayLocale()
   const queryClient = useQueryClient()
-  const uiLocale = i18n.resolvedLanguage ?? i18n.language
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<BudgetGroupVsActual | null>(null)
   const [deleting, setDeleting] = useState<BudgetGroupVsActual | null>(null)
@@ -464,14 +719,13 @@ function BudgetGroupsSection({
     },
     onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
   })
-  const categoryName = (id: string) => findCategoryReference(displayCategories, id)?.name ?? '—'
-  const money = (v: number | string) => mask(formatCurrency(Number(v), currency, locale))
 
   return (
     <div className="mt-6">
       <SectionCard>
         <SectionHeader
           title={t('budgets.groupsTitle')}
+          hint={t('budgets.groupsHint')}
           action={
             canWrite ? (
               <Button size="sm" className="gap-1.5 h-8" onClick={() => { setEditing(null); setDialogOpen(true) }}>
@@ -480,64 +734,35 @@ function BudgetGroupsSection({
             ) : undefined
           }
         />
-        <p className="px-4 sm:px-5 pt-3 text-xs text-muted-foreground">{t('budgets.groupsHint')}</p>
         {comparison && comparison.length > 0 ? (
-          <ul className="divide-y divide-border">
-            {comparison.map((group) => {
-              const pct = Math.min(group.percentage_used ?? 0, 100)
-              const over = (group.percentage_used ?? 0) > 100
-              return (
-                <li key={group.id} className="px-4 sm:px-5 py-3" data-testid="budget-group">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
-                        {group.name}
-                        {group.is_recurring && (
-                          <span title={t('budgets.recurringLabel')} className="text-muted-foreground"><Repeat size={12} /></span>
-                        )}
-                        {group.end_month && (
-                          <span className="text-xs font-normal text-muted-foreground">
-                            {t('budgets.untilLabel', { month: monthLabel(toMonthInput(group.end_month), uiLocale) })}
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {group.category_ids.map(categoryName).join(', ')}
-                      </p>
+          <table className="w-full">
+            <BudgetTableHead nameLabel={t('budgets.groupName')} limitLabel={t('budgets.groupCap')} />
+            <tbody>
+              {comparison.map((group) => (
+                <BudgetRow
+                  key={group.id}
+                  testId="budget-group"
+                  icon={
+                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 bg-primary/10 text-primary">
+                      <Layers size={14} />
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <span className="text-sm tabular-nums text-foreground">
-                        {t('budgets.spentOf', { spent: money(group.projected_amount), cap: money(group.amount) })}
-                      </span>
-                      {canWrite && (
-                        <>
-                          <button
-                            className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
-                            onClick={() => { setEditing(group); setDialogOpen(true) }}
-                            aria-label={t('common.edit')}
-                            title={t('common.edit')}
-                          >
-                            <Pencil size={13} />
-                          </button>
-                          <button
-                            className="p-1.5 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-rose-50 transition-colors"
-                            onClick={() => setDeleting(group)}
-                            aria-label={t('common.delete')}
-                            title={t('common.delete')}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden" role="progressbar" aria-label={group.name} aria-valuenow={group.percentage_used ?? 0}>
-                    <div className={over ? 'h-full bg-rose-500' : 'h-full bg-primary'} style={{ width: `${pct}%` }} />
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
+                  }
+                  name={group.name}
+                  extra={<MemberChip ids={group.category_ids} displayCategories={displayCategories} />}
+                  isRecurring={group.is_recurring}
+                  endMonth={group.end_month}
+                  spent={Number(group.projected_amount)}
+                  limit={Number(group.amount)}
+                  pct={group.percentage_used}
+                  inForecast={forecastChoices.hasGroup(group.id)}
+                  onForecastChange={(on) => forecastChoices.setGroup(group.id, on)}
+                  forecastDisabled={forecastChoices.pending}
+                  onEdit={() => { setEditing(group); setDialogOpen(true) }}
+                  onDelete={() => setDeleting(group)}
+                />
+              ))}
+            </tbody>
+          </table>
         ) : (
           <p className="text-sm text-muted-foreground text-center py-10">{t('budgets.groupsEmpty')}</p>
         )}
@@ -608,7 +833,9 @@ function BudgetGroupForm({
     ...groups.map((g) => ({ key: g.id, label: g.name, items: spending.filter((c) => c.group_id === g.id) })),
     { key: 'none', label: '', items: spending.filter((c) => !c.group_id || !groups.some((g) => g.id === c.group_id)) },
   ].filter((section) => section.items.length > 0)
-  const start = group?.month ?? month
+  // Fork: a group made a single month while viewing a later one becomes that
+  // month's, not its first month's (where it would vanish from view).
+  const start = group && group.is_recurring && !isRecurring ? month : group?.month ?? month
 
   return (
     <form
@@ -624,7 +851,7 @@ function BudgetGroupForm({
           amount: parseFloat(amount),
           month: start,
           is_recurring: isRecurring,
-          end_month: isRecurring && endMonth ? `${endMonth}-01` : null,
+          end_month: isRecurring ? fromMonthInput(endMonth) : null,
           category_ids: chosen,
         })
       }}
@@ -672,13 +899,11 @@ function BudgetGroupForm({
       {isRecurring && (
         <div className="space-y-2">
           <Label htmlFor="group-end-month">{t('budgets.untilOptional')}</Label>
-          <Input
+          <MonthField
             id="group-end-month"
-            type="month"
-            min={toMonthInput(start) || selectedMonth}
             value={endMonth}
-            onChange={(e) => setEndMonth(e.target.value)}
-            className={selectClass}
+            onChange={setEndMonth}
+            min={toMonthInput(start) || selectedMonth}
           />
         </div>
       )}
