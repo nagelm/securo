@@ -76,6 +76,7 @@ F017 = _load("f017_budget_end_month_and_groups")
 F018 = _load("f018_forecast_budget_choices")
 F019 = _load("f019_recurring_plan_items")
 F020 = _load("f020_recurring_drop_plan")
+F021 = _load("f021_budget_group_caps")
 
 # f015's table, which the ORM no longer maps; a Core table follows the
 # per-test schema map (raw SQL would read public).
@@ -122,6 +123,8 @@ async def test_plan_migrations_downgrade_and_upgrade(session, test_user, test_wo
     ])
     await session.commit()
 
+    await _pg._run(session, "downgrade", F021)
+    assert "budget_group_caps" not in (await _schema_facts(session))[1]
     await _pg._run(session, "downgrade", F020)
     await _pg._run(session, "downgrade", F019)
     await _pg._run(session, "downgrade", F018)
@@ -152,6 +155,8 @@ async def test_plan_migrations_downgrade_and_upgrade(session, test_user, test_wo
     assert "transfer_account_id" in columns and "forecast_item_matches" not in tables
     assert {"budget_groups", "budget_group_categories", "forecast_budget_choices"} <= tables
     assert "plan" not in (await _schema_facts(session, "recurring_transactions"))[0]
+    await _pg._run(session, "upgrade", F021)
+    assert "budget_group_caps" in (await _schema_facts(session))[1]
     # f018 deleted the plan's own budget.
     kinds = await session.execute(select(ForecastItem.kind))
     assert sorted(r[0] for r in kinds) == ["one_off"]

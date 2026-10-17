@@ -9,6 +9,7 @@ import {
   budgets as budgetsApi,
   budgetGroups as budgetGroupsApi,
   forecast as forecastApi,
+  type BudgetGroupInput,
 } from '@/lib/api'
 import { extractApiError } from '@/lib/api-errors'
 import { toast } from 'sonner'
@@ -704,8 +705,8 @@ function BudgetGroupsSection({
   }
   const close = () => { setDialogOpen(false); setEditing(null) }
   const saveMutation = useMutation({
-    mutationFn: (data: Parameters<typeof budgetGroupsApi.create>[0]): Promise<BudgetGroup> =>
-      editing ? budgetGroupsApi.update(editing.id, data) : budgetGroupsApi.create(data),
+    mutationFn: (data: Parameters<typeof budgetGroupsApi.update>[1]): Promise<BudgetGroup> =>
+      editing ? budgetGroupsApi.update(editing.id, data) : budgetGroupsApi.create(data as BudgetGroupInput),
     onSuccess: () => {
       invalidate()
       toast.success(t(editing ? 'budgets.groupUpdated' : 'budgets.groupCreated'))
@@ -819,7 +820,7 @@ function BudgetGroupForm({
   groups: CategoryGroup[]
   loading: boolean
   onCancel: () => void
-  onSave: (data: Parameters<typeof budgetGroupsApi.create>[0]) => void
+  onSave: (data: Parameters<typeof budgetGroupsApi.update>[1]) => void
 }) {
   const { t } = useTranslation()
   const [name, setName] = useState(group?.name ?? '')
@@ -849,13 +850,22 @@ function BudgetGroupForm({
           toast.error(t('budgets.pickCategories'))
           return
         }
+        const cap = parseFloat(amount)
+        // Fork: the cap shown is this month's. Unchanged, it is not sent (it
+        // would overwrite the group's first cap); new from a later month, it
+        // starts in that month and the months before keep theirs (as a
+        // budget's amount does).
+        const capChanged = !group || cap !== Number(group.amount)
+        const fromHere = group && group.is_recurring && isRecurring && capChanged
+          && toMonthInput(group.month) < selectedMonth
         onSave({
           name,
-          amount: parseFloat(amount),
+          ...(capChanged ? { amount: cap } : {}),
           month: start,
           is_recurring: isRecurring,
           end_month: isRecurring ? fromMonthInput(endMonth) : null,
           category_ids: chosen,
+          ...(fromHere ? { effective_month: month } : {}),
         })
       }}
     >

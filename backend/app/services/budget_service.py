@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.app_clock import app_today
 from app.models.budget import Budget
-from app.models.budget_group import BudgetGroup, BudgetGroupCategory
+from app.models.budget_group import BudgetGroup, BudgetGroupCap, BudgetGroupCategory
 from app.models.category import Category
 from app.models.category_group import CategoryGroup
 from app.models.transaction import Transaction
@@ -49,22 +49,22 @@ def resolve_budgets(budgets: Iterable[Budget], month_start: date) -> dict[str, B
     2. Most recent recurring default (is_recurring=true, month<=M) as fallback
 
     Fork: a recurring default whose ``end_month`` is before M no longer
-    applies, and an earlier default does not come back in its place; a
-    later default still takes over from its own month.
+    applies, and the most recent default still running takes its place:
+    a temporary budget laid over an open-ended one hands back to it after
+    its end month (owner 2026-10-17). An edit from a later month ends the
+    record it copies (``update_budget``), so that one does not come back.
     """
     latest: dict[str, Budget] = {}
     overrides: dict[str, Budget] = {}
     for b in budgets:
         cat_id = str(b.category_id)
         if b.is_recurring:
-            if b.month <= month_start and (cat_id not in latest or b.month > latest[cat_id].month):
+            running = b.month <= month_start and (b.end_month is None or month_start <= b.end_month)
+            if running and (cat_id not in latest or b.month > latest[cat_id].month):
                 latest[cat_id] = b
         elif b.month == month_start:
             overrides[cat_id] = b
-    resolved = {
-        cat_id: b for cat_id, b in latest.items()
-        if b.end_month is None or month_start <= b.end_month
-    }
+    resolved = dict(latest)
     resolved.update(overrides)
     return resolved
 
@@ -97,6 +97,12 @@ async def get_budgets(
     month_start = month.replace(day=1)
     resolved = resolve_budgets(await _budgets_up_to(session, workspace_id, month_start), month_start)
     return sorted(resolved.values(), key=lambda b: b.month, reverse=True)
+
+
+def _month_before(month_start: date) -> date:
+    if month_start.month == 1:
+        return month_start.replace(year=month_start.year - 1, month=12)
+    return month_start.replace(month=month_start.month - 1)
 
 
 def _check_end_month(month: date, is_recurring: bool, end_month: Optional[date]) -> Optional[date]:
@@ -166,6 +172,11 @@ async def update_budget(
                     effective, True, data.end_month if end_given else budget.end_month
                 ),
             )
+            # Fork: the copy replaces this record from its month, so this one
+            # ends the month before (it would otherwise come back after the
+            # copy's end month, see ``resolve_budgets``).
+            if budget.month < effective and (budget.end_month is None or budget.end_month >= effective):
+                budget.end_month = _month_before(effective)
             session.add(new_budget)
             await session.commit()
             await session.refresh(new_budget)
@@ -495,12 +506,23 @@ async def create_budget_group(
 async def update_budget_group(
     session: AsyncSession, group_id: uuid.UUID, workspace_id: uuid.UUID, data: BudgetGroupUpdate
 ) -> Optional[BudgetGroup]:
-    """Changes the group in place (no effective-from copy as category budgets
-    have): a category is in one group only, so a group is one row."""
+    """Changes the group in place: a category is in one group only, so a
+    group is one row. Fork (owner 2026-10-17): a repeating group's new cap
+    with an ``effective_month`` after its own month applies from that month
+    on, as a cap row (``BudgetGroupCap``); the months before keep theirs."""
     group = await get_budget_group(session, group_id, workspace_id)
     if group is None:
         return None
-    changes = data.model_dump(exclude_unset=True)
+    changes = data.model_dump(exclude_unset=True, exclude={"effective_month"})
+    if changes.get("amount") is not None and data.effective_month and changes.get("is_recurring", group.is_recurring):
+        effective = data.effective_month.replace(day=1)
+        if effective > (changes.get("month") or group.month).replace(day=1):
+            amount = changes.pop("amount")
+            cap = next((c for c in group.caps if c.month == effective), None)
+            if cap is None:
+                group.caps.append(BudgetGroupCap(month=effective, amount=amount))
+            else:
+                cap.amount = amount
     for required in ("name", "amount", "month", "is_recurring"):
         if required in changes and changes[required] is None:
             raise ValueError(f"{required} is required")
@@ -514,6 +536,8 @@ async def update_budget_group(
     end_month = changes.get("end_month", group.end_month)
     if not is_recurring and "end_month" not in changes:
         end_month = None  # a single month has no end month
+    if not is_recurring:
+        group.caps = []  # a single month has one cap
     changes.update(month=month, end_month=_check_end_month(month, is_recurring, end_month))
     for key, value in changes.items():
         setattr(group, key, value)
@@ -552,10 +576,11 @@ async def get_budget_group_vs_actual(
         members = [str(cat_id) for cat_id in group.category_ids]
         actual = sum((spending_map.get(c, Decimal("0")) for c in members), Decimal("0"))
         projected = sum((projected_spending_map.get(c, Decimal("0")) for c in members), Decimal("0"))
+        amount = group.amount_for(month_start)
         out.append(BudgetGroupVsActual(
             id=group.id,
             name=group.name,
-            amount=group.amount,
+            amount=amount,
             month=group.month,
             is_recurring=group.is_recurring,
             end_month=group.end_month,
@@ -563,7 +588,7 @@ async def get_budget_group_vs_actual(
             actual_amount=actual,
             projected_amount=projected,
             percentage_used=(
-                round(float(projected / group.amount * 100), 1) if group.amount and group.amount > 0 else None
+                round(float(projected / amount * 100), 1) if amount and amount > 0 else None
             ),
         ))
     return out

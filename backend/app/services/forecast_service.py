@@ -1049,16 +1049,17 @@ def _budgeted_spending(
             if group.id not in chosen_groups or not group.applies_to(month):
                 continue
             members = group.category_ids
+            cap = float(group.amount_for(month))
             rest = [c for c in members if c not in own and eligible(c)]
             taken = sum(committed.get((c, month), 0.0) for c in rest)
             remainder = max(
-                float(group.amount) * share - sum(own.get(c, 0.0) * share for c in members) - taken, 0.0
+                cap * share - sum(own.get(c, 0.0) * share for c in members) - taken, 0.0
             )
             total = sum(estimate.get(c, 0.0) for c in rest)
             for c in rest:
                 monthly[c] = remainder * estimate.get(c, 0.0) / total if total > 0 else remainder / len(rest)
                 budgeted.add((c, month))
-            uses.append(_BudgetUse(None, group.id, month, float(group.amount), round(taken, 2), round(remainder, 2)))
+            uses.append(_BudgetUse(None, group.id, month, cap, round(taken, 2), round(remainder, 2)))
         for cat, amount in monthly.items():
             if amount <= 0:
                 continue

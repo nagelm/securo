@@ -341,8 +341,6 @@ async def test_recurring_budget_ends_after_its_end_month(client, auth_headers, t
     assert body["end_month"] == _month_str(2)
 
     assert [b["amount"] for b in await _budget_for(client, auth_headers, cat, _month_str(2))] == ["200.00"]
-    # No longer after it, and an earlier default does not come back.
-    await _post_budget(client, auth_headers, cat, 999, _month_str(-1), is_recurring=True)
     assert await _budget_for(client, auth_headers, cat, _month_str(3)) == []
     # A later default still takes over from its own month.
     await _post_budget(client, auth_headers, cat, 300, _month_str(4), is_recurring=True)
@@ -352,6 +350,40 @@ async def test_recurring_budget_ends_after_its_end_month(client, auth_headers, t
     comp = await client.get("/api/budgets/comparison", params={"month": _month_str(1)}, headers=auth_headers)
     row = next(c for c in comp.json() if c["category_id"] == str(cat.id))
     assert row["end_month"] == _month_str(2)
+
+
+@pytest.mark.asyncio
+async def test_an_open_ended_budget_comes_back_after_a_temporary_one(client, auth_headers, test_categories):
+    cat = test_categories[0]
+    await _post_budget(client, auth_headers, cat, 500, _month_str(-1), is_recurring=True)
+    await _post_budget(client, auth_headers, cat, 150, _month_str(1), is_recurring=True, end_month=_month_str(2))
+
+    amounts = [
+        [b["amount"] for b in await _budget_for(client, auth_headers, cat, _month_str(n))] for n in range(0, 5)
+    ]
+    assert amounts == [["500.00"], ["150.00"], ["150.00"], ["500.00"], ["500.00"]]
+    comp = await client.get("/api/budgets/comparison", params={"month": _month_str(3)}, headers=auth_headers)
+    row = next(c for c in comp.json() if c["category_id"] == str(cat.id))
+    assert float(row["budget_amount"]) == 500 and row["end_month"] is None
+
+
+@pytest.mark.asyncio
+async def test_an_edit_from_a_later_month_with_an_end_month_ends_the_budget(client, auth_headers, test_categories):
+    """The record an edit copies stops where the copy starts, so it does not
+    come back after the copy's end month."""
+    cat = test_categories[0]
+    body = await _post_budget(client, auth_headers, cat, 200, _month_str(0), is_recurring=True)
+    resp = await client.patch(
+        f"/api/budgets/{body['id']}",
+        json={"amount": 250, "effective_month": _month_str(2), "end_month": _month_str(3)},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200 and resp.json()["id"] != body["id"]
+
+    amounts = [
+        [b["amount"] for b in await _budget_for(client, auth_headers, cat, _month_str(n))] for n in range(0, 5)
+    ]
+    assert amounts == [["200.00"], ["200.00"], ["250.00"], ["250.00"], []]
 
 
 @pytest.mark.asyncio
@@ -419,6 +451,40 @@ async def test_budget_group_crud_and_comparison(client, auth_headers, test_categ
 
     assert (await client.delete(f"/api/budget-groups/{group['id']}", headers=auth_headers)).status_code == 204
     assert (await client.delete(f"/api/budget-groups/{group['id']}", headers=auth_headers)).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_group_cap_changed_from_a_later_month_applies_from_that_month(client, auth_headers, test_categories):
+    food, transport, _ = test_categories
+    group = (await client.post("/api/budget-groups", json={
+        "name": "Everyday", "amount": 100, "month": _month_str(0), "is_recurring": True,
+        "category_ids": [str(food.id), str(transport.id)],
+    }, headers=auth_headers)).json()
+
+    async def caps():
+        out = []
+        for n in range(0, 4):
+            rows = (await client.get("/api/budget-groups/comparison", params={"month": _month_str(n)},
+                                     headers=auth_headers)).json()
+            out.append([float(r["amount"]) for r in rows])
+        return out
+
+    resp = await client.patch(f"/api/budget-groups/{group['id']}",
+                              json={"amount": 80, "effective_month": _month_str(2)}, headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    assert await caps() == [[100], [100], [80], [80]]
+    # Again from the same month: that month's cap changes, not a second one.
+    await client.patch(f"/api/budget-groups/{group['id']}",
+                       json={"amount": 90, "effective_month": _month_str(2)}, headers=auth_headers)
+    assert await caps() == [[100], [100], [90], [90]]
+    # From the group's own month, the first cap changes; later caps stay.
+    await client.patch(f"/api/budget-groups/{group['id']}",
+                       json={"amount": 120, "effective_month": _month_str(0)}, headers=auth_headers)
+    assert await caps() == [[120], [120], [90], [90]]
+    # Made a single month, the group has one cap.
+    await client.patch(f"/api/budget-groups/{group['id']}",
+                       json={"is_recurring": False}, headers=auth_headers)
+    assert await caps() == [[120], [], [], []]
 
 
 @pytest.mark.asyncio

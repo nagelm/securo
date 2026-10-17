@@ -260,6 +260,36 @@ describe('budget groups', () => {
     await waitFor(() => expect(api.budgetGroups.delete).toHaveBeenCalledWith('g-1'))
   })
 
+  it('a new group cap from a later month starts there, keeping the earlier months', async () => {
+    api.budgetGroups.comparison.mockResolvedValue([{ ...group, month: lastMonth() }])
+    const { user } = renderWithProviders(<BudgetsPage />)
+
+    await user.click(within(await screen.findByTestId('budget-group')).getByRole('button', { name: t('common.edit') }))
+    const dialog = await screen.findByRole('dialog')
+    await user.clear(within(dialog).getByLabelText(t('budgets.groupCap')))
+    await user.type(within(dialog).getByLabelText(t('budgets.groupCap')), '500')
+    await user.click(within(dialog).getByRole('button', { name: t('common.save') }))
+
+    await waitFor(() => expect(api.budgetGroups.update).toHaveBeenCalledWith('g-1', expect.objectContaining({
+      amount: 500, month: lastMonth(), effective_month: `${MONTH}-01`,
+    })))
+  })
+
+  it('a group edited without a new cap leaves its caps alone', async () => {
+    api.budgetGroups.comparison.mockResolvedValue([{ ...group, month: lastMonth() }])
+    const { user } = renderWithProviders(<BudgetsPage />)
+
+    await user.click(within(await screen.findByTestId('budget-group')).getByRole('button', { name: t('common.edit') }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(within(dialog).getByTestId('group-categories')).getByRole('checkbox', { name: 'Eating out' }))
+    await user.click(within(dialog).getByRole('button', { name: t('common.save') }))
+
+    await waitFor(() => expect(api.budgetGroups.update).toHaveBeenCalled())
+    expect(api.budgetGroups.update.mock.calls[0][1]).not.toHaveProperty('effective_month')
+    // The cap shown is this month's; unchanged, it is not sent at all.
+    expect(api.budgetGroups.update.mock.calls[0][1]).not.toHaveProperty('amount')
+  })
+
   it('a recurring group made a single month while viewing a later month becomes that month\'s', async () => {
     api.budgetGroups.comparison.mockResolvedValue([{ ...group, month: lastMonth() }])
     const { user } = renderWithProviders(<BudgetsPage />)

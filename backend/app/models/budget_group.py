@@ -6,6 +6,9 @@ the first day of a month; ``is_recurring`` true applies from ``month``
 through ``end_month`` (inclusive, NULL = open-ended), false applies to
 ``month`` only. A category is in at most one group (unique ``category_id``
 in ``budget_group_categories``; categories belong to one workspace).
+
+``amount`` is the cap from ``month`` on; a repeating group's later caps are
+``BudgetGroupCap`` rows, each from its own month (f021).
 """
 import uuid
 from datetime import date, datetime
@@ -40,6 +43,9 @@ class BudgetGroup(Base):
     members: Mapped[list["BudgetGroupCategory"]] = relationship(
         cascade="all, delete-orphan", passive_deletes=True, lazy="selectin"
     )
+    caps: Mapped[list["BudgetGroupCap"]] = relationship(
+        cascade="all, delete-orphan", passive_deletes=True, lazy="selectin", order_by="BudgetGroupCap.month"
+    )
 
     @property
     def category_ids(self) -> list[uuid.UUID]:
@@ -50,6 +56,16 @@ class BudgetGroup(Base):
         if not self.is_recurring:
             return self.month == month_start
         return self.month <= month_start and (self.end_month is None or month_start <= self.end_month)
+
+    def amount_for(self, month_start: date) -> Decimal:
+        """The cap in the month starting ``month_start``: the latest later cap
+        started by then, else ``amount``."""
+        amount = self.amount
+        if self.is_recurring:
+            for cap in self.caps:
+                if self.month < cap.month <= month_start:
+                    amount = cap.amount
+        return amount
 
 
 class BudgetGroupCategory(Base):
@@ -63,3 +79,17 @@ class BudgetGroupCategory(Base):
     category_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("categories.id", ondelete="CASCADE"), primary_key=True
     )
+
+
+class BudgetGroupCap(Base):
+    """A repeating group's cap from ``month`` (first day) on."""
+
+    __tablename__ = "budget_group_caps"
+    __table_args__ = (UniqueConstraint("group_id", "month", name="uq_budget_group_caps_group_month"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("budget_groups.id", ondelete="CASCADE")
+    )
+    month: Mapped[date] = mapped_column(Date)
+    amount: Mapped[Decimal] = mapped_column(Numeric(precision=15, scale=2))

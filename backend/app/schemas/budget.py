@@ -72,6 +72,8 @@ class BudgetGroupUpdate(BaseModel):
     is_recurring: Optional[bool] = None
     end_month: Optional[_Date] = None  # null clears it
     category_ids: Optional[list[uuid.UUID]] = Field(default=None, min_length=1)
+    # Fork: a repeating group's new amount applies from this month on.
+    effective_month: Optional[_Date] = None
 
 
 class BudgetGroupRead(BaseModel):

@@ -1415,7 +1415,8 @@ export const budgetGroups = {
     const { data } = await api.post('/budget-groups', group)
     return data
   },
-  update: async (id: string, group: Partial<BudgetGroupInput>): Promise<BudgetGroup> => {
+  // Fork: effective_month starts a repeating group's new cap in that month.
+  update: async (id: string, group: Partial<BudgetGroupInput> & { effective_month?: string }): Promise<BudgetGroup> => {
     const { data } = await api.patch(`/budget-groups/${id}`, group)
     return data
   },

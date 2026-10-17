@@ -769,7 +769,7 @@ async def test_a_group_counts_its_members_own_budgets_and_payments(session, test
     budgets, groups = await load_budget_plan(session, test_workspace.id)
     widened = SimpleNamespace(
         id=groups[0].id, amount=groups[0].amount, category_ids=[eating.id, groceries.id, rent.id],
-        applies_to=groups[0].applies_to,
+        applies_to=groups[0].applies_to, amount_for=groups[0].amount_for,
     )
     month = _add_months(this_month, 1)
     spending, _, uses = forecast_service._budgeted_spending(
@@ -779,6 +779,29 @@ async def test_a_group_counts_its_members_own_budgets_and_payments(session, test
     assert not [a for c, d, a in spending if c == groceries.id and d.replace(day=1) == month]
     group_use = next(u for u in uses if u.budget_group_id and u.month == month)
     assert (group_use.committed, group_use.remainder) == (1200, 0)
+
+
+async def test_a_group_cap_changed_from_a_later_month_feeds_the_forecast_from_that_month(
+    session, test_user, test_workspace,
+):
+    from app.schemas.budget import BudgetGroupUpdate
+    from app.services.budget_service import update_budget_group
+    from tests.test_forecast import _category
+
+    today = app_today()
+    this_month = today.replace(day=1)
+    await _account(session, test_user.id)
+    gifts = await _category(session, test_user.id, "Gifts")
+    group = await _group(session, test_user.id, test_workspace.id, "90", this_month, gifts.id)
+    later = _add_months(this_month, 2)
+    await update_budget_group(session, group.id, test_workspace.id,
+                              BudgetGroupUpdate(amount=Decimal("40"), effective_month=later))
+
+    result = await _forecast(session, test_user, test_workspace, include_spending=True)
+
+    caps = {u.month: u.amount for u in result.budget_uses if u.month < _add_months(this_month, 4)}
+    assert caps[_add_months(this_month, 1)] == pytest.approx(90)
+    assert caps[later] == pytest.approx(40) and caps[_add_months(this_month, 3)] == pytest.approx(40)
 
 
 async def test_a_chosen_group_with_no_estimates_spreads_its_cap_evenly(session, test_user, test_workspace):
