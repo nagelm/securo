@@ -500,3 +500,27 @@ async def test_unlink_recurring_noop_when_not_linked(session, test_user, test_wo
         session, tx.id, test_workspace.id
     )
     assert result is None  # nothing to unlink → 404 at the API layer
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_tolerance_rule_matches_a_bill_that_varies(session, test_user, test_workspace, account):
+    """Fork: a rule on the Rules page that accepts an amount within a
+    tolerance reaches the charges the exact-amount rules never see."""
+    from app.services import reconciliation_rule_service
+
+    bill = await _make_bill(session, test_workspace, test_user, account, description="Power")
+    charge = (session, test_user.id, account.id, Decimal("43.50"), "BRL", "debit", date(2025, 1, 10), "DD POWER CO")
+    assert await rms.find_bill_for_incoming(*charge) is None
+
+    await reconciliation_rule_service.upsert_override(
+        session, test_workspace.id, test_user.id, "reconciliation.match_recurring", "bill_only_candidate",
+        {"when": {"amount": {"match": "tolerance", "percent": "15"}}},
+    )
+    await session.commit()
+    assert (await rms.find_bill_for_incoming(*charge)).id == bill.id
+    tx = await _add_tx(session, test_user, test_workspace, account, amount=Decimal("43.50"), date=date(2025, 1, 10),
+                       description="DD POWER CO")
+    assert (await rms.find_real_tx_for_occurrence(session, bill, date(2025, 1, 10))).id == tx.id
+    # Outside the tolerance, still nothing.
+    far = (session, test_user.id, account.id, Decimal("60.00"), "BRL", "debit", date(2025, 1, 10), "DD POWER CO")
+    assert await rms.find_bill_for_incoming(*far) is None

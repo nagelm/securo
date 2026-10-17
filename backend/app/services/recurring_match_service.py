@@ -63,6 +63,12 @@ _REAL_SOURCES = ("sync", "ofx", "csv", "manual")
 #: and the two would drift.
 _QUERY_WINDOW_DAYS = 5
 
+#: Fork: the queries leave the amount to the policy too. A workspace rule
+#: on the Rules page may accept an amount within a tolerance (a power bill
+#: or a meal kit that varies week to week); filtering on the exact amount
+#: in SQL would hide every such charge from it. The shipped rules still
+#: ask for the exact amount, so what they link is unchanged.
+
 #: A candidate of either kind: a charge, or a bill.
 _T = TypeVar("_T")
 
@@ -199,7 +205,6 @@ async def find_real_tx_for_occurrence(
             Transaction.account_id == recurring.account_id,
             Transaction.recurring_transaction_id.is_(None),
             Transaction.source.in_(_REAL_SOURCES),
-            Transaction.amount == recurring.amount,
             Transaction.currency == recurring.currency,
             Transaction.type == recurring.type,
             Transaction.date >= occurrence_date - timedelta(days=_QUERY_WINDOW_DAYS),
@@ -239,7 +244,6 @@ async def find_placeholder_for_incoming(
             Transaction.source == "recurring",
             Transaction.recurring_transaction_id.is_not(None),
             Transaction.external_id.is_(None),
-            Transaction.amount == amount,
             Transaction.currency == currency,
             Transaction.type == tx_type,
             Transaction.date >= tx_date - timedelta(days=_QUERY_WINDOW_DAYS),
@@ -286,7 +290,6 @@ async def find_bill_for_incoming(
             RecurringTransaction.user_id == user_id,
             RecurringTransaction.account_id == account_id,
             RecurringTransaction.is_active.is_(True),
-            RecurringTransaction.amount == amount,
             RecurringTransaction.currency == currency,
             RecurringTransaction.type == tx_type,
             # Fork: a standard transfer is settled only by a leg of a bank
