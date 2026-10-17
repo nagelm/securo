@@ -3027,6 +3027,7 @@
       "similarDescription": "राशि करीब और विवरण मिलता-जुलता",
       "sameAccountExact": "वही खाता, ठीक वही राशि",
       "onlyCandidateBill": "Same account, exact amount, the only bill that fits",
+      "samePayeeBill": "Same account and payee, up to twice the amount, the only bill that fits",
       "unknown": "नियम",
       "partPayment": "ज्ञात व्यक्ति, राशि का एक हिस्सा",
       "severalInvoices": "ज्ञात व्यक्ति, एक साथ कई इनवॉइस",

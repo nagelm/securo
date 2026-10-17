@@ -3029,6 +3029,7 @@
       "similarDescription": "Vergelijkbaar bedrag en gelijkende omschrijving",
       "sameAccountExact": "Zelfde rekening, exact bedrag",
       "onlyCandidateBill": "Same account, exact amount, the only bill that fits",
+      "samePayeeBill": "Same account and payee, up to twice the amount, the only bill that fits",
       "unknown": "Regel",
       "partPayment": "Bekende persoon, deel van het bedrag",
       "severalInvoices": "Bekende persoon, meerdere facturen tegelijk",

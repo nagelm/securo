@@ -81,6 +81,7 @@ def _as_movement(transaction: Transaction) -> Movement:
         when=transaction.date,
         description=transaction.description,
         counterparty=transaction.payee,
+        payee_id=transaction.payee_id,
         account_id=transaction.account_id,
         source=transaction.source,
     )
@@ -103,6 +104,7 @@ def _as_occurrence(
         direction=recurring.type,
         when=when,
         description=recurring.description,
+        payee_id=recurring.payee_id,
         account_id=recurring.account_id,
     )
 
@@ -224,6 +226,7 @@ async def find_placeholder_for_incoming(
     tx_type: str,
     tx_date: date,
     description: Optional[str],
+    payee_id: Optional[uuid.UUID] = None,
 ) -> Optional[Transaction]:
     """Find an unmatched generated placeholder this incoming charge fulfills.
 
@@ -258,6 +261,7 @@ async def find_placeholder_for_incoming(
         direction=tx_type,
         when=tx_date,
         description=description,
+        payee_id=payee_id,
         account_id=account_id,
     )
     return _best_movement(result.scalars(), incoming, policy)
@@ -272,6 +276,7 @@ async def find_bill_for_incoming(
     tx_type: str,
     tx_date: date,
     description: Optional[str],
+    payee_id: Optional[uuid.UUID] = None,
 ) -> Optional[RecurringTransaction]:
     """Find an active bill whose next expected occurrence this charge fulfills.
 
@@ -306,6 +311,7 @@ async def find_bill_for_incoming(
         direction=tx_type,
         when=tx_date,
         description=description,
+        payee_id=payee_id,
         account_id=account_id,
     )
 

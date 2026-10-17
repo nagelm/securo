@@ -990,6 +990,7 @@ async def import_transactions(
             txn_data.type,
             txn_data.date,
             preview.description,
+            payee_id=import_payee_id or preview.payee_id,
         )
         if placeholder and not placeholder.is_ignored:
             placeholder.source = source
@@ -1028,6 +1029,7 @@ async def import_transactions(
             txn_data.type,
             txn_data.date,
             preview.description,
+            payee_id=import_payee_id or preview.payee_id,
         )
         incoming.recurring_transaction_id = (
             recurring_link.id if recurring_link else None

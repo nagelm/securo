@@ -3027,6 +3027,7 @@
       "similarDescription": "Κοντινό ποσό και παρόμοια περιγραφή",
       "sameAccountExact": "Ίδιος λογαριασμός, ακριβές ποσό",
       "onlyCandidateBill": "Same account, exact amount, the only bill that fits",
+      "samePayeeBill": "Same account and payee, up to twice the amount, the only bill that fits",
       "unknown": "Άγνωστος κανόνας",
       "partPayment": "Γνωστό πρόσωπο, μέρος του ποσού",
       "severalInvoices": "Γνωστό πρόσωπο, πολλά τιμολόγια μαζί",

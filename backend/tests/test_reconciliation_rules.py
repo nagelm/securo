@@ -322,6 +322,7 @@ async def test_the_recurring_rules_keep_running_even_though_nobody_sees_them(
     assert [s["id"] for s in policy["strategies"]] == [
         "same_account_exact",
         "bill_only_candidate",
+        "same_payee_varying_amount",
     ]
     assert policy["strategies"][0]["enabled"] is True
 

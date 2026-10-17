@@ -146,6 +146,7 @@ def test_the_new_rules_come_after_the_description_rules():
     assert [s["id"] for s in placeholder["strategies"]] == [
         "placeholder_same_account_exact",
         "placeholder_only_candidate",
+        "placeholder_same_payee_varying_amount",
     ]
     only = placeholder["strategies"][1]["when"]
     assert only["date"] == {"before_days": 2, "after_days": 2}
@@ -158,6 +159,7 @@ def test_the_new_rules_come_after_the_description_rules():
     assert [s["id"] for s in recurring["strategies"]] == [
         "same_account_exact",
         "bill_only_candidate",
+        "same_payee_varying_amount",
     ]
     assert "description_similarity" not in recurring["strategies"][1]["when"]
 

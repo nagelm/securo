@@ -3031,6 +3031,7 @@
       "similarDescription": "Montant proche et libellé semblable",
       "sameAccountExact": "Même compte, montant exact",
       "onlyCandidateBill": "Same account, exact amount, the only bill that fits",
+      "samePayeeBill": "Same account and payee, up to twice the amount, the only bill that fits",
       "unknown": "Règle",
       "partPayment": "Personne connue, une partie du montant",
       "severalInvoices": "Personne connue, plusieurs factures à la fois",

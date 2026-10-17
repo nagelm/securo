@@ -252,6 +252,28 @@ MATCH_RECURRING: dict[str, Any] = {
                 "unique_candidate": True,
             },
         },
+        {
+            # Fork: **a bill whose amount changes** (power, a meal kit)
+            # never answers the exact-amount rules above, so its Next date
+            # falls behind. This one leans on the payee instead: the same
+            # payee as the bill, on the same account, inside the window,
+            # and the only one that fits. The amount only has to be within
+            # 100% (the widest the validator allows), so a charge of up to
+            # twice the expected one still links. Last, so it speaks only
+            # when nothing above did; a bill without a payee never matches.
+            "id": "same_payee_varying_amount",
+            "enabled": True,
+            "outcome": "link",
+            "trigger": "money_arrives",
+            "when": {
+                "counterparty": "same_payee",
+                "same_account": True,
+                "amount": {"match": "tolerance", "percent": "100"},
+                "date": {"before_days": 3, "after_days": 5},
+                "currency": {"conversion": "reject"},
+                "unique_candidate": True,
+            },
+        },
     ],
     "on_ambiguity": "suggest",
 }
@@ -304,6 +326,28 @@ MATCH_PLACEHOLDER: dict[str, Any] = {
                 "same_account": True,
                 "amount": {"match": "exact"},
                 "date": {"before_days": 2, "after_days": 2},
+                "currency": {"conversion": "reject"},
+                "unique_candidate": True,
+            },
+        },
+        {
+            # Fork: **a bill whose amount changes** (power, a meal kit)
+            # never answers the exact-amount rules above, so its Next date
+            # falls behind. This one leans on the payee instead: the same
+            # payee as the placeholder, on the same account, inside the window,
+            # and the only one that fits. The amount only has to be within
+            # 100% (the widest the validator allows), so a charge of up to
+            # twice the expected one still links. Last, so it speaks only
+            # when nothing above did; a placeholder without a payee never matches.
+            "id": "placeholder_same_payee_varying_amount",
+            "enabled": True,
+            "outcome": "link",
+            "trigger": "money_arrives",
+            "when": {
+                "counterparty": "same_payee",
+                "same_account": True,
+                "amount": {"match": "tolerance", "percent": "100"},
+                "date": {"before_days": 5, "after_days": 5},
                 "currency": {"conversion": "reject"},
                 "unique_candidate": True,
             },

@@ -3044,6 +3044,7 @@
       "similarDescription": "Близкая сумма и похожее описание",
       "sameAccountExact": "Тот же счёт, точная сумма",
       "onlyCandidateBill": "Same account, exact amount, the only bill that fits",
+      "samePayeeBill": "Same account and payee, up to twice the amount, the only bill that fits",
       "unknown": "Правило",
       "partPayment": "Известный человек, часть суммы",
       "severalInvoices": "Известный человек, несколько счетов сразу",

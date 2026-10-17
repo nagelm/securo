@@ -2731,6 +2731,7 @@ async def sync_connection(
                         txn_data.type,
                         txn_data.date,
                         preview.description,
+                        payee_id=sync_payee_id or preview.payee_id,
                     )
                 )
                 if placeholder:
@@ -2780,6 +2781,7 @@ async def sync_connection(
                         txn_data.type,
                         txn_data.date,
                         preview.description,
+                        payee_id=sync_payee_id or preview.payee_id,
                     )
                 )
                 transaction.recurring_transaction_id = (
