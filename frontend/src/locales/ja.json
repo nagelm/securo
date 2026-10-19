@@ -134,7 +134,7 @@
     "aiAgents": "AIエージェント",
     "collapseSidebar": "サイドバーを折りたたむ",
     "expandSidebar": "サイドバーを展開する",
-    "insights": "Insights"
+    "insights": "インサイト"
   },
   "invoices": {
     "title": "請求書",
@@ -3378,106 +3378,109 @@
     }
   },
   "insights": {
-    "title": "Insights",
-    "previousMonth": "Previous month",
-    "nextMonth": "Next month",
-    "loadError": "Couldn't load the insights for this month.",
-    "empty": "Not enough history yet. Insights need a few months of transactions to compare against.",
+    "title": "インサイト",
+    "previousMonth": "前の月",
+    "nextMonth": "次の月",
+    "loadError": "この月のインサイトを読み込めませんでした。",
+    "empty": "まだ履歴が足りません。インサイトには比較のため数か月分の取引が必要です。",
     "headline": {
-      "slide": "Your savings rate has been sliding: {{before}}% a year ago, {{rate}}% now.",
-      "rise": "Your savings rate has been climbing: {{before}}% a year ago, {{rate}}% now.",
-      "under": "Everyday spending came in {{pct}}% under a usual month.",
-      "over": "Everyday spending ran {{pct}}% over a usual month.",
-      "steady": "Everyday spending was close to a usual month.",
-      "leave": "Saving less while pay was reduced: {{before}}% of income a year ago, {{rate}}% now."
+      "slide": "貯蓄率が下がっています：1年前は{{before}}%、今は{{rate}}%。",
+      "rise": "貯蓄率が上がっています：1年前は{{before}}%、今は{{rate}}%。",
+      "under": "日常の支出はいつもの月より{{pct}}%少なめでした。",
+      "over": "日常の支出はいつもの月より{{pct}}%多めでした。",
+      "steady": "日常の支出はいつもの月とほぼ同じでした。",
+      "leave": "給与が減った間は貯蓄も減少：1年前は収入の{{before}}%、今は{{rate}}%。"
     },
-    "summary": "Everyday spending was {{spent}} against a usual {{usual}}. {{lower}} categories came in under their usual month and {{higher}} over.",
-    "everydaySpend": "Everyday spend",
-    "vsUsual": "{{sign}} {{pct}}% vs {{usual}}",
-    "savedTwelve": "Saved, last 12 months",
-    "savedFrom": "from {{before}}% a year ago",
-    "oneOffs": "One-offs",
-    "oneOffsNone": "None",
-    "oneOffsOver": "over {{amount}}",
-    "oneOffsCount_one": "{{count}} purchase, left out above",
-    "oneOffsCount_other": "{{count}} purchases, left out above",
-    "chartTitle": "Each category against its usual month",
-    "chartUsual": "usual = median of the six months before",
-    "less": "less than usual",
-    "more": "more than usual",
-    "excluded": "Not shown: {{list}}.",
+    "summary": "日常の支出は{{spent}}（いつもは{{usual}}）。いつもの月より少ないカテゴリーが{{lower}}、多いカテゴリーが{{higher}}。",
+    "everydaySpend": "日常の支出",
+    "vsUsual": "{{sign}} {{pct}}%（{{usual}}比）",
+    "savedTwelve": "貯蓄、直近12か月",
+    "savedFrom": "1年前は{{before}}%",
+    "oneOffs": "単発の購入",
+    "oneOffsNone": "なし",
+    "oneOffsOver": "{{amount}}以上",
+    "oneOffsCount_one": "{{count}}件の購入、上の集計から除外",
+    "oneOffsCount_other": "{{count}}件の購入、上の集計から除外",
+    "chartTitle": "各カテゴリーといつもの月の比較",
+    "chartUsual": "いつも = 直前6か月の中央値",
+    "less": "いつもより少ない",
+    "more": "いつもより多い",
+    "excluded": "表示していないもの：{{list}}。",
     "reasons": {
-      "one_off": "one-offs",
-      "more_payments": "an extra regular payment",
-      "fewer_payments": "one regular payment fewer"
+      "one_off": "単発の購入",
+      "more_payments": "定期支払いが1回多い",
+      "fewer_payments": "定期支払いが1回少ない"
     },
-    "better": "Better",
-    "worse": "Worse",
-    "noneBetter": "Nothing stood out as better this month.",
-    "noneWorse": "Nothing stood out as worse this month.",
+    "better": "良くなった",
+    "worse": "悪くなった",
+    "noneBetter": "今月は良くなった点は特にありません。",
+    "noneWorse": "今月は悪くなった点は特にありません。",
     "cards": {
       "category_month": {
-        "title_better": "{{category}} under usual",
-        "title_worse": "{{category}} over usual",
-        "titleStreak": "{{category}} back up after {{count}} quiet months",
-        "detail_one": "{{amount}} · usual {{usual}} · {{count}} transaction",
-        "detail_other": "{{amount}} · usual {{usual}} · {{count}} transactions"
+        "title_better": "{{category}}がいつもより少なめ",
+        "title_worse": "{{category}}がいつもより多め",
+        "titleStreak": "{{category}}が{{count}}か月の落ち着きの後に再び増加",
+        "detail_one": "{{amount}} · いつもは{{usual}} · {{count}}件",
+        "detail_other": "{{amount}} · いつもは{{usual}} · {{count}}件",
+        "title_seasonal_better": "{{category}}が少なめ、{{month}}と同様",
+        "title_seasonal_worse": "{{category}}が多め、{{month}}と同様"
       },
       "trend_cooling": {
-        "title": "{{category}} cooling off",
-        "detail": "12-month total {{total}}, down from {{peak}} ({{month}})"
+        "title": "{{category}}が落ち着いてきた",
+        "detail": "12か月合計{{total}}、ピーク{{peak}}（{{month}}）から減少"
       },
       "trend_rising": {
-        "title": "{{category}} climbing",
-        "detail": "12-month total {{total}}, up {{pct}}% on {{before}} a year earlier"
+        "title": "{{category}}が増えている",
+        "detail": "12か月合計{{total}}、1年前の{{before}}から{{pct}}%増"
       },
       "savings_rate": {
-        "title_worse": "Savings rate sliding",
-        "title_better": "Savings rate climbing",
-        "detail": "{{rate}}% of income kept over 12 months, from {{before}}%.",
-        "title_leave": "Savings rate lower during leave",
-        "income": "Income {{change}} ({{movers}}).",
-        "spending": "Everyday spending {{change}} ({{movers}}).",
-        "leave": "Pay fell while {{payer}} payments started, which looks like leave.",
-        "short": "{{rate}}% kept, from {{before}}% · income {{income}}"
+        "title_worse": "貯蓄率が低下",
+        "title_better": "貯蓄率が上昇",
+        "detail": "12か月で収入の{{rate}}%を貯蓄、以前は{{before}}%。",
+        "title_leave": "休業中は貯蓄率が低め",
+        "income": "収入 {{change}}（{{movers}}）。",
+        "spending": "日常の支出 {{change}}（{{movers}}）。",
+        "leave": "{{payer}}からの支払いが始まると同時に給与が減っており、休業のようです。",
+        "short": "{{rate}}%を貯蓄、以前は{{before}}% · 収入 {{income}}"
       },
       "price_up": {
-        "title": "{{payee}} costs more"
+        "title": "{{payee}}が値上がり"
       },
       "price_down": {
-        "title": "{{payee}} costs less"
+        "title": "{{payee}}が値下がり"
       },
       "price": {
-        "detail": "{{before}} → {{after}} a payment since {{since}}",
-        "yearly": "yearly change"
+        "detail": "{{since}}から1回あたり{{before}} → {{after}}",
+        "yearly": "年次の改定"
       },
       "payee_new": {
-        "title": "New cost: {{payee}}",
-        "detail": "{{amount}} this month in {{category}}"
+        "title": "新しい支出：{{payee}}",
+        "detail": "今月{{category}}で{{amount}}"
       },
       "payee_stopped": {
-        "title": "{{payee}} stopped",
-        "detail": "{{amount}} a payment in {{category}}, last on {{last}}"
+        "title": "{{payee}}が停止",
+        "detail": "{{category}}で1回あたり{{amount}}、最後は{{last}}"
       },
       "small_burst": {
-        "title": "Burst of small charges: {{payee}}",
-        "detail": "{{count}} charges, {{amount}} · usually {{usual}} a month"
+        "title": "少額の請求が集中：{{payee}}",
+        "detail": "{{count}}件、{{amount}} · 通常は月{{usual}}件"
       },
       "income_change": {
-        "title_better": "{{payee}} paying more",
-        "title_worse": "{{payee}} paying less",
-        "detail": "{{before}} → {{after}} a payment ({{pct}}%)"
+        "title_better": "{{payee}}からの入金が増加",
+        "title_worse": "{{payee}}からの入金が減少",
+        "detail": "1回あたり{{before}} → {{after}}（{{pct}}%）"
       },
       "payee_switch": {
         "title": "{{from}} → {{to}}",
-        "detail": "{{category}}: {{before}} → {{after}} a month together ({{pct}}%), since {{since}}"
+        "detail": "{{category}}：合計で月{{before}} → {{after}}（{{pct}}%）、{{since}}から"
       },
       "habit_ended": {
-        "title": "{{payee}} has stopped",
-        "detail": "About {{monthly}} a month in {{category}}; last on {{last}}"
+        "title": "{{payee}}がなくなった",
+        "detail": "{{category}}で月約{{monthly}}、最後は{{last}}"
       }
     },
-    "usualSince": "usual since {{month}}",
-    "mostly": "mostly {{list}}"
+    "usualSince": "{{month}}以降のいつも",
+    "mostly": "主に{{list}}",
+    "lastYear": "{{month}}は{{amount}}"
   }
 }

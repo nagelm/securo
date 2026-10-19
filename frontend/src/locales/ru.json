@@ -134,7 +134,7 @@
     "aiAgents": "ИИ-агенты",
     "collapseSidebar": "Свернуть боковую панель",
     "expandSidebar": "Развернуть боковую панель",
-    "insights": "Insights"
+    "insights": "Аналитика"
   },
   "invoices": {
     "title": "Invoices",
@@ -3397,106 +3397,113 @@
     }
   },
   "insights": {
-    "title": "Insights",
-    "previousMonth": "Previous month",
-    "nextMonth": "Next month",
-    "loadError": "Couldn't load the insights for this month.",
-    "empty": "Not enough history yet. Insights need a few months of transactions to compare against.",
+    "title": "Аналитика",
+    "previousMonth": "Предыдущий месяц",
+    "nextMonth": "Следующий месяц",
+    "loadError": "Не удалось загрузить аналитику за этот месяц.",
+    "empty": "Пока мало истории. Для аналитики нужны транзакции за несколько месяцев, чтобы было с чем сравнить.",
     "headline": {
-      "slide": "Your savings rate has been sliding: {{before}}% a year ago, {{rate}}% now.",
-      "rise": "Your savings rate has been climbing: {{before}}% a year ago, {{rate}}% now.",
-      "under": "Everyday spending came in {{pct}}% under a usual month.",
-      "over": "Everyday spending ran {{pct}}% over a usual month.",
-      "steady": "Everyday spending was close to a usual month.",
-      "leave": "Saving less while pay was reduced: {{before}}% of income a year ago, {{rate}}% now."
+      "slide": "Ваша норма сбережений снижается: {{before}}% год назад, {{rate}}% сейчас.",
+      "rise": "Ваша норма сбережений растёт: {{before}}% год назад, {{rate}}% сейчас.",
+      "under": "Повседневные расходы были на {{pct}}% ниже обычного месяца.",
+      "over": "Повседневные расходы были на {{pct}}% выше обычного месяца.",
+      "steady": "Повседневные расходы были близки к обычному месяцу.",
+      "leave": "Сбережения ниже при сниженной зарплате: {{before}}% дохода год назад, {{rate}}% сейчас."
     },
-    "summary": "Everyday spending was {{spent}} against a usual {{usual}}. {{lower}} categories came in under their usual month and {{higher}} over.",
-    "everydaySpend": "Everyday spend",
-    "vsUsual": "{{sign}} {{pct}}% vs {{usual}}",
-    "savedTwelve": "Saved, last 12 months",
-    "savedFrom": "from {{before}}% a year ago",
-    "oneOffs": "One-offs",
-    "oneOffsNone": "None",
-    "oneOffsOver": "over {{amount}}",
-    "oneOffsCount_one": "{{count}} purchase, left out above",
-    "oneOffsCount_other": "{{count}} purchases, left out above",
-    "chartTitle": "Each category against its usual month",
-    "chartUsual": "usual = median of the six months before",
-    "less": "less than usual",
-    "more": "more than usual",
-    "excluded": "Not shown: {{list}}.",
+    "summary": "Повседневные расходы составили {{spent}} при обычных {{usual}}. Категорий ниже обычного: {{lower}}, выше: {{higher}}.",
+    "everydaySpend": "Повседневные расходы",
+    "vsUsual": "{{sign}} {{pct}}% к {{usual}}",
+    "savedTwelve": "Сбережено, последние 12 месяцев",
+    "savedFrom": "с {{before}}% год назад",
+    "oneOffs": "Разовые покупки",
+    "oneOffsNone": "Нет",
+    "oneOffsOver": "свыше {{amount}}",
+    "oneOffsCount_one": "{{count}} покупка, не учтена выше",
+    "oneOffsCount_few": "{{count}} покупки, не учтены выше",
+    "oneOffsCount_many": "{{count}} покупок, не учтены выше",
+    "oneOffsCount_other": "{{count}} покупки, не учтены выше",
+    "chartTitle": "Каждая категория против своего обычного месяца",
+    "chartUsual": "обычный = медиана шести предыдущих месяцев",
+    "less": "меньше обычного",
+    "more": "больше обычного",
+    "excluded": "Не показано: {{list}}.",
     "reasons": {
-      "one_off": "one-offs",
-      "more_payments": "an extra regular payment",
-      "fewer_payments": "one regular payment fewer"
+      "one_off": "разовые покупки",
+      "more_payments": "лишний регулярный платёж",
+      "fewer_payments": "на один регулярный платёж меньше"
     },
-    "better": "Better",
-    "worse": "Worse",
-    "noneBetter": "Nothing stood out as better this month.",
-    "noneWorse": "Nothing stood out as worse this month.",
+    "better": "Лучше",
+    "worse": "Хуже",
+    "noneBetter": "В этом месяце ничего не выделилось в лучшую сторону.",
+    "noneWorse": "В этом месяце ничего не выделилось в худшую сторону.",
     "cards": {
       "category_month": {
-        "title_better": "{{category}} under usual",
-        "title_worse": "{{category}} over usual",
-        "titleStreak": "{{category}} back up after {{count}} quiet months",
-        "detail_one": "{{amount}} · usual {{usual}} · {{count}} transaction",
-        "detail_other": "{{amount}} · usual {{usual}} · {{count}} transactions"
+        "title_better": "{{category}} ниже обычного",
+        "title_worse": "{{category}} выше обычного",
+        "titleStreak": "{{category}} снова выше после спокойных месяцев ({{count}})",
+        "detail_one": "{{amount}} · обычно {{usual}} · {{count}} транзакция",
+        "detail_few": "{{amount}} · обычно {{usual}} · {{count}} транзакции",
+        "detail_many": "{{amount}} · обычно {{usual}} · {{count}} транзакций",
+        "detail_other": "{{amount}} · обычно {{usual}} · {{count}} транзакции",
+        "title_seasonal_better": "{{category}} ниже, как и год назад ({{month}})",
+        "title_seasonal_worse": "{{category}} выше, как и год назад ({{month}})"
       },
       "trend_cooling": {
-        "title": "{{category}} cooling off",
-        "detail": "12-month total {{total}}, down from {{peak}} ({{month}})"
+        "title": "{{category}} снижается",
+        "detail": "Сумма за 12 месяцев {{total}}, ниже пика {{peak}} ({{month}})"
       },
       "trend_rising": {
-        "title": "{{category}} climbing",
-        "detail": "12-month total {{total}}, up {{pct}}% on {{before}} a year earlier"
+        "title": "{{category}} растёт",
+        "detail": "Сумма за 12 месяцев {{total}}, на {{pct}}% больше, чем {{before}} годом ранее"
       },
       "savings_rate": {
-        "title_worse": "Savings rate sliding",
-        "title_better": "Savings rate climbing",
-        "detail": "{{rate}}% of income kept over 12 months, from {{before}}%.",
-        "title_leave": "Savings rate lower during leave",
-        "income": "Income {{change}} ({{movers}}).",
-        "spending": "Everyday spending {{change}} ({{movers}}).",
-        "leave": "Pay fell while {{payer}} payments started, which looks like leave.",
-        "short": "{{rate}}% kept, from {{before}}% · income {{income}}"
+        "title_worse": "Норма сбережений снижается",
+        "title_better": "Норма сбережений растёт",
+        "detail": "Сохранено {{rate}}% дохода за 12 месяцев, было {{before}}%.",
+        "title_leave": "Норма сбережений ниже во время отпуска",
+        "income": "Доход {{change}} ({{movers}}).",
+        "spending": "Повседневные расходы {{change}} ({{movers}}).",
+        "leave": "Зарплата снизилась, когда начались выплаты от {{payer}}; похоже на отпуск.",
+        "short": "Сохранено {{rate}}%, было {{before}}% · доход {{income}}"
       },
       "price_up": {
-        "title": "{{payee}} costs more"
+        "title": "{{payee}} дороже"
       },
       "price_down": {
-        "title": "{{payee}} costs less"
+        "title": "{{payee}} дешевле"
       },
       "price": {
-        "detail": "{{before}} → {{after}} a payment since {{since}}",
-        "yearly": "yearly change"
+        "detail": "{{before}} → {{after}} за платёж с {{since}}",
+        "yearly": "ежегодное изменение"
       },
       "payee_new": {
-        "title": "New cost: {{payee}}",
-        "detail": "{{amount}} this month in {{category}}"
+        "title": "Новый расход: {{payee}}",
+        "detail": "{{amount}} в этом месяце в категории {{category}}"
       },
       "payee_stopped": {
-        "title": "{{payee}} stopped",
-        "detail": "{{amount}} a payment in {{category}}, last on {{last}}"
+        "title": "{{payee}} прекратился",
+        "detail": "{{amount}} за платёж в категории {{category}}, последний {{last}}"
       },
       "small_burst": {
-        "title": "Burst of small charges: {{payee}}",
-        "detail": "{{count}} charges, {{amount}} · usually {{usual}} a month"
+        "title": "Серия мелких списаний: {{payee}}",
+        "detail": "Списаний: {{count}}, {{amount}} · обычно {{usual}} в месяц"
       },
       "income_change": {
-        "title_better": "{{payee}} paying more",
-        "title_worse": "{{payee}} paying less",
-        "detail": "{{before}} → {{after}} a payment ({{pct}}%)"
+        "title_better": "{{payee}} платит больше",
+        "title_worse": "{{payee}} платит меньше",
+        "detail": "{{before}} → {{after}} за выплату ({{pct}}%)"
       },
       "payee_switch": {
         "title": "{{from}} → {{to}}",
-        "detail": "{{category}}: {{before}} → {{after}} a month together ({{pct}}%), since {{since}}"
+        "detail": "{{category}}: {{before}} → {{after}} в месяц вместе ({{pct}}%), с {{since}}"
       },
       "habit_ended": {
-        "title": "{{payee}} has stopped",
-        "detail": "About {{monthly}} a month in {{category}}; last on {{last}}"
+        "title": "{{payee}} больше нет",
+        "detail": "Около {{monthly}} в месяц в категории {{category}}; последний {{last}}"
       }
     },
-    "usualSince": "usual since {{month}}",
-    "mostly": "mostly {{list}}"
+    "usualSince": "обычный с {{month}}",
+    "mostly": "в основном {{list}}",
+    "lastYear": "{{month}}: {{amount}}"
   }
 }

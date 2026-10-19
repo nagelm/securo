@@ -134,7 +134,7 @@
     "aiAgents": "AI एजेंट",
     "collapseSidebar": "साइडबार छोटा करें",
     "expandSidebar": "साइडबार बड़ा करें",
-    "insights": "Insights"
+    "insights": "इनसाइट्स"
   },
   "invoices": {
     "title": "इनवॉइस",
@@ -3378,106 +3378,109 @@
     }
   },
   "insights": {
-    "title": "Insights",
-    "previousMonth": "Previous month",
-    "nextMonth": "Next month",
-    "loadError": "Couldn't load the insights for this month.",
-    "empty": "Not enough history yet. Insights need a few months of transactions to compare against.",
+    "title": "इनसाइट्स",
+    "previousMonth": "पिछला महीना",
+    "nextMonth": "अगला महीना",
+    "loadError": "इस महीने की इनसाइट्स लोड नहीं हो सकीं।",
+    "empty": "अभी पर्याप्त इतिहास नहीं है। तुलना के लिए इनसाइट्स को कुछ महीनों के लेन-देन चाहिए।",
     "headline": {
-      "slide": "Your savings rate has been sliding: {{before}}% a year ago, {{rate}}% now.",
-      "rise": "Your savings rate has been climbing: {{before}}% a year ago, {{rate}}% now.",
-      "under": "Everyday spending came in {{pct}}% under a usual month.",
-      "over": "Everyday spending ran {{pct}}% over a usual month.",
-      "steady": "Everyday spending was close to a usual month.",
-      "leave": "Saving less while pay was reduced: {{before}}% of income a year ago, {{rate}}% now."
+      "slide": "आपकी बचत दर घट रही है: एक साल पहले {{before}}%, अब {{rate}}%।",
+      "rise": "आपकी बचत दर बढ़ रही है: एक साल पहले {{before}}%, अब {{rate}}%।",
+      "under": "रोज़मर्रा का खर्च सामान्य महीने से {{pct}}% कम रहा।",
+      "over": "रोज़मर्रा का खर्च सामान्य महीने से {{pct}}% ज़्यादा रहा।",
+      "steady": "रोज़मर्रा का खर्च सामान्य महीने के आसपास रहा।",
+      "leave": "वेतन कम रहने पर बचत कम: एक साल पहले आय का {{before}}%, अब {{rate}}%।"
     },
-    "summary": "Everyday spending was {{spent}} against a usual {{usual}}. {{lower}} categories came in under their usual month and {{higher}} over.",
-    "everydaySpend": "Everyday spend",
-    "vsUsual": "{{sign}} {{pct}}% vs {{usual}}",
-    "savedTwelve": "Saved, last 12 months",
-    "savedFrom": "from {{before}}% a year ago",
-    "oneOffs": "One-offs",
-    "oneOffsNone": "None",
-    "oneOffsOver": "over {{amount}}",
-    "oneOffsCount_one": "{{count}} purchase, left out above",
-    "oneOffsCount_other": "{{count}} purchases, left out above",
-    "chartTitle": "Each category against its usual month",
-    "chartUsual": "usual = median of the six months before",
-    "less": "less than usual",
-    "more": "more than usual",
-    "excluded": "Not shown: {{list}}.",
+    "summary": "रोज़मर्रा का खर्च {{spent}} रहा, जबकि सामान्य {{usual}} है। {{lower}} श्रेणियाँ अपने सामान्य महीने से कम और {{higher}} ज़्यादा रहीं।",
+    "everydaySpend": "रोज़मर्रा का खर्च",
+    "vsUsual": "{{sign}} {{pct}}% बनाम {{usual}}",
+    "savedTwelve": "बचत, पिछले 12 महीने",
+    "savedFrom": "एक साल पहले {{before}}% से",
+    "oneOffs": "एकमुश्त खरीद",
+    "oneOffsNone": "कोई नहीं",
+    "oneOffsOver": "{{amount}} से ऊपर",
+    "oneOffsCount_one": "{{count}} खरीद, ऊपर शामिल नहीं",
+    "oneOffsCount_other": "{{count}} खरीद, ऊपर शामिल नहीं",
+    "chartTitle": "हर श्रेणी अपने सामान्य महीने के मुकाबले",
+    "chartUsual": "सामान्य = पिछले छह महीनों का माध्यक",
+    "less": "सामान्य से कम",
+    "more": "सामान्य से ज़्यादा",
+    "excluded": "नहीं दिखाया गया: {{list}}।",
     "reasons": {
-      "one_off": "one-offs",
-      "more_payments": "an extra regular payment",
-      "fewer_payments": "one regular payment fewer"
+      "one_off": "एकमुश्त खरीद",
+      "more_payments": "एक अतिरिक्त नियमित भुगतान",
+      "fewer_payments": "एक नियमित भुगतान कम"
     },
-    "better": "Better",
-    "worse": "Worse",
-    "noneBetter": "Nothing stood out as better this month.",
-    "noneWorse": "Nothing stood out as worse this month.",
+    "better": "बेहतर",
+    "worse": "बदतर",
+    "noneBetter": "इस महीने कुछ भी बेहतर नहीं दिखा।",
+    "noneWorse": "इस महीने कुछ भी बदतर नहीं दिखा।",
     "cards": {
       "category_month": {
-        "title_better": "{{category}} under usual",
-        "title_worse": "{{category}} over usual",
-        "titleStreak": "{{category}} back up after {{count}} quiet months",
-        "detail_one": "{{amount}} · usual {{usual}} · {{count}} transaction",
-        "detail_other": "{{amount}} · usual {{usual}} · {{count}} transactions"
+        "title_better": "{{category}} सामान्य से कम",
+        "title_worse": "{{category}} सामान्य से ज़्यादा",
+        "titleStreak": "{{count}} शांत महीनों के बाद {{category}} फिर बढ़ा",
+        "detail_one": "{{amount}} · सामान्य {{usual}} · {{count}} लेन-देन",
+        "detail_other": "{{amount}} · सामान्य {{usual}} · {{count}} लेन-देन",
+        "title_seasonal_better": "{{category}} कम, जैसे {{month}} में",
+        "title_seasonal_worse": "{{category}} ज़्यादा, जैसे {{month}} में"
       },
       "trend_cooling": {
-        "title": "{{category}} cooling off",
-        "detail": "12-month total {{total}}, down from {{peak}} ({{month}})"
+        "title": "{{category}} घट रहा है",
+        "detail": "12 महीने का कुल {{total}}, {{peak}} ({{month}}) से कम"
       },
       "trend_rising": {
-        "title": "{{category}} climbing",
-        "detail": "12-month total {{total}}, up {{pct}}% on {{before}} a year earlier"
+        "title": "{{category}} बढ़ रहा है",
+        "detail": "12 महीने का कुल {{total}}, एक साल पहले के {{before}} से {{pct}}% ज़्यादा"
       },
       "savings_rate": {
-        "title_worse": "Savings rate sliding",
-        "title_better": "Savings rate climbing",
-        "detail": "{{rate}}% of income kept over 12 months, from {{before}}%.",
-        "title_leave": "Savings rate lower during leave",
-        "income": "Income {{change}} ({{movers}}).",
-        "spending": "Everyday spending {{change}} ({{movers}}).",
-        "leave": "Pay fell while {{payer}} payments started, which looks like leave.",
-        "short": "{{rate}}% kept, from {{before}}% · income {{income}}"
+        "title_worse": "बचत दर घट रही है",
+        "title_better": "बचत दर बढ़ रही है",
+        "detail": "12 महीनों में आय का {{rate}}% बचा, पहले {{before}}%।",
+        "title_leave": "छुट्टी के दौरान बचत दर कम",
+        "income": "आय {{change}} ({{movers}})।",
+        "spending": "रोज़मर्रा का खर्च {{change}} ({{movers}})।",
+        "leave": "{{payer}} से भुगतान शुरू होने पर वेतन घटा, जो छुट्टी जैसा लगता है।",
+        "short": "{{rate}}% बचा, पहले {{before}}% · आय {{income}}"
       },
       "price_up": {
-        "title": "{{payee}} costs more"
+        "title": "{{payee}} महँगा हुआ"
       },
       "price_down": {
-        "title": "{{payee}} costs less"
+        "title": "{{payee}} सस्ता हुआ"
       },
       "price": {
-        "detail": "{{before}} → {{after}} a payment since {{since}}",
-        "yearly": "yearly change"
+        "detail": "{{since}} से प्रति भुगतान {{before}} → {{after}}",
+        "yearly": "वार्षिक बदलाव"
       },
       "payee_new": {
-        "title": "New cost: {{payee}}",
-        "detail": "{{amount}} this month in {{category}}"
+        "title": "नया खर्च: {{payee}}",
+        "detail": "इस महीने {{category}} में {{amount}}"
       },
       "payee_stopped": {
-        "title": "{{payee}} stopped",
-        "detail": "{{amount}} a payment in {{category}}, last on {{last}}"
+        "title": "{{payee}} बंद हुआ",
+        "detail": "{{category}} में प्रति भुगतान {{amount}}, आख़िरी {{last}} को"
       },
       "small_burst": {
-        "title": "Burst of small charges: {{payee}}",
-        "detail": "{{count}} charges, {{amount}} · usually {{usual}} a month"
+        "title": "छोटे शुल्कों की झड़ी: {{payee}}",
+        "detail": "{{count}} शुल्क, {{amount}} · आमतौर पर महीने में {{usual}}"
       },
       "income_change": {
-        "title_better": "{{payee}} paying more",
-        "title_worse": "{{payee}} paying less",
-        "detail": "{{before}} → {{after}} a payment ({{pct}}%)"
+        "title_better": "{{payee}} ज़्यादा दे रहा है",
+        "title_worse": "{{payee}} कम दे रहा है",
+        "detail": "प्रति भुगतान {{before}} → {{after}} ({{pct}}%)"
       },
       "payee_switch": {
         "title": "{{from}} → {{to}}",
-        "detail": "{{category}}: {{before}} → {{after}} a month together ({{pct}}%), since {{since}}"
+        "detail": "{{category}}: मिलाकर प्रति माह {{before}} → {{after}} ({{pct}}%), {{since}} से"
       },
       "habit_ended": {
-        "title": "{{payee}} has stopped",
-        "detail": "About {{monthly}} a month in {{category}}; last on {{last}}"
+        "title": "{{payee}} बंद हो गया",
+        "detail": "{{category}} में लगभग {{monthly}} प्रति माह; आख़िरी {{last}} को"
       }
     },
-    "usualSince": "usual since {{month}}",
-    "mostly": "mostly {{list}}"
+    "usualSince": "{{month}} से सामान्य",
+    "mostly": "मुख्यतः {{list}}",
+    "lastYear": "{{month}} में {{amount}}"
   }
 }

@@ -175,6 +175,33 @@ def test_holiday_pause_is_not_a_stop():
     assert not [c for c in b["better"] if c["kind"] == "payee_stopped"]
 
 
+def lessons() -> list[Row]:
+    """Lessons billed at the end of each month, none over the summer
+    holidays (December to February), like a class paid per school term."""
+    return [
+        spend(d.replace(day=28), 90, "Kids", payee="SwimClub")
+        for d in months_back(24) if d.month not in (12, 1, 2)
+    ]
+
+
+def test_a_term_break_like_last_years_is_not_a_stop():
+    rows = steady_income() + [r for r in lessons() if r.when < date(2025, 12, 1)]
+    for month in (date(2026, 1, 1), date(2026, 2, 1)):
+        b = analyse(rows, month)
+        assert not [c for c in b["better"] if c["kind"] in ("payee_stopped", "payee_switch")], month
+
+
+def test_a_payee_that_paused_one_summer_can_still_stop_mid_year():
+    rows = steady_income() + [
+        spend(d.replace(day=28), 90, "Kids", payee="SwimClub")
+        for d in months_back(24)
+        if d < date(2026, 7, 1) and not date(2024, 12, 1) <= d < date(2025, 3, 1)
+    ]
+    b = analyse(rows, MONTH)
+    card = next(c for c in b["better"] if c["kind"] == "payee_stopped")
+    assert card["params"]["payee"] == "SwimClub"
+
+
 def test_twelve_month_total_past_its_peak():
     rows = steady_income()
     for d in months_back(24):
@@ -389,3 +416,43 @@ def test_drivers_fall_back_to_the_bank_description():
     b = analyse(rows, MONTH)
     row = next(c for c in b["categories"] if c["name"] == "Leisure")
     assert row["drivers"][0]["payee"] == "Tickets example Grey"
+
+
+def test_each_category_carries_the_same_month_last_year():
+    rows = steady_income()
+    for d in months_back(24):
+        rows.append(spend(d.replace(day=10), 300 if d == date(2025, 9, 1) else 200, "Groceries"))
+    b = analyse(rows, MONTH)
+    row = next(c for c in b["categories"] if c["name"] == "Groceries")
+    assert row["last_year"] == 300
+    assert b["last_year_spend"] == 300
+
+
+def test_no_last_year_without_a_year_of_history():
+    rows = [pay(d.replace(day=15), 5000) for d in months_back(8)]
+    rows += [spend(d.replace(day=10), 200, "Groceries") for d in months_back(8)]
+    b = analyse(rows, MONTH)
+    assert b["last_year_spend"] is None
+    assert next(c for c in b["categories"] if c["name"] == "Groceries")["last_year"] is None
+
+
+def test_a_month_that_is_high_every_year_is_told_as_seasonal():
+    rows = steady_income()
+    for d in months_back(24):
+        rows.append(spend(d.replace(day=10), 400 if d.month == 9 else 200, "Power"))
+    rows.append(spend(MONTH.replace(day=20), 20, "Power"))
+    b = analyse(rows, MONTH)
+    card = next(c for c in b["worse"] if c["kind"] == "category_month")
+    assert card["params"]["seasonal"] is True
+    assert card["params"]["last_year"] == 400
+
+
+def test_a_jump_unlike_last_year_is_not_seasonal():
+    rows = steady_income()
+    for d in months_back(24)[:-1]:
+        rows.append(spend(d.replace(day=10), 200, "Power"))
+    rows.append(spend(MONTH.replace(day=10), 450, "Power"))
+    b = analyse(rows, MONTH)
+    card = next(c for c in b["worse"] if c["kind"] == "category_month")
+    assert card["params"]["seasonal"] is False
+    assert card["params"]["last_year"] == 200

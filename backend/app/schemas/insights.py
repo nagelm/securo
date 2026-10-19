@@ -20,6 +20,8 @@ class InsightCategoryRow(BaseModel):
     # the six months before; None when all six count.
     usual_since: Optional[str] = None
     drivers: list[InsightDriver] = []
+    # The same month a year earlier; None until the data reaches back a year.
+    last_year: Optional[float] = None
 
 
 class InsightExcluded(BaseModel):
@@ -46,6 +48,7 @@ class InsightsBriefing(BaseModel):
     last_month: str
     everyday_spend: float
     usual_spend: float
+    last_year_spend: Optional[float] = None
     income: float
     savings_rate: Optional[float] = None
     savings_rate_before: Optional[float] = None

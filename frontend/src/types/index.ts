@@ -2208,6 +2208,8 @@ export interface InsightsBriefing {
   last_month: string
   everyday_spend: number
   usual_spend: number
+  // The same month a year earlier; null until the data reaches back a year.
+  last_year_spend?: number | null
   income: number
   savings_rate: number | null
   savings_rate_before: number | null
@@ -2222,6 +2224,7 @@ export interface InsightsBriefing {
     diff: number
     usual_since: string | null
     drivers: { payee_id: string | null; payee: string; diff: number }[]
+    last_year?: number | null
   }[]
   excluded: { category_id: string | null; name: string; reason: 'one_off' | 'more_payments' | 'fewer_payments' }[]
   better: InsightCard[]

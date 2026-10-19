@@ -121,6 +121,25 @@ describe('InsightsPage', () => {
     expect(screen.getByText(/Rates: \$478 → \$521 a month together \(\+9%\)/)).toBeInTheDocument()
   })
 
+  it('shows the same month last year and tells a seasonal move as the season', async () => {
+    api.insights.briefing.mockResolvedValue(briefing({
+      last_year_spend: 900,
+      categories: [
+        { category_id: 'cat-power', name: 'Power', amount: 420, usual: 200, diff: 220, usual_since: null, drivers: [], last_year: 400 },
+      ],
+      worse: [{
+        kind: 'category_month', direction: 'worse', series: [200, 420], category_id: 'cat-power', payee_id: null,
+        link_from: '2026-09-01', link_to: '2026-09-30',
+        params: { category: 'Power', amount: 420, usual: 200, diff: 220, visits: 2, streak: 0, last_year: 400, seasonal: true },
+      }],
+    }))
+    renderWithProviders(<InsightsPage />)
+    expect(await screen.findByText('$900 in September 2025')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Power' })).toHaveAttribute('title', '$400 in September 2025')
+    const title = t('insights.cards.category_month.title_seasonal_worse', { category: 'Power', month: 'September 2025' })
+    expect(screen.getByText(title).closest('a')).toHaveAttribute('title', '$400 in September 2025')
+  })
+
   it('steps back a month', async () => {
     renderWithProviders(<InsightsPage />)
     await screen.findByText('Groceries')

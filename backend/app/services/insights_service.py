@@ -241,6 +241,24 @@ def _regulars(rows: list[Row], end: date, debit: bool) -> list[_Regular]:
     return out
 
 
+def _seasonal_pause(reg: _Regular, silent: int) -> bool:
+    """The payee went quiet at this time of year before and came back.
+
+    Lessons paid per school term stop over the summer holidays every year;
+    a silence that began within six weeks of the same date a year or two
+    earlier, and lasts no more than twice that earlier break, is the break
+    again, not a stop.
+    """
+    since = reg.dates[-1]
+    for a, b in zip(reg.dates, reg.dates[1:]):
+        gap = (b - a).days
+        if gap <= 1.5 * reg.cycle or silent > 2 * gap:
+            continue
+        if any(abs((a - (since - timedelta(days=365 * years))).days) <= 45 for years in (1, 2)):
+            return True
+    return False
+
+
 def _who(r: Row) -> tuple[str, str]:
     """A key and a label for who a row was paid to: the payee, or failing
     that the first words of the bank's description ("Tickets example")."""
@@ -303,6 +321,10 @@ def analyse(rows: list[Row], month: date) -> dict[str, Any]:
 
     lumpy = {c for c, total in all_debits.items() if total > 0 and one_off[c] / total >= LUMPY_SHARE}
     usual_range = range(m0 - USUAL_MONTHS, m0)
+    # The same month a year earlier, once the data reaches back that far.
+    first_seen = min((_mi(r.when) for r in rows), default=m0)
+    ly = m0 - 12
+    has_ly = first_seen <= ly
     # Everyday spending leaves out project categories (mostly one-off
     # purchases) entirely, their small purchases included: a renovation's
     # trips to the hardware store are part of the project, not of daily life.
@@ -417,6 +439,7 @@ def analyse(rows: list[Row], month: date) -> dict[str, Any]:
             "category_id": c, "name": names.get(c) or "", "amount": now, "usual": u, "diff": round(now - u, 2),
             "usual_since": _ym(months[0]) if len(months) < USUAL_MONTHS else None,
             "drivers": drivers(c, now - u),
+            "last_year": round(spend[c][ly], 2) if has_ly else None,
         })
     excluded = (
         [{"category_id": c, "name": names.get(c) or "", "reason": cadence_note[c]} for c in cadence_note]
@@ -437,9 +460,22 @@ def analyse(rows: list[Row], month: date) -> dict[str, Any]:
                 quiet += 1
             else:
                 break
+        # Seasonal: the same month last year made the same move against its
+        # own usual and this one goes no further than about that (power in
+        # winter, gifts in December). Still told, but as the season, and
+        # ranked lower.
+        then = spend[c][ly]
+        then_usual = _median([spend[c][m] for m in range(ly - USUAL_MONTHS, ly)])
+        seasonal = (
+            first_seen <= ly - USUAL_MONTHS and (then - then_usual) * diff > 0
+            and material(c, then - then_usual, then_usual)
+            and (now <= 1.25 * then if diff > 0 else now >= 0.75 * then)
+        )
         cards.append(Card(
-            kind="category_month", direction="worse" if diff > 0 else "better", score=abs(diff),
+            kind="category_month", direction="worse" if diff > 0 else "better",
+            score=abs(diff) / 2 if seasonal else abs(diff),
             params={
+                "last_year": round(then, 2) if has_ly else None, "seasonal": seasonal,
                 "category": names.get(c) or "", "amount": now, "usual": u, "diff": diff,
                 "visits": visits[c][m0], "usual_visits": _median([visits[c][m] for m in usual_range]),
                 "previous": round(spend[c][m0 - 1], 2), "streak": quiet,
@@ -584,6 +620,8 @@ def analyse(rows: list[Row], month: date) -> dict[str, Any]:
         silent = (month_end - reg.dates[-1]).days
         # A holiday pause is not a stop: at least 45 days of silence.
         if reg.category_id in lumpy or silent <= max(2.5 * reg.cycle, 45) or silent > 120:
+            continue
+        if _seasonal_pause(reg, silent):
             continue
         typical = _median(reg.amounts[-6:])
         cards.append(Card(
@@ -748,6 +786,7 @@ def analyse(rows: list[Row], month: date) -> dict[str, Any]:
         "month": _ym(m0),
         "everyday_spend": round(everyday_total[m0], 2),
         "usual_spend": round(usual_total, 2),
+        "last_year_spend": round(everyday_total[ly], 2) if has_ly else None,
         "income": round(income[m0], 2),
         "savings_rate": savings_rate,
         "savings_rate_before": savings_rate_before,

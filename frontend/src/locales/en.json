@@ -3421,7 +3421,9 @@
         "title_worse": "{{category}} over usual",
         "titleStreak": "{{category}} back up after {{count}} quiet months",
         "detail_one": "{{amount}} · usual {{usual}} · {{count}} transaction",
-        "detail_other": "{{amount}} · usual {{usual}} · {{count}} transactions"
+        "detail_other": "{{amount}} · usual {{usual}} · {{count}} transactions",
+        "title_seasonal_better": "{{category}} down, as in {{month}}",
+        "title_seasonal_worse": "{{category}} up, as in {{month}}"
       },
       "trend_cooling": {
         "title": "{{category}} cooling off",
@@ -3478,6 +3480,7 @@
       }
     },
     "usualSince": "usual since {{month}}",
-    "mostly": "mostly {{list}}"
+    "mostly": "mostly {{list}}",
+    "lastYear": "{{amount}} in {{month}}"
   }
 }

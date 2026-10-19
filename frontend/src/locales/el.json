@@ -134,7 +134,7 @@
     "aiAgents": "Βοηθοί AI",
     "collapseSidebar": "Σύμπτυξη πλευρικής γραμμής",
     "expandSidebar": "Ανάπτυξη πλευρικής γραμμής",
-    "insights": "Insights"
+    "insights": "Πληροφορίες"
   },
   "invoices": {
     "title": "Τιμολόγια",
@@ -3378,106 +3378,109 @@
     }
   },
   "insights": {
-    "title": "Insights",
-    "previousMonth": "Previous month",
-    "nextMonth": "Next month",
-    "loadError": "Couldn't load the insights for this month.",
-    "empty": "Not enough history yet. Insights need a few months of transactions to compare against.",
+    "title": "Πληροφορίες",
+    "previousMonth": "Προηγούμενος μήνας",
+    "nextMonth": "Επόμενος μήνας",
+    "loadError": "Δεν ήταν δυνατή η φόρτωση των πληροφοριών αυτού του μήνα.",
+    "empty": "Δεν υπάρχει ακόμη αρκετό ιστορικό. Οι πληροφορίες χρειάζονται συναλλαγές λίγων μηνών για σύγκριση.",
     "headline": {
-      "slide": "Your savings rate has been sliding: {{before}}% a year ago, {{rate}}% now.",
-      "rise": "Your savings rate has been climbing: {{before}}% a year ago, {{rate}}% now.",
-      "under": "Everyday spending came in {{pct}}% under a usual month.",
-      "over": "Everyday spending ran {{pct}}% over a usual month.",
-      "steady": "Everyday spending was close to a usual month.",
-      "leave": "Saving less while pay was reduced: {{before}}% of income a year ago, {{rate}}% now."
+      "slide": "Το ποσοστό αποταμίευσής σας μειώνεται: {{before}}% πριν από ένα χρόνο, {{rate}}% τώρα.",
+      "rise": "Το ποσοστό αποταμίευσής σας αυξάνεται: {{before}}% πριν από ένα χρόνο, {{rate}}% τώρα.",
+      "under": "Οι καθημερινές δαπάνες ήταν {{pct}}% κάτω από έναν συνηθισμένο μήνα.",
+      "over": "Οι καθημερινές δαπάνες ήταν {{pct}}% πάνω από έναν συνηθισμένο μήνα.",
+      "steady": "Οι καθημερινές δαπάνες ήταν κοντά σε έναν συνηθισμένο μήνα.",
+      "leave": "Λιγότερη αποταμίευση με μειωμένο μισθό: {{before}}% του εισοδήματος πριν από ένα χρόνο, {{rate}}% τώρα."
     },
-    "summary": "Everyday spending was {{spent}} against a usual {{usual}}. {{lower}} categories came in under their usual month and {{higher}} over.",
-    "everydaySpend": "Everyday spend",
-    "vsUsual": "{{sign}} {{pct}}% vs {{usual}}",
-    "savedTwelve": "Saved, last 12 months",
-    "savedFrom": "from {{before}}% a year ago",
-    "oneOffs": "One-offs",
-    "oneOffsNone": "None",
-    "oneOffsOver": "over {{amount}}",
-    "oneOffsCount_one": "{{count}} purchase, left out above",
-    "oneOffsCount_other": "{{count}} purchases, left out above",
-    "chartTitle": "Each category against its usual month",
-    "chartUsual": "usual = median of the six months before",
-    "less": "less than usual",
-    "more": "more than usual",
-    "excluded": "Not shown: {{list}}.",
+    "summary": "Οι καθημερινές δαπάνες ήταν {{spent}} έναντι συνήθως {{usual}}. Κατηγορίες κάτω από τον συνηθισμένο μήνα: {{lower}}, πάνω: {{higher}}.",
+    "everydaySpend": "Καθημερινές δαπάνες",
+    "vsUsual": "{{sign}} {{pct}}% έναντι {{usual}}",
+    "savedTwelve": "Αποταμίευση, τελευταίοι 12 μήνες",
+    "savedFrom": "από {{before}}% πριν από ένα χρόνο",
+    "oneOffs": "Έκτακτες αγορές",
+    "oneOffsNone": "Καμία",
+    "oneOffsOver": "πάνω από {{amount}}",
+    "oneOffsCount_one": "{{count}} αγορά, εκτός παραπάνω",
+    "oneOffsCount_other": "{{count}} αγορές, εκτός παραπάνω",
+    "chartTitle": "Κάθε κατηγορία έναντι του συνηθισμένου της μήνα",
+    "chartUsual": "συνηθισμένος = διάμεσος των έξι προηγούμενων μηνών",
+    "less": "λιγότερο από συνήθως",
+    "more": "περισσότερο από συνήθως",
+    "excluded": "Δεν εμφανίζονται: {{list}}.",
     "reasons": {
-      "one_off": "one-offs",
-      "more_payments": "an extra regular payment",
-      "fewer_payments": "one regular payment fewer"
+      "one_off": "έκτακτες αγορές",
+      "more_payments": "μία επιπλέον τακτική πληρωμή",
+      "fewer_payments": "μία τακτική πληρωμή λιγότερη"
     },
-    "better": "Better",
-    "worse": "Worse",
-    "noneBetter": "Nothing stood out as better this month.",
-    "noneWorse": "Nothing stood out as worse this month.",
+    "better": "Καλύτερα",
+    "worse": "Χειρότερα",
+    "noneBetter": "Τίποτα δεν ξεχώρισε ως καλύτερο αυτόν τον μήνα.",
+    "noneWorse": "Τίποτα δεν ξεχώρισε ως χειρότερο αυτόν τον μήνα.",
     "cards": {
       "category_month": {
-        "title_better": "{{category}} under usual",
-        "title_worse": "{{category}} over usual",
-        "titleStreak": "{{category}} back up after {{count}} quiet months",
-        "detail_one": "{{amount}} · usual {{usual}} · {{count}} transaction",
-        "detail_other": "{{amount}} · usual {{usual}} · {{count}} transactions"
+        "title_better": "{{category}} κάτω από το συνηθισμένο",
+        "title_worse": "{{category}} πάνω από το συνηθισμένο",
+        "titleStreak": "{{category}} ξανά πάνω μετά από {{count}} ήσυχους μήνες",
+        "detail_one": "{{amount}} · συνήθως {{usual}} · {{count}} συναλλαγή",
+        "detail_other": "{{amount}} · συνήθως {{usual}} · {{count}} συναλλαγές",
+        "title_seasonal_better": "{{category}} κάτω, όπως πέρσι ({{month}})",
+        "title_seasonal_worse": "{{category}} πάνω, όπως πέρσι ({{month}})"
       },
       "trend_cooling": {
-        "title": "{{category}} cooling off",
-        "detail": "12-month total {{total}}, down from {{peak}} ({{month}})"
+        "title": "{{category}} υποχωρεί",
+        "detail": "Σύνολο 12 μηνών {{total}}, κάτω από {{peak}} ({{month}})"
       },
       "trend_rising": {
-        "title": "{{category}} climbing",
-        "detail": "12-month total {{total}}, up {{pct}}% on {{before}} a year earlier"
+        "title": "{{category}} ανεβαίνει",
+        "detail": "Σύνολο 12 μηνών {{total}}, {{pct}}% πάνω από {{before}} ένα χρόνο νωρίτερα"
       },
       "savings_rate": {
-        "title_worse": "Savings rate sliding",
-        "title_better": "Savings rate climbing",
-        "detail": "{{rate}}% of income kept over 12 months, from {{before}}%.",
-        "title_leave": "Savings rate lower during leave",
-        "income": "Income {{change}} ({{movers}}).",
-        "spending": "Everyday spending {{change}} ({{movers}}).",
-        "leave": "Pay fell while {{payer}} payments started, which looks like leave.",
-        "short": "{{rate}}% kept, from {{before}}% · income {{income}}"
+        "title_worse": "Το ποσοστό αποταμίευσης μειώνεται",
+        "title_better": "Το ποσοστό αποταμίευσης αυξάνεται",
+        "detail": "Κρατήθηκε το {{rate}}% του εισοδήματος σε 12 μήνες, από {{before}}%.",
+        "title_leave": "Χαμηλότερη αποταμίευση κατά την άδεια",
+        "income": "Εισόδημα {{change}} ({{movers}}).",
+        "spending": "Καθημερινές δαπάνες {{change}} ({{movers}}).",
+        "leave": "Ο μισθός μειώθηκε ενώ ξεκίνησαν πληρωμές από {{payer}}, κάτι που μοιάζει με άδεια.",
+        "short": "Κρατήθηκε {{rate}}%, από {{before}}% · εισόδημα {{income}}"
       },
       "price_up": {
-        "title": "{{payee}} costs more"
+        "title": "{{payee}} κοστίζει περισσότερο"
       },
       "price_down": {
-        "title": "{{payee}} costs less"
+        "title": "{{payee}} κοστίζει λιγότερο"
       },
       "price": {
-        "detail": "{{before}} → {{after}} a payment since {{since}}",
-        "yearly": "yearly change"
+        "detail": "{{before}} → {{after}} ανά πληρωμή από {{since}}",
+        "yearly": "ετήσια αλλαγή"
       },
       "payee_new": {
-        "title": "New cost: {{payee}}",
-        "detail": "{{amount}} this month in {{category}}"
+        "title": "Νέο κόστος: {{payee}}",
+        "detail": "{{amount}} αυτόν τον μήνα σε {{category}}"
       },
       "payee_stopped": {
-        "title": "{{payee}} stopped",
-        "detail": "{{amount}} a payment in {{category}}, last on {{last}}"
+        "title": "{{payee}} σταμάτησε",
+        "detail": "{{amount}} ανά πληρωμή σε {{category}}, τελευταία {{last}}"
       },
       "small_burst": {
-        "title": "Burst of small charges: {{payee}}",
-        "detail": "{{count}} charges, {{amount}} · usually {{usual}} a month"
+        "title": "Σειρά μικρών χρεώσεων: {{payee}}",
+        "detail": "{{count}} χρεώσεις, {{amount}} · συνήθως {{usual}} τον μήνα"
       },
       "income_change": {
-        "title_better": "{{payee}} paying more",
-        "title_worse": "{{payee}} paying less",
-        "detail": "{{before}} → {{after}} a payment ({{pct}}%)"
+        "title_better": "{{payee}} πληρώνει περισσότερα",
+        "title_worse": "{{payee}} πληρώνει λιγότερα",
+        "detail": "{{before}} → {{after}} ανά πληρωμή ({{pct}}%)"
       },
       "payee_switch": {
         "title": "{{from}} → {{to}}",
-        "detail": "{{category}}: {{before}} → {{after}} a month together ({{pct}}%), since {{since}}"
+        "detail": "{{category}}: {{before}} → {{after}} τον μήνα μαζί ({{pct}}%), από {{since}}"
       },
       "habit_ended": {
-        "title": "{{payee}} has stopped",
-        "detail": "About {{monthly}} a month in {{category}}; last on {{last}}"
+        "title": "{{payee}} σταμάτησε",
+        "detail": "Περίπου {{monthly}} τον μήνα σε {{category}}· τελευταία {{last}}"
       }
     },
-    "usualSince": "usual since {{month}}",
-    "mostly": "mostly {{list}}"
+    "usualSince": "συνηθισμένο από {{month}}",
+    "mostly": "κυρίως {{list}}",
+    "lastYear": "{{month}}: {{amount}}"
   }
 }

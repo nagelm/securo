@@ -134,7 +134,7 @@
     "aiAgents": "AI-agents",
     "collapseSidebar": "Zijbalk inklappen",
     "expandSidebar": "Zijbalk uitklappen",
-    "insights": "Insights"
+    "insights": "Inzichten"
   },
   "invoices": {
     "title": "Invoices",
@@ -3380,106 +3380,109 @@
     }
   },
   "insights": {
-    "title": "Insights",
-    "previousMonth": "Previous month",
-    "nextMonth": "Next month",
-    "loadError": "Couldn't load the insights for this month.",
-    "empty": "Not enough history yet. Insights need a few months of transactions to compare against.",
+    "title": "Inzichten",
+    "previousMonth": "Vorige maand",
+    "nextMonth": "Volgende maand",
+    "loadError": "De inzichten voor deze maand konden niet worden geladen.",
+    "empty": "Nog niet genoeg geschiedenis. Inzichten hebben een paar maanden aan transacties nodig om mee te vergelijken.",
     "headline": {
-      "slide": "Your savings rate has been sliding: {{before}}% a year ago, {{rate}}% now.",
-      "rise": "Your savings rate has been climbing: {{before}}% a year ago, {{rate}}% now.",
-      "under": "Everyday spending came in {{pct}}% under a usual month.",
-      "over": "Everyday spending ran {{pct}}% over a usual month.",
-      "steady": "Everyday spending was close to a usual month.",
-      "leave": "Saving less while pay was reduced: {{before}}% of income a year ago, {{rate}}% now."
+      "slide": "Uw spaarquote daalt: {{before}}% een jaar geleden, nu {{rate}}%.",
+      "rise": "Uw spaarquote stijgt: {{before}}% een jaar geleden, nu {{rate}}%.",
+      "under": "De dagelijkse uitgaven lagen {{pct}}% onder een gewone maand.",
+      "over": "De dagelijkse uitgaven lagen {{pct}}% boven een gewone maand.",
+      "steady": "De dagelijkse uitgaven lagen dicht bij een gewone maand.",
+      "leave": "Minder gespaard terwijl het loon lager was: {{before}}% van het inkomen een jaar geleden, nu {{rate}}%."
     },
-    "summary": "Everyday spending was {{spent}} against a usual {{usual}}. {{lower}} categories came in under their usual month and {{higher}} over.",
-    "everydaySpend": "Everyday spend",
-    "vsUsual": "{{sign}} {{pct}}% vs {{usual}}",
-    "savedTwelve": "Saved, last 12 months",
-    "savedFrom": "from {{before}}% a year ago",
-    "oneOffs": "One-offs",
-    "oneOffsNone": "None",
-    "oneOffsOver": "over {{amount}}",
-    "oneOffsCount_one": "{{count}} purchase, left out above",
-    "oneOffsCount_other": "{{count}} purchases, left out above",
-    "chartTitle": "Each category against its usual month",
-    "chartUsual": "usual = median of the six months before",
-    "less": "less than usual",
-    "more": "more than usual",
-    "excluded": "Not shown: {{list}}.",
+    "summary": "Dagelijkse uitgaven van {{spent}} tegenover gewoonlijk {{usual}}. {{lower}} categorieën lagen onder hun gewone maand en {{higher}} erboven.",
+    "everydaySpend": "Dagelijkse uitgaven",
+    "vsUsual": "{{sign}} {{pct}}% t.o.v. {{usual}}",
+    "savedTwelve": "Gespaard, laatste 12 maanden",
+    "savedFrom": "van {{before}}% een jaar geleden",
+    "oneOffs": "Eenmalige aankopen",
+    "oneOffsNone": "Geen",
+    "oneOffsOver": "boven {{amount}}",
+    "oneOffsCount_one": "{{count}} aankoop, hierboven weggelaten",
+    "oneOffsCount_other": "{{count}} aankopen, hierboven weggelaten",
+    "chartTitle": "Elke categorie tegenover haar gewone maand",
+    "chartUsual": "gewoon = mediaan van de zes maanden ervoor",
+    "less": "minder dan gewoonlijk",
+    "more": "meer dan gewoonlijk",
+    "excluded": "Niet getoond: {{list}}.",
     "reasons": {
-      "one_off": "one-offs",
-      "more_payments": "an extra regular payment",
-      "fewer_payments": "one regular payment fewer"
+      "one_off": "eenmalige aankopen",
+      "more_payments": "een extra vaste betaling",
+      "fewer_payments": "een vaste betaling minder"
     },
-    "better": "Better",
-    "worse": "Worse",
-    "noneBetter": "Nothing stood out as better this month.",
-    "noneWorse": "Nothing stood out as worse this month.",
+    "better": "Beter",
+    "worse": "Slechter",
+    "noneBetter": "Niets viel deze maand op als beter.",
+    "noneWorse": "Niets viel deze maand op als slechter.",
     "cards": {
       "category_month": {
-        "title_better": "{{category}} under usual",
-        "title_worse": "{{category}} over usual",
-        "titleStreak": "{{category}} back up after {{count}} quiet months",
-        "detail_one": "{{amount}} · usual {{usual}} · {{count}} transaction",
-        "detail_other": "{{amount}} · usual {{usual}} · {{count}} transactions"
+        "title_better": "{{category}} onder gewoonlijk",
+        "title_worse": "{{category}} boven gewoonlijk",
+        "titleStreak": "{{category}} weer hoger na {{count}} rustige maanden",
+        "detail_one": "{{amount}} · gewoonlijk {{usual}} · {{count}} transactie",
+        "detail_other": "{{amount}} · gewoonlijk {{usual}} · {{count}} transacties",
+        "title_seasonal_better": "{{category}} lager, net als in {{month}}",
+        "title_seasonal_worse": "{{category}} hoger, net als in {{month}}"
       },
       "trend_cooling": {
-        "title": "{{category}} cooling off",
-        "detail": "12-month total {{total}}, down from {{peak}} ({{month}})"
+        "title": "{{category}} neemt af",
+        "detail": "12-maandentotaal {{total}}, omlaag van {{peak}} ({{month}})"
       },
       "trend_rising": {
-        "title": "{{category}} climbing",
-        "detail": "12-month total {{total}}, up {{pct}}% on {{before}} a year earlier"
+        "title": "{{category}} stijgt",
+        "detail": "12-maandentotaal {{total}}, {{pct}}% hoger dan {{before}} een jaar eerder"
       },
       "savings_rate": {
-        "title_worse": "Savings rate sliding",
-        "title_better": "Savings rate climbing",
-        "detail": "{{rate}}% of income kept over 12 months, from {{before}}%.",
-        "title_leave": "Savings rate lower during leave",
-        "income": "Income {{change}} ({{movers}}).",
-        "spending": "Everyday spending {{change}} ({{movers}}).",
-        "leave": "Pay fell while {{payer}} payments started, which looks like leave.",
-        "short": "{{rate}}% kept, from {{before}}% · income {{income}}"
+        "title_worse": "Spaarquote daalt",
+        "title_better": "Spaarquote stijgt",
+        "detail": "{{rate}}% van het inkomen overgehouden over 12 maanden, van {{before}}%.",
+        "title_leave": "Lagere spaarquote tijdens verlof",
+        "income": "Inkomen {{change}} ({{movers}}).",
+        "spending": "Dagelijkse uitgaven {{change}} ({{movers}}).",
+        "leave": "Het loon daalde terwijl betalingen van {{payer}} begonnen; dat lijkt op verlof.",
+        "short": "{{rate}}% overgehouden, van {{before}}% · inkomen {{income}}"
       },
       "price_up": {
-        "title": "{{payee}} costs more"
+        "title": "{{payee}} kost meer"
       },
       "price_down": {
-        "title": "{{payee}} costs less"
+        "title": "{{payee}} kost minder"
       },
       "price": {
-        "detail": "{{before}} → {{after}} a payment since {{since}}",
-        "yearly": "yearly change"
+        "detail": "{{before}} → {{after}} per betaling sinds {{since}}",
+        "yearly": "jaarlijkse aanpassing"
       },
       "payee_new": {
-        "title": "New cost: {{payee}}",
-        "detail": "{{amount}} this month in {{category}}"
+        "title": "Nieuwe kosten: {{payee}}",
+        "detail": "{{amount}} deze maand in {{category}}"
       },
       "payee_stopped": {
-        "title": "{{payee}} stopped",
-        "detail": "{{amount}} a payment in {{category}}, last on {{last}}"
+        "title": "{{payee}} gestopt",
+        "detail": "{{amount}} per betaling in {{category}}, laatst op {{last}}"
       },
       "small_burst": {
-        "title": "Burst of small charges: {{payee}}",
-        "detail": "{{count}} charges, {{amount}} · usually {{usual}} a month"
+        "title": "Reeks kleine afschrijvingen: {{payee}}",
+        "detail": "{{count}} afschrijvingen, {{amount}} · gewoonlijk {{usual}} per maand"
       },
       "income_change": {
-        "title_better": "{{payee}} paying more",
-        "title_worse": "{{payee}} paying less",
-        "detail": "{{before}} → {{after}} a payment ({{pct}}%)"
+        "title_better": "{{payee}} betaalt meer",
+        "title_worse": "{{payee}} betaalt minder",
+        "detail": "{{before}} → {{after}} per betaling ({{pct}}%)"
       },
       "payee_switch": {
         "title": "{{from}} → {{to}}",
-        "detail": "{{category}}: {{before}} → {{after}} a month together ({{pct}}%), since {{since}}"
+        "detail": "{{category}}: {{before}} → {{after}} per maand samen ({{pct}}%), sinds {{since}}"
       },
       "habit_ended": {
-        "title": "{{payee}} has stopped",
-        "detail": "About {{monthly}} a month in {{category}}; last on {{last}}"
+        "title": "{{payee}} is gestopt",
+        "detail": "Ongeveer {{monthly}} per maand in {{category}}; laatst op {{last}}"
       }
     },
-    "usualSince": "usual since {{month}}",
-    "mostly": "mostly {{list}}"
+    "usualSince": "gewoon sinds {{month}}",
+    "mostly": "vooral {{list}}",
+    "lastYear": "{{amount}} in {{month}}"
   }
 }

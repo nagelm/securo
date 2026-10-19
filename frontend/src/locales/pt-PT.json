@@ -3383,105 +3383,108 @@
   },
   "insights": {
     "title": "Insights",
-    "previousMonth": "Previous month",
-    "nextMonth": "Next month",
-    "loadError": "Couldn't load the insights for this month.",
-    "empty": "Not enough history yet. Insights need a few months of transactions to compare against.",
+    "previousMonth": "Mês anterior",
+    "nextMonth": "Próximo mês",
+    "loadError": "Não foi possível carregar os insights deste mês.",
+    "empty": "Ainda não há histórico suficiente. Os insights precisam de alguns meses de transações para comparar.",
     "headline": {
-      "slide": "Your savings rate has been sliding: {{before}}% a year ago, {{rate}}% now.",
-      "rise": "Your savings rate has been climbing: {{before}}% a year ago, {{rate}}% now.",
-      "under": "Everyday spending came in {{pct}}% under a usual month.",
-      "over": "Everyday spending ran {{pct}}% over a usual month.",
-      "steady": "Everyday spending was close to a usual month.",
-      "leave": "Saving less while pay was reduced: {{before}}% of income a year ago, {{rate}}% now."
+      "slide": "A tua taxa de poupança está a descer: {{before}}% há um ano, {{rate}}% agora.",
+      "rise": "A tua taxa de poupança está a subir: {{before}}% há um ano, {{rate}}% agora.",
+      "under": "As despesas do dia a dia ficaram {{pct}}% abaixo de um mês habitual.",
+      "over": "As despesas do dia a dia ficaram {{pct}}% acima de um mês habitual.",
+      "steady": "As despesas do dia a dia ficaram perto de um mês habitual.",
+      "leave": "A poupar menos com o salário reduzido: {{before}}% do rendimento há um ano, {{rate}}% agora."
     },
-    "summary": "Everyday spending was {{spent}} against a usual {{usual}}. {{lower}} categories came in under their usual month and {{higher}} over.",
-    "everydaySpend": "Everyday spend",
+    "summary": "As despesas do dia a dia foram {{spent}} contra {{usual}} habituais. {{lower}} categorias ficaram abaixo do seu mês habitual e {{higher}} acima.",
+    "everydaySpend": "Despesas do dia a dia",
     "vsUsual": "{{sign}} {{pct}}% vs {{usual}}",
-    "savedTwelve": "Saved, last 12 months",
-    "savedFrom": "from {{before}}% a year ago",
-    "oneOffs": "One-offs",
-    "oneOffsNone": "None",
-    "oneOffsOver": "over {{amount}}",
-    "oneOffsCount_one": "{{count}} purchase, left out above",
-    "oneOffsCount_other": "{{count}} purchases, left out above",
-    "chartTitle": "Each category against its usual month",
-    "chartUsual": "usual = median of the six months before",
-    "less": "less than usual",
-    "more": "more than usual",
-    "excluded": "Not shown: {{list}}.",
+    "savedTwelve": "Poupado, últimos 12 meses",
+    "savedFrom": "de {{before}}% há um ano",
+    "oneOffs": "Compras pontuais",
+    "oneOffsNone": "Nenhuma",
+    "oneOffsOver": "acima de {{amount}}",
+    "oneOffsCount_one": "{{count}} compra, deixada de fora acima",
+    "oneOffsCount_other": "{{count}} compras, deixadas de fora acima",
+    "chartTitle": "Cada categoria face ao seu mês habitual",
+    "chartUsual": "habitual = mediana dos seis meses anteriores",
+    "less": "menos que o habitual",
+    "more": "mais que o habitual",
+    "excluded": "Não mostrado: {{list}}.",
     "reasons": {
-      "one_off": "one-offs",
-      "more_payments": "an extra regular payment",
-      "fewer_payments": "one regular payment fewer"
+      "one_off": "compras pontuais",
+      "more_payments": "um pagamento recorrente a mais",
+      "fewer_payments": "um pagamento recorrente a menos"
     },
-    "better": "Better",
-    "worse": "Worse",
-    "noneBetter": "Nothing stood out as better this month.",
-    "noneWorse": "Nothing stood out as worse this month.",
+    "better": "Melhor",
+    "worse": "Pior",
+    "noneBetter": "Nada se destacou como melhor este mês.",
+    "noneWorse": "Nada se destacou como pior este mês.",
     "cards": {
       "category_month": {
-        "title_better": "{{category}} under usual",
-        "title_worse": "{{category}} over usual",
-        "titleStreak": "{{category}} back up after {{count}} quiet months",
-        "detail_one": "{{amount}} · usual {{usual}} · {{count}} transaction",
-        "detail_other": "{{amount}} · usual {{usual}} · {{count}} transactions"
+        "title_better": "{{category}} abaixo do habitual",
+        "title_worse": "{{category}} acima do habitual",
+        "titleStreak": "{{category}} voltou a subir após {{count}} meses calmos",
+        "detail_one": "{{amount}} · habitual {{usual}} · {{count}} transação",
+        "detail_other": "{{amount}} · habitual {{usual}} · {{count}} transações",
+        "title_seasonal_better": "{{category}} em queda, como em {{month}}",
+        "title_seasonal_worse": "{{category}} em alta, como em {{month}}"
       },
       "trend_cooling": {
-        "title": "{{category}} cooling off",
-        "detail": "12-month total {{total}}, down from {{peak}} ({{month}})"
+        "title": "{{category}} a abrandar",
+        "detail": "Total de 12 meses {{total}}, abaixo de {{peak}} ({{month}})"
       },
       "trend_rising": {
-        "title": "{{category}} climbing",
-        "detail": "12-month total {{total}}, up {{pct}}% on {{before}} a year earlier"
+        "title": "{{category}} a subir",
+        "detail": "Total de 12 meses {{total}}, {{pct}}% acima de {{before}} um ano antes"
       },
       "savings_rate": {
-        "title_worse": "Savings rate sliding",
-        "title_better": "Savings rate climbing",
-        "detail": "{{rate}}% of income kept over 12 months, from {{before}}%.",
-        "title_leave": "Savings rate lower during leave",
-        "income": "Income {{change}} ({{movers}}).",
-        "spending": "Everyday spending {{change}} ({{movers}}).",
-        "leave": "Pay fell while {{payer}} payments started, which looks like leave.",
-        "short": "{{rate}}% kept, from {{before}}% · income {{income}}"
+        "title_worse": "Taxa de poupança a descer",
+        "title_better": "Taxa de poupança a subir",
+        "detail": "{{rate}}% do rendimento guardado em 12 meses, de {{before}}%.",
+        "title_leave": "Taxa de poupança menor durante a licença",
+        "income": "Rendimento {{change}} ({{movers}}).",
+        "spending": "Despesas do dia a dia {{change}} ({{movers}}).",
+        "leave": "O salário desceu quando começaram os pagamentos de {{payer}}, o que parece uma licença.",
+        "short": "{{rate}}% guardado, de {{before}}% · rendimento {{income}}"
       },
       "price_up": {
-        "title": "{{payee}} costs more"
+        "title": "{{payee}} está mais caro"
       },
       "price_down": {
-        "title": "{{payee}} costs less"
+        "title": "{{payee}} está mais barato"
       },
       "price": {
-        "detail": "{{before}} → {{after}} a payment since {{since}}",
-        "yearly": "yearly change"
+        "detail": "{{before}} → {{after}} por pagamento desde {{since}}",
+        "yearly": "atualização anual"
       },
       "payee_new": {
-        "title": "New cost: {{payee}}",
-        "detail": "{{amount}} this month in {{category}}"
+        "title": "Nova despesa: {{payee}}",
+        "detail": "{{amount}} este mês em {{category}}"
       },
       "payee_stopped": {
-        "title": "{{payee}} stopped",
-        "detail": "{{amount}} a payment in {{category}}, last on {{last}}"
+        "title": "{{payee}} parou",
+        "detail": "{{amount}} por pagamento em {{category}}, o último em {{last}}"
       },
       "small_burst": {
-        "title": "Burst of small charges: {{payee}}",
-        "detail": "{{count}} charges, {{amount}} · usually {{usual}} a month"
+        "title": "Série de pequenos débitos: {{payee}}",
+        "detail": "{{count}} débitos, {{amount}} · normalmente {{usual}} por mês"
       },
       "income_change": {
-        "title_better": "{{payee}} paying more",
-        "title_worse": "{{payee}} paying less",
-        "detail": "{{before}} → {{after}} a payment ({{pct}}%)"
+        "title_better": "{{payee}} a pagar mais",
+        "title_worse": "{{payee}} a pagar menos",
+        "detail": "{{before}} → {{after}} por pagamento ({{pct}}%)"
       },
       "payee_switch": {
         "title": "{{from}} → {{to}}",
-        "detail": "{{category}}: {{before}} → {{after}} a month together ({{pct}}%), since {{since}}"
+        "detail": "{{category}}: {{before}} → {{after}} por mês juntos ({{pct}}%), desde {{since}}"
       },
       "habit_ended": {
-        "title": "{{payee}} has stopped",
-        "detail": "About {{monthly}} a month in {{category}}; last on {{last}}"
+        "title": "{{payee}} parou",
+        "detail": "Cerca de {{monthly}} por mês em {{category}}; o último em {{last}}"
       }
     },
-    "usualSince": "usual since {{month}}",
-    "mostly": "mostly {{list}}"
+    "usualSince": "habitual desde {{month}}",
+    "mostly": "principalmente {{list}}",
+    "lastYear": "{{amount}} em {{month}}"
   }
 }

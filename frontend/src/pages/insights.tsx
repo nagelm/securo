@@ -162,6 +162,9 @@ function Briefing({ data, money }: { data: InsightsBriefing; money: (v: number) 
             value={money(data.everyday_spend)}
             note={t('insights.vsUsual', { sign: pct < 0 ? '▼' : '▲', pct: Math.abs(pct), usual: money(data.usual_spend) })}
             tone={pct < 0 ? 'good' : pct > 0 ? 'bad' : undefined}
+            sub={data.last_year_spend == null ? undefined : t('insights.lastYear', {
+              amount: money(data.last_year_spend), month: monthLabel(shiftMonth(data.month, -12), locale),
+            })}
           />
           <Stat
             label={t('insights.savedTwelve')}
@@ -228,7 +231,7 @@ function Briefing({ data, money }: { data: InsightsBriefing; money: (v: number) 
   )
 }
 
-function Stat({ label, value, note, tone }: { label: string; value: string; note: string; tone?: 'good' | 'bad' }) {
+function Stat({ label, value, note, tone, sub }: { label: string; value: string; note: string; tone?: 'good' | 'bad'; sub?: string }) {
   return (
     <div className="rounded-xl border border-border bg-card px-3.5 py-3">
       <div className="text-xs text-muted-foreground">{label}</div>
@@ -236,6 +239,7 @@ function Stat({ label, value, note, tone }: { label: string; value: string; note
       <div className={cn('text-xs', tone === 'good' ? 'text-emerald-600' : tone === 'bad' ? 'text-rose-600' : 'text-muted-foreground')}>
         {note}
       </div>
+      {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
     </div>
   )
 }
@@ -261,6 +265,9 @@ function CategoryRow({
       ? t('insights.mostly', {
           list: c.drivers.map((d) => `${d.payee} ${d.diff < 0 ? '−' : '+'}${money(Math.abs(d.diff))}`).join(', '),
         })
+      : '',
+    c.last_year != null
+      ? t('insights.lastYear', { amount: money(c.last_year), month: monthLabel(shiftMonth(data.month, -12), locale) })
       : '',
   ].filter(Boolean)
   const hover = notes.join(' · ') || undefined
@@ -344,17 +351,27 @@ function describe(
   switch (card.kind) {
     case 'category_month': {
       const streak = n('streak')
-      const title = card.direction === 'worse' && streak >= 2
-        ? t('insights.cards.category_month.titleStreak', { category: p.category, count: streak })
-        : t(`insights.cards.category_month.title_${card.direction}`, { category: p.category })
+      // The month a year before the card's month (its link starts on the 1st).
+      const lastYearMonth = card.link_from ? monthLabel(shiftMonth(card.link_from.slice(0, 7), -12), locale) : ''
+      const title = card.params.seasonal
+        ? t(`insights.cards.category_month.title_seasonal_${card.direction}`, { category: p.category, month: lastYearMonth })
+        : card.direction === 'worse' && streak >= 2
+          ? t('insights.cards.category_month.titleStreak', { category: p.category, count: streak })
+          : t(`insights.cards.category_month.title_${card.direction}`, { category: p.category })
+      const more = [
+        p.driver
+          ? t('insights.mostly', { list: `${p.driver} ${n('driver_diff') < 0 ? '−' : '+'}${money(Math.abs(n('driver_diff')))}` })
+          : '',
+        p.last_year != null && lastYearMonth
+          ? t('insights.lastYear', { amount: money(n('last_year')), month: lastYearMonth })
+          : '',
+      ].filter(Boolean).join(' · ')
       return {
         title,
         detail: t('insights.cards.category_month.detail', {
           amount: money(n('amount')), usual: money(n('usual')), count: n('visits'),
         }),
-        more: p.driver
-          ? t('insights.mostly', { list: `${p.driver} ${n('driver_diff') < 0 ? '−' : '+'}${money(Math.abs(n('driver_diff')))}` })
-          : undefined,
+        more: more || undefined,
       }
     }
     case 'trend_cooling':

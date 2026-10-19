@@ -134,7 +134,7 @@
     "aiAgents": "Agentes IA",
     "collapseSidebar": "Contraer barra lateral",
     "expandSidebar": "Expandir barra lateral",
-    "insights": "Insights"
+    "insights": "Perspectivas"
   },
   "invoices": {
     "title": "Invoices",
@@ -3382,106 +3382,109 @@
     }
   },
   "insights": {
-    "title": "Insights",
-    "previousMonth": "Previous month",
-    "nextMonth": "Next month",
-    "loadError": "Couldn't load the insights for this month.",
-    "empty": "Not enough history yet. Insights need a few months of transactions to compare against.",
+    "title": "Perspectivas",
+    "previousMonth": "Mes anterior",
+    "nextMonth": "Mes siguiente",
+    "loadError": "No se pudieron cargar las perspectivas de este mes.",
+    "empty": "Aún no hay suficiente historial. Las perspectivas necesitan unos meses de transacciones para comparar.",
     "headline": {
-      "slide": "Your savings rate has been sliding: {{before}}% a year ago, {{rate}}% now.",
-      "rise": "Your savings rate has been climbing: {{before}}% a year ago, {{rate}}% now.",
-      "under": "Everyday spending came in {{pct}}% under a usual month.",
-      "over": "Everyday spending ran {{pct}}% over a usual month.",
-      "steady": "Everyday spending was close to a usual month.",
-      "leave": "Saving less while pay was reduced: {{before}}% of income a year ago, {{rate}}% now."
+      "slide": "Tu tasa de ahorro va bajando: {{before}} % hace un año, {{rate}} % ahora.",
+      "rise": "Tu tasa de ahorro va subiendo: {{before}} % hace un año, {{rate}} % ahora.",
+      "under": "El gasto cotidiano quedó un {{pct}} % por debajo de un mes habitual.",
+      "over": "El gasto cotidiano superó en un {{pct}} % un mes habitual.",
+      "steady": "El gasto cotidiano estuvo cerca de un mes habitual.",
+      "leave": "Ahorrando menos mientras el sueldo bajó: {{before}} % de los ingresos hace un año, {{rate}} % ahora."
     },
-    "summary": "Everyday spending was {{spent}} against a usual {{usual}}. {{lower}} categories came in under their usual month and {{higher}} over.",
-    "everydaySpend": "Everyday spend",
-    "vsUsual": "{{sign}} {{pct}}% vs {{usual}}",
-    "savedTwelve": "Saved, last 12 months",
-    "savedFrom": "from {{before}}% a year ago",
-    "oneOffs": "One-offs",
-    "oneOffsNone": "None",
-    "oneOffsOver": "over {{amount}}",
-    "oneOffsCount_one": "{{count}} purchase, left out above",
-    "oneOffsCount_other": "{{count}} purchases, left out above",
-    "chartTitle": "Each category against its usual month",
-    "chartUsual": "usual = median of the six months before",
-    "less": "less than usual",
-    "more": "more than usual",
-    "excluded": "Not shown: {{list}}.",
+    "summary": "El gasto cotidiano fue de {{spent}} frente a {{usual}} habituales. {{lower}} categorías quedaron por debajo de su mes habitual y {{higher}} por encima.",
+    "everydaySpend": "Gasto cotidiano",
+    "vsUsual": "{{sign}} {{pct}} % vs {{usual}}",
+    "savedTwelve": "Ahorrado, últimos 12 meses",
+    "savedFrom": "desde {{before}} % hace un año",
+    "oneOffs": "Compras puntuales",
+    "oneOffsNone": "Ninguna",
+    "oneOffsOver": "de más de {{amount}}",
+    "oneOffsCount_one": "{{count}} compra, excluida arriba",
+    "oneOffsCount_other": "{{count}} compras, excluidas arriba",
+    "chartTitle": "Cada categoría frente a su mes habitual",
+    "chartUsual": "habitual = mediana de los seis meses anteriores",
+    "less": "menos de lo habitual",
+    "more": "más de lo habitual",
+    "excluded": "No se muestra: {{list}}.",
     "reasons": {
-      "one_off": "one-offs",
-      "more_payments": "an extra regular payment",
-      "fewer_payments": "one regular payment fewer"
+      "one_off": "compras puntuales",
+      "more_payments": "un pago periódico de más",
+      "fewer_payments": "un pago periódico de menos"
     },
-    "better": "Better",
-    "worse": "Worse",
-    "noneBetter": "Nothing stood out as better this month.",
-    "noneWorse": "Nothing stood out as worse this month.",
+    "better": "Mejor",
+    "worse": "Peor",
+    "noneBetter": "Nada destacó como mejor este mes.",
+    "noneWorse": "Nada destacó como peor este mes.",
     "cards": {
       "category_month": {
-        "title_better": "{{category}} under usual",
-        "title_worse": "{{category}} over usual",
-        "titleStreak": "{{category}} back up after {{count}} quiet months",
-        "detail_one": "{{amount}} · usual {{usual}} · {{count}} transaction",
-        "detail_other": "{{amount}} · usual {{usual}} · {{count}} transactions"
+        "title_better": "{{category}} por debajo de lo habitual",
+        "title_worse": "{{category}} por encima de lo habitual",
+        "titleStreak": "{{category}} vuelve a subir tras {{count}} meses tranquilos",
+        "detail_one": "{{amount}} · habitual {{usual}} · {{count}} transacción",
+        "detail_other": "{{amount}} · habitual {{usual}} · {{count}} transacciones",
+        "title_seasonal_better": "{{category}} baja, como en {{month}}",
+        "title_seasonal_worse": "{{category}} sube, como en {{month}}"
       },
       "trend_cooling": {
-        "title": "{{category}} cooling off",
-        "detail": "12-month total {{total}}, down from {{peak}} ({{month}})"
+        "title": "{{category}} se modera",
+        "detail": "Total de 12 meses {{total}}, por debajo de {{peak}} ({{month}})"
       },
       "trend_rising": {
-        "title": "{{category}} climbing",
-        "detail": "12-month total {{total}}, up {{pct}}% on {{before}} a year earlier"
+        "title": "{{category}} en aumento",
+        "detail": "Total de 12 meses {{total}}, un {{pct}} % más que {{before}} un año antes"
       },
       "savings_rate": {
-        "title_worse": "Savings rate sliding",
-        "title_better": "Savings rate climbing",
-        "detail": "{{rate}}% of income kept over 12 months, from {{before}}%.",
-        "title_leave": "Savings rate lower during leave",
-        "income": "Income {{change}} ({{movers}}).",
-        "spending": "Everyday spending {{change}} ({{movers}}).",
-        "leave": "Pay fell while {{payer}} payments started, which looks like leave.",
-        "short": "{{rate}}% kept, from {{before}}% · income {{income}}"
+        "title_worse": "La tasa de ahorro baja",
+        "title_better": "La tasa de ahorro sube",
+        "detail": "{{rate}} % de los ingresos conservado en 12 meses, desde {{before}} %.",
+        "title_leave": "Tasa de ahorro más baja durante la licencia",
+        "income": "Ingresos {{change}} ({{movers}}).",
+        "spending": "Gasto cotidiano {{change}} ({{movers}}).",
+        "leave": "El sueldo bajó cuando empezaron los pagos de {{payer}}, lo que parece una licencia.",
+        "short": "{{rate}} % conservado, desde {{before}} % · ingresos {{income}}"
       },
       "price_up": {
-        "title": "{{payee}} costs more"
+        "title": "{{payee}} cuesta más"
       },
       "price_down": {
-        "title": "{{payee}} costs less"
+        "title": "{{payee}} cuesta menos"
       },
       "price": {
-        "detail": "{{before}} → {{after}} a payment since {{since}}",
-        "yearly": "yearly change"
+        "detail": "{{before}} → {{after}} por pago desde el {{since}}",
+        "yearly": "ajuste anual"
       },
       "payee_new": {
-        "title": "New cost: {{payee}}",
-        "detail": "{{amount}} this month in {{category}}"
+        "title": "Nuevo gasto: {{payee}}",
+        "detail": "{{amount}} este mes en {{category}}"
       },
       "payee_stopped": {
-        "title": "{{payee}} stopped",
-        "detail": "{{amount}} a payment in {{category}}, last on {{last}}"
+        "title": "{{payee}} se detuvo",
+        "detail": "{{amount}} por pago en {{category}}, el último el {{last}}"
       },
       "small_burst": {
-        "title": "Burst of small charges: {{payee}}",
-        "detail": "{{count}} charges, {{amount}} · usually {{usual}} a month"
+        "title": "Ráfaga de cargos pequeños: {{payee}}",
+        "detail": "{{count}} cargos, {{amount}} · normalmente {{usual}} al mes"
       },
       "income_change": {
-        "title_better": "{{payee}} paying more",
-        "title_worse": "{{payee}} paying less",
-        "detail": "{{before}} → {{after}} a payment ({{pct}}%)"
+        "title_better": "{{payee}} paga más",
+        "title_worse": "{{payee}} paga menos",
+        "detail": "{{before}} → {{after}} por pago ({{pct}} %)"
       },
       "payee_switch": {
         "title": "{{from}} → {{to}}",
-        "detail": "{{category}}: {{before}} → {{after}} a month together ({{pct}}%), since {{since}}"
+        "detail": "{{category}}: {{before}} → {{after}} al mes en conjunto ({{pct}} %), desde el {{since}}"
       },
       "habit_ended": {
-        "title": "{{payee}} has stopped",
-        "detail": "About {{monthly}} a month in {{category}}; last on {{last}}"
+        "title": "{{payee}} ha terminado",
+        "detail": "Unos {{monthly}} al mes en {{category}}; el último el {{last}}"
       }
     },
-    "usualSince": "usual since {{month}}",
-    "mostly": "mostly {{list}}"
+    "usualSince": "habitual desde {{month}}",
+    "mostly": "sobre todo {{list}}",
+    "lastYear": "{{amount}} en {{month}}"
   }
 }
