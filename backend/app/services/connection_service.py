@@ -24,6 +24,7 @@ from app.models.goal import Goal
 from app.models.collection import collection_accounts, collection_asset_groups
 from app.models.credit_card_bill import CreditCardBill
 from app.models.payee import Payee, PayeeMapping
+from app.models.rule import Rule
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.providers import get_provider
@@ -50,8 +51,12 @@ from app.services.asset_group_service import (
     ensure_group_for_connection,
 )
 from app.services.credit_card_service import apply_effective_date
-from app.services.rule_engine import merge_notes
-from app.services.rule_service import apply_rules_to_transaction, preview_rules_for_transaction
+from app.services.rule_engine import apply_rule_actions, evaluate_conditions, merge_notes
+from app.services.rule_service import (
+    apply_rules_to_transaction,
+    get_assignable_category_ids,
+    preview_rules_for_transaction,
+)
 from app.services.transfer_detection_service import detect_transfer_pairs
 from app.services.fx_rate_service import stamp_primary_amount
 from app.services.loan_details import is_revolving, merge_provider_details
@@ -1186,6 +1191,36 @@ async def _match_provider_category(
             session, workspace_id, getattr(txn_data, "category_hint", None), enabled=enabled
         )
     return category_id
+
+
+async def _fill_late_category(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    tx: Transaction,
+    txn_data,
+    use_provider_cats: bool,
+) -> None:
+    """Categorize an already-stored row the way a new one is: rules, then the provider.
+
+    Only the rules' categories apply. Their other actions ran when the row
+    arrived, and running them again could overwrite the user's payee.
+    """
+    rules = (
+        await session.execute(
+            select(Rule)
+            .where(Rule.workspace_id == workspace_id, Rule.is_active == True)  # noqa: E712
+            .order_by(Rule.priority, Rule.id)
+        )
+    ).scalars().all()
+    assignable = await get_assignable_category_ids(session, workspace_id)
+    for rule in rules:
+        if evaluate_conditions(rule.conditions_op, rule.conditions or [], tx):
+            set_category = [a for a in rule.actions or [] if a.get("op") == "set_category"]
+            if apply_rule_actions(set_category, tx, False, assignable_category_ids=assignable):
+                return
+    tx.category_id = await _match_provider_category(
+        session, workspace_id, txn_data, enabled=use_provider_cats
+    )
 
 
 async def _find_installment_category(
@@ -2549,6 +2584,7 @@ async def sync_connection(
                     # a re-sync can't revive a transaction the user hid.
                     if existing_tx.is_ignored:
                         continue
+                    raw_before = existing_tx.raw_data
                     _merge_sync_metadata(existing_tx, txn_data)
                     if existing_tx.status == "pending" and txn_data.status == "posted":
                         existing_tx.status = "posted"
@@ -2594,6 +2630,17 @@ async def sync_connection(
                                 ),
                                 None,
                             ),
+                        )
+                    # The provider can enrich a row after first sending it
+                    # (Akahu adds the merchant category later): a row still
+                    # uncategorized gets what a new row would get.
+                    if (
+                        existing_tx.category_id is None
+                        and existing_tx.transfer_pair_id is None
+                        and existing_tx.raw_data != raw_before
+                    ):
+                        await _fill_late_category(
+                            session, workspace_id, existing_tx, txn_data, use_provider_cats
                         )
                     continue
 

@@ -28,6 +28,7 @@ from app.models.account import Account
 from app.models.bank_connection import BankConnection
 from app.models.category import Category
 from app.models.group import Group, GroupMember
+from app.models.rule import Rule
 from app.models.transaction import Transaction
 from app.models.transaction_attachment import TransactionAttachment
 from app.models.transaction_split import TransactionSplit
@@ -240,6 +241,61 @@ async def test_a_users_or_rules_description_survives_a_bank_text_change(
     assert rows["trans_rule"].description == "Home insurance"
     assert rows["trans_rule"].description_is_rule_managed is True
     assert rows["trans_rule"].original_description == "Dd Insurer Ltd"
+
+
+def with_category(row: dict, name: str) -> dict:
+    return {**row, "category": {"_id": "nzfcc_test", "name": name}}
+
+
+async def test_a_category_the_provider_adds_later_reaches_an_uncategorized_row(
+    session, test_user, test_workspace
+):
+    fake = FakeAkahu([
+        akahu_row("trans_late", 10, -8.5, "EXAMPLE CAFE"),
+        akahu_row("trans_mine", 11, -9.0, "OTHER CAFE"),
+    ])
+    conn = await akahu_connection(session, test_user, test_workspace)
+    await run_sync(session, conn, test_workspace, test_user, fake)
+
+    eating_out = await category(session, test_workspace, "Eating out")
+    eating_out.default_key = "food"
+    leisure = await category(session, test_workspace, "Leisure")
+    rows = await synced(session, conn)
+    assert rows["trans_late"].category_id is None
+    rows["trans_mine"].category_id = leisure.id
+    await session.commit()
+
+    fake.rows = [
+        with_category(akahu_row("trans_late", 10, -8.5, "EXAMPLE CAFE"), "Cafes and restaurants"),
+        with_category(akahu_row("trans_mine", 11, -9.0, "OTHER CAFE"), "Cafes and restaurants"),
+    ]
+    await run_sync(session, conn, test_workspace, test_user, fake)
+
+    rows = await synced(session, conn)
+    assert rows["trans_late"].category_id == eating_out.id
+    # A category the user chose is never replaced.
+    assert rows["trans_mine"].category_id == leisure.id
+
+
+async def test_a_rule_category_beats_the_late_provider_category(session, test_user, test_workspace):
+    fake = FakeAkahu([akahu_row("trans_late", 10, -8.5, "EXAMPLE BAKERY")])
+    conn = await akahu_connection(session, test_user, test_workspace)
+    await run_sync(session, conn, test_workspace, test_user, fake)
+
+    eating_out = await category(session, test_workspace, "Eating out")
+    eating_out.default_key = "food"
+    treats = await category(session, test_workspace, "Treats")
+    session.add(Rule(
+        user_id=test_user.id, workspace_id=test_workspace.id, name="Bakeries are treats",
+        conditions=[{"field": "description", "op": "contains", "value": "BAKERY"}],
+        actions=[{"op": "set_category", "value": str(treats.id)}], priority=5,
+    ))
+    await session.commit()
+
+    fake.rows = [with_category(akahu_row("trans_late", 10, -8.5, "EXAMPLE BAKERY"), "Cafes and restaurants")]
+    await run_sync(session, conn, test_workspace, test_user, fake)
+
+    assert (await synced(session, conn))["trans_late"].category_id == treats.id
 
 
 async def test_an_amount_edit_moves_a_mirrored_transfer_leg_and_rescales_equal_splits(
