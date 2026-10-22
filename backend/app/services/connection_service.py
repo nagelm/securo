@@ -2642,6 +2642,19 @@ async def sync_connection(
                         await _fill_late_category(
                             session, workspace_id, existing_tx, txn_data, use_provider_cats
                         )
+                    # Likewise the merchant: a row that arrived without one
+                    # links the payee once the provider names it.
+                    if (
+                        existing_tx.payee_id is None
+                        and txn_data.payee
+                        and existing_tx.transfer_pair_id is None
+                        and existing_tx.raw_data != raw_before
+                    ):
+                        late_payee = await get_or_create_payee(
+                            session, user_id, txn_data.payee, workspace_id=workspace_id
+                        )
+                        _fill_payee_website(late_payee, txn_data)
+                        existing_tx.payee_id = late_payee.id
                     continue
 
                 # Pass 2: Fuzzy match against manual transactions

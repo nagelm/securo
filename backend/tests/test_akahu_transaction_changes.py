@@ -28,6 +28,7 @@ from app.models.account import Account
 from app.models.bank_connection import BankConnection
 from app.models.category import Category
 from app.models.group import Group, GroupMember
+from app.models.payee import Payee
 from app.models.rule import Rule
 from app.models.transaction import Transaction
 from app.models.transaction_attachment import TransactionAttachment
@@ -296,6 +297,37 @@ async def test_a_rule_category_beats_the_late_provider_category(session, test_us
     await run_sync(session, conn, test_workspace, test_user, fake)
 
     assert (await synced(session, conn))["trans_late"].category_id == treats.id
+
+
+async def test_a_merchant_the_provider_adds_later_links_the_payee(session, test_user, test_workspace):
+    fake = FakeAkahu([
+        akahu_row("trans_late", 10, -8.5, "EXAMPLE CAFE 123 TOWN"),
+        akahu_row("trans_mine", 11, -9.0, "OTHER CAFE"),
+    ])
+    conn = await akahu_connection(session, test_user, test_workspace)
+    await run_sync(session, conn, test_workspace, test_user, fake)
+
+    mine = Payee(user_id=test_user.id, workspace_id=test_workspace.id, name="My Cafe")
+    session.add(mine)
+    await session.flush()
+    rows = await synced(session, conn)
+    assert rows["trans_late"].payee_id is None
+    rows["trans_mine"].payee_id = mine.id
+    await session.commit()
+
+    merchant = {"_id": "merchant_test", "name": "Example Cafe", "website": "https://cafe.example"}
+    fake.rows = [
+        {**akahu_row("trans_late", 10, -8.5, "EXAMPLE CAFE 123 TOWN"), "merchant": merchant},
+        {**akahu_row("trans_mine", 11, -9.0, "OTHER CAFE"), "merchant": merchant},
+    ]
+    await run_sync(session, conn, test_workspace, test_user, fake)
+
+    rows = await synced(session, conn)
+    late = await session.get(Payee, rows["trans_late"].payee_id)
+    assert late is not None and late.name == "Example Cafe"
+    assert late.website == "https://cafe.example"
+    # A payee the user chose is never replaced.
+    assert rows["trans_mine"].payee_id == mine.id
 
 
 async def test_an_amount_edit_moves_a_mirrored_transfer_leg_and_rescales_equal_splits(
