@@ -87,6 +87,17 @@ class Settings(BaseSettings):
     sync_stale_minutes: int = 240
     provider_refresh_minutes: int = 1200
 
+    # Fork: server-side database backups (app/services/db_backup_service.py).
+    # Empty DB_BACKUP_DIR turns them off. The worker writes a pg_dump file there
+    # whenever the newest one is DB_BACKUP_INTERVAL_HOURS old (0: only on demand,
+    # `python -m app.cli db-backup <label>`). After each backup the folder keeps
+    # the newest DB_BACKUP_KEEP_LATEST plus, per tier in DB_BACKUP_TIERS_DAYS,
+    # the oldest backup younger than that many days.
+    db_backup_dir: str = ""
+    db_backup_interval_hours: int = 24
+    db_backup_keep_latest: int = 3
+    db_backup_tiers_days: str = "14,60"
+
     # Storage
     storage_provider: str = "local"  # "local" or "s3"
     storage_local_path: str = "./data/attachments"
