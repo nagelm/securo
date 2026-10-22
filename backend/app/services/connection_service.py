@@ -2779,20 +2779,18 @@ async def sync_connection(
                 # Normalize before recurring reconciliation. A generated
                 # placeholder is upgraded in place; otherwise the normalized
                 # candidate may fulfill an active definition, which advances so
-                # later generation cannot duplicate the occurrence.
-                placeholder = (
-                    None
-                    if plain_pending
-                    else await recurring_match_service.find_placeholder_for_incoming(
-                        session,
-                        account.id,
-                        txn_data.amount,
-                        incoming_currency,
-                        txn_data.type,
-                        txn_data.date,
-                        preview.description,
-                        payee_id=sync_payee_id or preview.payee_id,
-                    )
+                # later generation cannot duplicate the occurrence. Fork: a
+                # pending charge takes its placeholder's place as well, and
+                # hands the link to its settled row (pending_rows).
+                placeholder = await recurring_match_service.find_placeholder_for_incoming(
+                    session,
+                    account.id,
+                    txn_data.amount,
+                    incoming_currency,
+                    txn_data.type,
+                    txn_data.date,
+                    preview.description,
+                    payee_id=sync_payee_id or preview.payee_id,
                 )
                 if placeholder:
                     if placeholder.is_ignored:
@@ -2826,6 +2824,14 @@ async def sync_connection(
                     )
                     if preview.is_ignored:
                         placeholder.is_ignored = True
+                    if plain_pending:
+                        remember_pending_defaults(placeholder, {
+                            "category_id": preview.category_id or category_id,
+                            "payee_id": sync_payee_id or preview.payee_id,
+                            "notes": preview.notes,
+                            "is_ignored": bool(preview.is_ignored),
+                            "exclude_from_pnl": False,
+                        })
                     merged_count += 1
                     continue
 

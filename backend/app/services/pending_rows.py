@@ -55,10 +55,15 @@ def _plain(value: Any) -> Any:
     return value
 
 
-def remember_pending_defaults(tx: Transaction) -> None:
-    """Record what sync set on a new pending row, before the user sees it."""
+def remember_pending_defaults(tx: Transaction, sync_set: Optional[dict[str, Any]] = None) -> None:
+    """Record what sync set on a new pending row, before the user sees it.
+
+    ``sync_set`` names what sync would have set when the row is not new (a
+    recurring placeholder the pending charge took over): whatever else the
+    row holds came from the placeholder and follows it like an edit.
+    """
     raw = dict(tx.raw_data) if isinstance(tx.raw_data, dict) else {}
-    raw[DEFAULTS_KEY] = _snapshot(tx)
+    raw[DEFAULTS_KEY] = {**_snapshot(tx), **{f: _plain(v) for f, v in (sync_set or {}).items()}}
     tx.raw_data = raw
 
 
@@ -193,7 +198,10 @@ async def retire_stale_pending(
             continue
         edits = user_edits(stale)
         settled = await _settled_match(session, stale, claimed)
-        if settled is None and edits and stale.date + timedelta(days=EDITED_GRACE_DAYS) >= today:
+        # A charge linked to a recurring item waits too, so the item does
+        # not lose the payment it is counting on.
+        waits = edits or stale.recurring_transaction_id is not None
+        if settled is None and waits and stale.date + timedelta(days=EDITED_GRACE_DAYS) >= today:
             continue
         if settled is not None:
             claimed.add(settled.id)

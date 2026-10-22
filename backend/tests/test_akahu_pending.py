@@ -22,6 +22,7 @@ from app.agents.services.crypto import encrypt
 from app.models.account import Account
 from app.models.bank_connection import BankConnection
 from app.models.category import Category
+from app.models.recurring_transaction import RecurringTransaction
 from app.models.transaction import Transaction
 from app.providers.akahu import AkahuProvider
 from app.services.connection_service import sync_connection
@@ -221,6 +222,80 @@ async def test_the_users_edits_move_to_the_settled_row(session, test_user, test_
     assert (settled.external_id, settled.category_id, settled.notes) == (
         "trans_new", clothes.id, "Birthday jacket",
     )
+
+
+@pytest.mark.asyncio
+async def test_a_pending_charge_takes_its_recurring_placeholder_and_settles_linked(
+    session, test_user, test_workspace
+):
+    bank = Bank()
+    bank.pending = []
+    conn = await _connection(session, test_user, test_workspace)
+    await _sync(session, conn, test_workspace, test_user, bank)
+
+    account = (await session.execute(select(Account).where(Account.external_id == "acc_card"))).scalar_one()
+    clothes = Category(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        name="Clothes", icon="shirt", color="#000000",
+    )
+    session.add(clothes)
+    due = date(2026, 10, 14)
+    recurring = RecurringTransaction(
+        user_id=test_user.id, workspace_id=test_workspace.id, account_id=account.id,
+        description="Fashion club", amount=Decimal("99.90"), currency="NZD", type="debit",
+        frequency="monthly", start_date=due, next_occurrence=date(2026, 11, 14),
+        category_id=clothes.id,
+    )
+    session.add(recurring)
+    await session.flush()
+    session.add(Transaction(
+        user_id=test_user.id, workspace_id=test_workspace.id, account_id=account.id,
+        recurring_transaction_id=recurring.id, description="Fashion club", amount=Decimal("99.90"),
+        currency="NZD", date=due, effective_date=due, type="debit", source="recurring",
+        status="pending", category_id=clothes.id,
+    ))
+    await session.commit()
+
+    bank.pending = [PENDING]
+    await _sync(session, conn, test_workspace, test_user, bank)
+    rows = await _rows(session)
+    assert [(r.source, r.status, r.recurring_transaction_id) for r in rows][1:] == [
+        ("sync", "pending", recurring.id),
+    ]
+    assert len(rows) == 2
+
+    bank.pending = []
+    bank.settled = [SETTLED_OLD, SETTLED_NEW]
+    await _sync(session, conn, test_workspace, test_user, bank)
+    rows = await _rows(session)
+    assert [(r.external_id, r.recurring_transaction_id, r.category_id) for r in rows][1:] == [
+        ("trans_new", recurring.id, clothes.id),
+    ]
+    assert len(rows) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_dropped_charge_linked_to_a_recurring_item_waits_for_its_settled_row(
+    session, test_user, test_workspace
+):
+    bank = Bank()
+    conn = await _connection(session, test_user, test_workspace)
+    await _sync(session, conn, test_workspace, test_user, bank)
+    account = (await session.execute(select(Account).where(Account.external_id == "acc_card"))).scalar_one()
+    recurring = RecurringTransaction(
+        user_id=test_user.id, workspace_id=test_workspace.id, account_id=account.id,
+        description="Fashion club", amount=Decimal("99.90"), currency="NZD", type="debit",
+        frequency="monthly", start_date=date(2026, 10, 14), next_occurrence=date(2026, 11, 14),
+    )
+    session.add(recurring)
+    await session.flush()
+    (await _rows(session))[1].recurring_transaction_id = recurring.id
+    await session.commit()
+
+    bank.pending = []
+    with patch("app.services.pending_rows.app_today", return_value=date(2026, 10, 15)):
+        await _sync(session, conn, test_workspace, test_user, bank)
+    assert [r.status for r in await _rows(session)] == ["posted", "pending"]
 
 
 @pytest.mark.asyncio
