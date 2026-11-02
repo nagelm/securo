@@ -1,0 +1,638 @@
+{
+  "id": "securo/rules-nz",
+  "name": {
+    "en": "New Zealand",
+    "pt-BR": "Nova Zelândia"
+  },
+  "description": {
+    "en": "Common merchants and transfer patterns, mapped to the default categories.",
+    "pt-BR": "Estabelecimentos e padrões de transferência comuns, mapeados para as categorias padrão."
+  },
+  "version": "1.0.0",
+  "repository": "https://github.com/nagelm/securo",
+  "license": "AGPL-3.0-only",
+  "min_securo_version": "0.19.0",
+  "contributes": {
+    "rules": [
+      {
+        "key": "nz-supermarkets",
+        "name": "NZ supermarkets",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "WOOLWORTHS|COUNTDOWN|NEW WORLD|PAK ?'?N ?'?SAVE(?! ?FUEL)|FOUR SQUARE|FRESH ?CHOICE|SUPERVALUE|\\bCOSTCO\\b(?! ?FUEL)|\\bFARRO\\b|RAEWARD|MOORE WILSON|COMMONSENSE ORGANICS|\\bBIN INN\\b|NIGHT ?'?N'? ?DAY|ON THE SPOT|HUCKLEBERRY|\\bSUPIE\\b"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "groceries"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-liquor-stores",
+        "name": "NZ liquor stores",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "LIQUORLAND|SUPER LIQUOR|LIQUOR KING|THIRSTY LIQUOR|GLENGARRY|BOTTLE[- ]?O\\b"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "groceries"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-food-delivery",
+        "name": "NZ food delivery",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "UBER ?EATS|DOORDASH|MENULOG|DELIVEREASY"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "food"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-takeaway-and-cafe-chains",
+        "name": "NZ takeaway and cafe chains",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "MCDONALD|\\bKFC\\b|BURGER KING|BURGER ?FUEL|\\bSUBWAY\\b|DOMINO|PIZZA HUT|HELL PIZZA|STARBUCKS|MUFFIN BREAK|COFFEE CULTURE|\\bMOJO\\b|CARL'?S JR|WENDY'?S|TACO BELL|NANDO'?S|LONE STAR|PITA PIT|ST PIERRE|COLUMBUS COFFEE|ROBERT HARRIS|ESQUIRES"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "food"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-fuel",
+        "name": "NZ fuel",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "Z ENERGY|^Z |\\bBP\\b|\\bMOBIL\\b|\\bGULL\\b|WAITOMO|\\bNPD\\b|CALTEX|ALLIED PETROLEUM|TASMAN FUELS|MCKEOWN|PAK ?'?N ?'?SAVE ?FUEL|COSTCO ?FUEL"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "transport"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-public-transport",
+        "name": "NZ public transport",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "METLINK|AT HOP|AUCKLAND TRANSPORT|SNAPPER|BEE CARD|KIWIRAIL|INTERCITY|\\bMETRO CARD\\b|MOTU MOVE|\\bBUSIT\\b|\\bBAYBUS\\b|\\bORBUS\\b|\\bGOBAY\\b|FULLERS|\\bDIDI\\b"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "transport"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-airlines-and-ferries",
+        "name": "NZ airlines and ferries",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "\\bAIR ?N(EW )?Z(EALAND)?\\b|JETSTAR|SOUNDS AIR|AIR CHATHAMS|ORIGINAIR|BARRIER AIR|INTERISLANDER|BLUEBRIDGE"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "transport"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-parking",
+        "name": "NZ parking",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "WILSON PARKING|PARKMATE|\\bCARE ?PARK|PAYBYPHONE|SMARTPARK|SECURE PARKING|TOURNAMENT PARKING"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "transport"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-vehicle-licensing-and-inspections",
+        "name": "NZ vehicle licensing and inspections",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "\\bNZTA\\b|NZ TRANSPORT AGENCY|WAKA KOTAHI|\\bVTNZ\\b|\\bVINZ\\b"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "transport"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-power-and-gas",
+        "name": "NZ power and gas",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "MERIDIAN|MERCURY|GENESIS|CONTACT ENERGY|TRUSTPOWER|ELECTRIC KIWI|FLICK ELECTRIC|NOVA ENERGY|POWERSHOP|PULSE ENERGY|ROCKGAS|OCTOPUS ENERGY|ECOTRICITY|GLOBUG|TOAST ELECTRIC|HANERGY|NAU MAI RA|WISE ?PRE-?PAY|FRANK ENERGY|GREY POWER ELECTRICITY|BLACK BOX POWER|JUST ENERGY|ENERGY ONLINE|SIMPLY ENERGY|KEA ENERGY|LODESTONE ENERGY|\\bELGAS\\b|\\bON ?GAS\\b"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "housing"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-phone-and-broadband",
+        "name": "NZ phone and broadband",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "\\bSPARK\\b|\\bONE ?NZ|VODAFONE|2DEGREES|SKINNY|ORCON|SLINGSHOT|\\bNOW ?NZ|VOYAGER|STUFF FIBRE|BIGPIPE|ZERONET|WIRELESS NATION|FARMSIDE|STARLINK|KOGAN MOBILE|WAREHOUSE MOBILE|MIGHTY MOBILE|ROCKET MOBILE|KIWI MOBILE"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "housing"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-water",
+        "name": "NZ water",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "WATERCARE|TIAKI WAI|WELLINGTON WATER|\\bIAWAI\\b|WAIKATO WATERS"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "housing"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-council-rates",
+        "name": "NZ council rates",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "(CITY|DISTRICT|REGIONAL) COUN|AUCKLAND COUNCIL|CHATHAM ISLANDS COUNCIL"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "housing"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "kainga-ora-rent",
+        "name": "Kainga Ora rent",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "KAINGA ORA"
+          },
+          {
+            "field": "type",
+            "op": "equals",
+            "value": "debit"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "housing"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-hardware-stores",
+        "name": "NZ hardware stores",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "BUNNINGS|MITRE ?10|PLACEMAKERS"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "housing"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-department-and-electronics-stores",
+        "name": "NZ department and electronics stores",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "THE WAREHOUSE|WAREHOUSE STATIONERY|\\bKMART\\b|BRISCOES|\\bFARMERS(?! MARKET)|NOEL LEEMING|HARVEY NORMAN|JB HI|PB TECH|REBEL SPORT|TORPEDO7|TRADE ME(?! INS)|SMITHS CITY|100% APPLIANCES|MIGHTY APE|\\bTEMU\\b"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "shopping"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-clothing-sport-and-outdoor-stores",
+        "name": "NZ clothing, sport and outdoor stores",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "HALLENSTEIN|GLASSONS|COTTON ON|\\bPOSTIE\\b|NUMBER ONE SHOES|STIRLING SPORTS|HUNTING (AND|&) FISHING|KATHMANDU|MACPAC"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "shopping"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-home-book-and-pet-stores",
+        "name": "NZ home, book and pet stores",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "SPOTLIGHT|BED BATH (AND|&) BEYOND|FREEDOM FURNITURE|\\bNOOD\\b|WHITCOULLS|PAPER PLUS|ANIMATES|PETSTOCK|PET\\.CO\\.NZ|PETDIRECT"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "shopping"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-pharmacies",
+        "name": "NZ pharmacies",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "UNICHEM|LIFE PHARMACY|CHEMIST WAREHOUSE|PHARMACY"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "health"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-doctors-dentists-and-optometrists",
+        "name": "NZ doctors, dentists and optometrists",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "MEDICAL CENTRE|HEALTH CENTRE|\\bDENTAL\\b|DENTIST|PHYSIO|SPECSAVERS|\\bOPSM\\b|SOUTHERN CROSS (HOSPITAL|HEALTHCARE)"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "health"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-gyms",
+        "name": "NZ gyms",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "LES MILLS|CITYFITNESS|ANYTIME FITNESS|\\bJETTS\\b|SNAP FITNESS|FLEX FITNESS"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "health"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-insurers",
+        "name": "NZ insurers",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "INSURANCE|\\bINSURE\\b|\\bAMI INS|\\bSTATE INS|\\bTOWER INS|\\bVERO\\b|\\bNZI\\b|\\bFMG\\b|INITIO|\\bYOUI\\b|\\bANDO INS|KIWI INSURE|HOLLARD|STAR INSUR|\\bCOVE INS|SOUTHERN CROSS (HEALTH (INS|SOC)|TRAVEL|PET)|\\bSCHS\\b|\\bSCTI\\b|\\bNIB\\b|\\bAIA\\b|PARTNERS LIFE|UNIMED|ACCURO|FIDELITY LIFE|ASTERON|ACENDA LIFE|PINNACLE LIFE|\\bCHUBB\\b|ONEPATH|\\bCIGNA\\b|PETCOVER|PET-N-SUR|COVER-MORE|\\b1COVER\\b|WORLD NOMADS"
+          },
+          {
+            "field": "type",
+            "op": "equals",
+            "value": "debit"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "insurance"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-streaming",
+        "name": "NZ streaming",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "\\bNEON\\b|SKY NETWORK|SKY TV|\\bSKY GO\\b|TVNZ|THREENOW"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "subscriptions"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-news-subscriptions",
+        "name": "NZ news subscriptions",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "NZ ?HERALD|\\bNZME\\b|THE SPINOFF|BUSINESSDESK|\\bNBR\\b"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "subscriptions"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-early-childhood",
+        "name": "NZ early childhood",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "KINDERGARTEN|PLAYCENTRE|\\bKINDY\\b|EDUCARE"
+          },
+          {
+            "field": "type",
+            "op": "equals",
+            "value": "debit"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "education"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "inland-revenue-ird",
+        "name": "Inland Revenue (IRD)",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "INLAND REVENUE|\\bIRD\\b"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "taxes"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-acc-levies",
+        "name": "NZ ACC levies",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "\\bACC LEV|ACCIDENT COMPENSATION"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "taxes"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-government-fees-and-fines",
+        "name": "NZ government fees and fines",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "INTERNAL AFFAIRS|PASSPORT OFFICE|MINISTRY OF JUSTICE|COURT FINES?|IMMIGRATION (NZ|NEW ZEALAND)|NZ CUSTOMS"
+          },
+          {
+            "field": "type",
+            "op": "equals",
+            "value": "debit"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "taxes"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-bank-fees",
+        "name": "NZ bank fees",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "(ACCOUNT|TRANSACTION|OVERDRAFT|CARD|LATE PAYMENT|STATEMENT|ATM OWNER|CASH ADVANCE|INVESTIGATION|RETRIEVAL) FEE|UNARRANGED OVERDRAFT|CURRENCY CONVERSION|DISHONOUR"
+          },
+          {
+            "field": "type",
+            "op": "equals",
+            "value": "debit"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "taxes"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-benefits-and-student-support",
+        "name": "NZ benefits and student support",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "WORK AND INCOME|\\bWINZ\\b|\\bMSD\\b|MINISTRY OF SOCIAL DEV|STUDYLINK"
+          },
+          {
+            "field": "type",
+            "op": "equals",
+            "value": "credit"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "salary"
+          }
+        ],
+        "priority": 10
+      },
+      {
+        "key": "nz-charities",
+        "name": "NZ charities",
+        "conditions_op": "and",
+        "conditions": [
+          {
+            "field": "description",
+            "op": "regex",
+            "value": "GIVEALITTLE|RED CROSS|\\bSPCA\\b(?! PET)|WORLD VISION|UNICEF|STARSHIP FOUNDATION|CANCER SOCIETY|DONATION"
+          }
+        ],
+        "actions": [
+          {
+            "op": "set_category",
+            "value": "donations"
+          }
+        ],
+        "priority": 10
+      }
+    ]
+  }
+}

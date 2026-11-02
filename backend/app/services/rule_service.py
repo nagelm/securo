@@ -205,14 +205,18 @@ CURRENCY_TO_PACK = {
     "USD": "US",
     "EUR": "EU",
     "GBP": "GB",
+    "NZD": "NZ",
 }
 
 
 def resolve_default_category_keys(
     categories_by_name: dict[str, str],
+    categories_by_key: Optional[dict[str, str]] = None,
 ) -> dict[str, str]:
     """Map default-category internal keys (e.g. 'transport') to the user's actual
-    category UUID by matching against any language variant of the default name.
+    category UUID: the category seeded from that key (``categories_by_key``,
+    from ``Category.default_key``, which survives a rename) first, else by
+    matching against any language variant of the default name.
 
     Rule templates reference categories by their internal key, but the user's
     categories are stored under a localized name. If we resolve the key using
@@ -222,13 +226,27 @@ def resolve_default_category_keys(
     which language the user's categories were created in.
     """
     key_to_id: dict[str, str] = {}
+    keyed = categories_by_key or {}
+    keyed_ids = set(keyed.values())
     for internal_key, data in DEFAULT_CATEGORIES.items():
+        if internal_key in keyed:
+            key_to_id[internal_key] = keyed[internal_key]
+            continue
         for value in data["names"].values():
             cat_id = categories_by_name.get(value)
-            if cat_id:
+            # A category seeded from another key keeps that key whatever
+            # it is renamed to, so its name never stands in for this one.
+            if cat_id and cat_id not in keyed_ids:
                 key_to_id[internal_key] = cat_id
                 break
     return key_to_id
+
+
+def _categories_by_name_and_key(categories: list[Category]) -> tuple[dict[str, str], dict[str, str]]:
+    """The two lookups `_resolve_categories_by_internal_key` takes."""
+    by_name = {cat.name: str(cat.id) for cat in categories}
+    by_key = {cat.default_key: str(cat.id) for cat in categories if cat.default_key}
+    return by_name, by_key
 
 
 def _build_rules_from_templates(
@@ -286,8 +304,9 @@ async def create_default_rules(
     else:
         cat_query = cat_query.where(Category.user_id == user_id)
     result = await session.execute(cat_query)
-    categories = {cat.name: str(cat.id) for cat in result.scalars().all()}
-    key_to_id = resolve_default_category_keys(categories)
+    key_to_id = resolve_default_category_keys(
+        *_categories_by_name_and_key(list(result.scalars().all()))
+    )
 
     resolved, _unresolved = _build_rules_from_templates(UNIVERSAL_RULES, key_to_id)
 
@@ -337,12 +356,16 @@ async def ensure_default_categories(
             )
         ).scalars().all()
     )
-    existing_cat_names = {c.name for c in existing_cats}
+    # A category seeded from a key keeps it when renamed, so the key alone
+    # says the default exists; its name only counts for unkeyed categories.
+    existing_keys = {c.default_key for c in existing_cats if c.default_key}
+    existing_cat_names = {c.name for c in existing_cats if not c.default_key}
 
     missing_keys = [
         key
         for key in internal_keys
         if (data := DEFAULT_CATEGORIES.get(key))
+        and key not in existing_keys
         and not (name_variants(data) & existing_cat_names)
     ]
     if not missing_keys:
@@ -399,6 +422,7 @@ async def ensure_default_categories(
             is_system=True,
             group_id=target_group.id if target_group else None,
             treat_as_transfer=data.get("treat_as_transfer", False),
+            default_key=key,
         )
         session.add(cat)
     await session.flush()

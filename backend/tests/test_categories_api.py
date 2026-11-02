@@ -31,9 +31,10 @@ async def test_list_categories_with_defaults(
     response = await client.get("/api/categories", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
-    assert len(data) == 16
+    assert len(data) == 18
     names = {c["name"] for c in data}
     assert "Alimentação" in names
+    assert "Pagamentos de empréstimos" in names
     assert "Transporte" in names
     assert "Outros" in names
     assert "Investimentos" in names
@@ -259,7 +260,7 @@ async def test_hide_system_category_filters_default_list(
 
 
 @pytest.mark.asyncio
-async def test_cannot_hide_user_category(client: AsyncClient, auth_headers):
+async def test_can_hide_user_category(client: AsyncClient, auth_headers):
     create_response = await client.post(
         "/api/categories",
         headers=auth_headers,
@@ -274,8 +275,9 @@ async def test_cannot_hide_user_category(client: AsyncClient, auth_headers):
         json={"is_hidden": True},
     )
 
-    assert update_response.status_code == 400
-    assert update_response.json()["detail"] == "Only system categories can be hidden"
+    # Fork: any category can be hidden, not only the seeded defaults.
+    assert update_response.status_code == 200
+    assert update_response.json()["is_hidden"] is True
 
     unhide_response = await client.patch(
         f"/api/categories/{category_id}",

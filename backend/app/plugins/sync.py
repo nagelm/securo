@@ -162,11 +162,15 @@ async def _plan(
     group_names = await _group_names(session, workspace_id, source)
     category_rows = (
         await session.execute(
-            select(Category.id, Category.name, Category.source).where(Category.workspace_id == workspace_id)
+            select(Category.id, Category.name, Category.source, Category.default_key).where(
+                Category.workspace_id == workspace_id
+            )
         )
     ).all()
-    category_names = {name: str(cid) for cid, name, src in category_rows}
-    foreign_category_names = {name: cid for cid, name, src in category_rows if src != source}
+    category_names = {name: str(cid) for cid, name, src, _ in category_rows}
+    # A seeded default keeps its key when renamed (`Category.default_key`).
+    category_keys = {key: str(cid) for cid, _, _, key in category_rows if key}
+    foreign_category_names = {name: cid for cid, name, src, _ in category_rows if src != source}
     rule_names = await existing_rule_names(session, workspace_id)
     own_rule_names = {row.name for row in rows[RULES].values()}
 
@@ -179,7 +183,7 @@ async def _plan(
     target_groups = {g.key: g for g in contributes.category_groups} if contributes else {}
     target_categories = {c.key: c for c in contributes.categories} if contributes else {}
     target_rules = {r.key: r for r in contributes.rules} if contributes else {}
-    default_ids = resolve_default_category_keys(category_names)
+    default_ids = resolve_default_category_keys(category_names, category_keys)
     planned_refs: set[str] = set()
     """Category ids the plugin's rules will point at after this sync."""
 
@@ -439,13 +443,16 @@ async def apply_sync(
         # Rules resolve their categories against the workspace as it is now.
         category_rows = (
             await session.execute(
-                select(Category.id, Category.name, Category.source, Category.source_key).where(
-                    Category.workspace_id == workspace_id
-                )
+                select(
+                    Category.id, Category.name, Category.source, Category.source_key, Category.default_key
+                ).where(Category.workspace_id == workspace_id)
             )
         ).all()
-        default_ids = resolve_default_category_keys({name: str(cid) for cid, name, _, _ in category_rows})
-        own = {key: str(cid) for cid, _, src, key in category_rows if src == source}
+        default_ids = resolve_default_category_keys(
+            {name: str(cid) for cid, name, _, _, _ in category_rows},
+            {dkey: str(cid) for cid, _, _, _, dkey in category_rows if dkey},
+        )
+        own = {key: str(cid) for cid, _, src, key, _ in category_rows if src == source}
         own |= {key: str(cid) for key, cid in state.adopted[CATEGORIES].items()}
         own_keys = {c.key for c in contributes.categories}
 

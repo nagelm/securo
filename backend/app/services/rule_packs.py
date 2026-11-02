@@ -30,7 +30,7 @@ PACKS_DIR = Path(__file__).resolve().parent.parent / "data" / "rule_packs"
 
 #: The built-in packs, in the order they are listed. Each one is
 #: `PACKS_DIR/<name>.json` with the manifest id `securo/rules-<name>`.
-PACK_FILES = ("br", "us", "eu", "gb")
+PACK_FILES = ("br", "us", "eu", "gb", "nz")
 
 
 @dataclass(frozen=True)

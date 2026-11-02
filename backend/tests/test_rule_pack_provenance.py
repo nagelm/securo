@@ -70,7 +70,7 @@ def _content(rule: Rule) -> dict:
 def test_every_pack_file_is_listed_and_named_after_its_id():
     assert sorted(p.stem for p in PACKS_DIR.glob("*.json")) == sorted(PACK_FILES)
     packs = built_in_packs()
-    assert list(packs) == ["BR", "US", "EU", "GB"]
+    assert list(packs) == ["BR", "US", "EU", "GB", "NZ"]  # Fork: the New Zealand pack
     for name in PACK_FILES:
         assert packs[name.upper()].source == f"securo/rules-{name}"
 
