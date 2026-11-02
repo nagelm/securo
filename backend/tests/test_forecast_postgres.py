@@ -1,0 +1,164 @@
+"""Fork: the Forecast tests again on real PostgreSQL (the cash-flow
+projection and the category estimate run real SQL), plus f010's own
+upgrade()/downgrade() in a per-test schema. Every figure is made up."""
+import importlib.util
+from pathlib import Path
+
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from app.core.database import get_async_session
+from app.main import app
+from tests.test_forecast import (  # noqa: F401  (collected here on PostgreSQL)
+    test_a_row_linked_to_a_recurring_payment_does_not_match,
+    test_a_row_stored_before_the_payment_was_expected_does_not_match,
+    test_api_crud_and_forecast,
+    test_api_is_workspace_scoped,
+    test_api_scenario_change_validation,
+    test_api_validation,
+    test_api_viewer_can_read_but_not_write,
+    test_base_line_counts_recurring_and_expected_payments,
+    test_cash_flow_report_counts_expected_payments_but_not_scenarios,
+    test_creating_a_payment_does_not_match_a_row_already_stored,
+    test_disabled_scenarios_are_left_out_unless_asked_for,
+    test_expected_payment_on_a_loan_account_is_not_cash,
+    test_income_change,
+    test_lowest_point_and_its_date,
+    test_matched_payment_drops_out_of_the_forecast,
+    test_matching_only_looks_at_the_rows_given,
+    test_matching_tolerance,
+    test_one_bank_row_settles_one_payment,
+    test_one_off_and_repeating_scenario_items,
+    test_overdue_unmatched_payment_is_still_expected_tomorrow,
+    test_recurring_change,
+    test_spending_change_amount_between_dates,
+    test_spending_change_does_nothing_with_the_estimate_off,
+    test_spending_change_percent,
+    test_spending_cut_cannot_go_below_nothing,
+    test_spending_estimate_feeds_the_base_only_when_switched_on,
+    test_spending_estimate_per_category,
+    test_the_most_similar_description_wins,
+)
+
+pytestmark = pytest.mark.asyncio
+
+_PATH = Path(__file__).resolve().parent.parent / "alembic" / "versions" / "f010_forecast.py"
+_SPEC = importlib.util.spec_from_file_location("f010_forecast", _PATH)
+assert _SPEC is not None and _SPEC.loader is not None
+migration = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(migration)
+
+
+@pytest_asyncio.fixture
+async def session(postgres_sessions):
+    async with postgres_sessions() as session:
+        yield session
+        await session.rollback()
+
+
+@pytest.fixture
+def clean_db(postgres_sessions):
+    """The reused user fixtures start in a fresh per-test PostgreSQL schema."""
+
+
+@pytest_asyncio.fixture
+async def client(postgres_sessions, monkeypatch):
+    async def pg_session():
+        async with postgres_sessions() as session:
+            yield session
+
+    monkeypatch.setitem(app.dependency_overrides, get_async_session, pg_session)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client
+
+
+_F011_PATH = _PATH.with_name("f011_forecast_loan_changes.py")
+_F011_SPEC = importlib.util.spec_from_file_location("f011_forecast_loan_changes", _F011_PATH)
+assert _F011_SPEC is not None and _F011_SPEC.loader is not None
+_F011 = importlib.util.module_from_spec(_F011_SPEC)
+_F011_SPEC.loader.exec_module(_F011)
+
+
+async def _run(session: AsyncSession, step: str, module=migration) -> None:
+    def go(sync_session):
+        connection = sync_session.connection()
+        schema = (connection.get_execution_options().get("schema_translate_map") or {}).get(None)
+        # The per-test schema is a translate map, which Alembic's DDL doesn't follow.
+        connection.exec_driver_sql(f'SET LOCAL search_path TO "{schema}"')
+        context = MigrationContext.configure(connection)
+        with Operations.context(context):
+            getattr(module, step)()
+
+    await session.run_sync(go)
+    await session.commit()
+
+
+async def _tables(session: AsyncSession) -> set[str]:
+    connection = (await session.connection()).sync_connection
+    assert connection is not None
+    schema = connection.get_execution_options()["schema_translate_map"][None]
+    rows = await session.execute(
+        text("SELECT table_name FROM information_schema.tables WHERE table_schema = :schema"),
+        {"schema": schema},
+    )
+    return {r[0] for r in rows}
+
+
+def _load(name: str):
+    path = _PATH.with_name(f"{name}.py")
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# Fork: the later forecast revisions, so the ORM's schema (head) can be
+# taken down to before f010 and rebuilt.
+_LATER = [_load(name) for name in (
+    "f014_forecast_transfers", "f015_forecast_item_matches", "f016_forecast_budgets",
+)]
+
+
+async def test_migration_downgrades_and_upgrades(session):
+    assert {"forecast_scenarios", "forecast_items"} <= await _tables(session)
+    await _run(session, "downgrade")
+    assert not {"forecast_scenarios", "forecast_items"} & await _tables(session)
+    await _run(session, "upgrade")
+    assert {"forecast_scenarios", "forecast_items"} <= await _tables(session)
+
+
+async def test_migrated_tables_take_the_app_rows(session, test_user, test_workspace):
+    """After a real upgrade (not create_all), the ORM can write and cascade."""
+    from datetime import date
+    from decimal import Decimal
+
+    from sqlalchemy import delete, select
+
+    from app.models.forecast import ForecastItem, ForecastScenario
+
+    await _run(session, "downgrade")
+    await _run(session, "upgrade")
+    await _run(session, "upgrade", _F011)  # the ORM is at head, so the later columns too
+    for later in _LATER:
+        await _run(session, "upgrade", later)
+    scenario = ForecastScenario(
+        user_id=test_user.id, workspace_id=test_workspace.id, name="S", color="#000000",
+    )
+    session.add(scenario)
+    await session.flush()
+    session.add(ForecastItem(
+        user_id=test_user.id, workspace_id=test_workspace.id, scenario_id=scenario.id, kind="spending_change",
+        currency="BRL", change_mode="percent", percent=Decimal("-50"), start_date=date(2030, 1, 1),
+    ))
+    await session.commit()
+    # A core DELETE, so the migration's ON DELETE CASCADE does the work.
+    await session.execute(delete(ForecastScenario).where(ForecastScenario.id == scenario.id))
+    await session.commit()
+    session.expunge_all()
+    assert (await session.execute(select(ForecastItem))).scalars().all() == []

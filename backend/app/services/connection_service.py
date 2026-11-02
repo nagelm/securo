@@ -55,7 +55,7 @@ from app.providers.base import (
 from app.services.provider_settings import resolve_settings
 from app.services import oauth_state
 from app.services import admin_service
-from app.services import category_line_service, reconciliation_service, recurring_match_service
+from app.services import category_line_service, forecast_service, reconciliation_service, recurring_match_service
 from app.services.text_similarity import normalize_words, token_overlap
 from app.services.account_order import next_account_position
 from app.services.account_service import (
@@ -5129,6 +5129,10 @@ async def sync_connection(
                 .all()
             )
             await reconciliation_service.match_incoming(
+                session, workspace_id, landed
+            )
+            # Fork: settle the Forecast page's expected payments too.
+            await forecast_service.match_expected_payments(
                 session, workspace_id, landed
             )
 

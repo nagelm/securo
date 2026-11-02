@@ -15,6 +15,7 @@ from app.models.plugin_connection import PluginConnection
 from app.models.plugin_logo import PluginLogo
 from app.models.ui_layout import UiLayout
 from app.models.recurring_transaction import RecurringTransaction
+from app.models.forecast import ForecastItem, ForecastScenario
 from app.models.budget import Budget
 from app.models.budget_group import BudgetGroup, BudgetGroupCap, BudgetGroupCategory
 from app.models.import_log import ImportLog
@@ -77,6 +78,8 @@ __all__ = [
     "PluginLogo",
     "UiLayout",
     "RecurringTransaction",
+    "ForecastItem",
+    "ForecastScenario",
     "Budget",
     "BudgetGroup",
     "BudgetGroupCap",
