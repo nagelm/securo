@@ -1,9 +1,16 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale } from '@/hooks/use-display-locale'
 import { monthLabel } from '@/lib/month-utils'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { categories as categoriesApi, categoryGroups as groupsApi, budgets as budgetsApi } from '@/lib/api'
+import {
+  categories as categoriesApi,
+  categoryGroups as groupsApi,
+  budgets as budgetsApi,
+  budgetGroups as budgetGroupsApi,
+  forecast as forecastApi,
+  type BudgetGroupInput,
+} from '@/lib/api'
 import { extractApiError } from '@/lib/api-errors'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -396,14 +403,19 @@ export default function BudgetsPage() {
   })
 
   const createMutation = useMutation({
-    mutationFn: (data: { category_id: string; amount: number; month: string; is_recurring?: boolean }) =>
-      budgetsApi.create(data),
+    mutationFn: (data: {
+      category_id: string
+      amount: number
+      month: string
+      is_recurring?: boolean
+      end_month?: string | null
+    }) => budgetsApi.create(data),
     onSuccess: () => {
       invalidateBudgets()
       setDialogOpen(false)
       toast.success(t('budgets.created'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
   })
 
   const updateMutation = useMutation({
@@ -418,7 +430,7 @@ export default function BudgetsPage() {
       closeDialog()
       toast.success(t('budgets.updated'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
   })
 
   const deleteMutation = useMutation({
@@ -598,10 +610,28 @@ export default function BudgetsPage() {
                   </select>
                 </div>
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" name="is_recurring" className="rounded border-border" />
+                  <input
+                    type="checkbox"
+                    name="is_recurring"
+                    className="rounded border-border"
+                    checked={newRecurring}
+                    onChange={(e) => setNewRecurring(e.target.checked)}
+                  />
                   <span className="text-sm text-foreground">{t('budgets.repeatEveryMonth')}</span>
                 </label>
               </>
+            )}
+            {/* Fork: a recurring budget can stop after a month ("until"). */}
+            {(editing ? editing.is_recurring : newRecurring) && (
+              <div className="space-y-2">
+                <Label htmlFor="budget-end-month">{t('budgets.untilOptional')}</Label>
+                <MonthField
+                  id="budget-end-month"
+                  value={endMonth}
+                  onChange={setEndMonth}
+                  min={editing ? toMonthInput(editing.month) : selectedMonth}
+                />
+              </div>
             )}
             <div className="space-y-2">
               <Label htmlFor="budget-amount">{t('budgets.amount')}</Label>
@@ -626,6 +656,14 @@ export default function BudgetsPage() {
         </DialogContent>
       </Dialog>
 
+      <BudgetGroupsSection
+        month={monthParam}
+        selectedMonth={selectedMonth}
+        categories={categoriesList ?? []}
+        displayCategories={displayCategories}
+        groups={groupsList ?? []}
+        forecastChoices={forecastChoices}
+      />
       <Dialog open={suggestOpen} onOpenChange={(open) => { setSuggestOpen(open); if (!open) setSuggestEdits({}) }}>
         <DialogContent>
           <DialogHeader>
@@ -738,5 +776,293 @@ export default function BudgetsPage() {
         onConfirm={() => deletingBudget && deleteMutation.mutate(deletingBudget.id)}
       />
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Fork: budget groups, one cap over several categories
+// ---------------------------------------------------------------------------
+
+/** The group's member categories: a count chip that opens the list. */
+function MemberChip({ ids, displayCategories }: { ids: string[]; displayCategories: Category[] }) {
+  const { t } = useTranslation()
+  const members = ids.map((id) => findCategoryReference(displayCategories, id))
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="shrink-0 text-[11px] font-medium text-muted-foreground bg-muted hover:bg-muted-foreground/15 px-1.5 py-0.5 rounded-full transition-colors cursor-pointer"
+          data-testid="group-member-count"
+        >
+          {t('budgets.categoryCount', { count: ids.length })}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-60 p-2">
+        <ul className="max-h-64 overflow-y-auto space-y-1" data-testid="group-members">
+          {members.map((category, index) => (
+            <li key={ids[index]} className="flex items-center gap-2 px-1 py-0.5 text-sm text-foreground">
+              <CategoryIcon icon={category?.icon} color={category?.color} size="xs" />
+              <span className="truncate">{category?.name ?? '—'}</span>
+            </li>
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function BudgetGroupsSection({
+  month,
+  selectedMonth,
+  categories,
+  displayCategories,
+  groups,
+  forecastChoices,
+}: {
+  month: string
+  selectedMonth: string
+  categories: Category[]
+  displayCategories: Category[]
+  groups: CategoryGroup[]
+  forecastChoices: ReturnType<typeof useForecastChoices>
+}) {
+  const { t } = useTranslation()
+  const { canWrite } = useWorkspace()
+  const queryClient = useQueryClient()
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [editing, setEditing] = useState<BudgetGroupVsActual | null>(null)
+  const [deleting, setDeleting] = useState<BudgetGroupVsActual | null>(null)
+
+  const { data: comparison } = useQuery({
+    queryKey: ['budget-groups', 'comparison', month],
+    queryFn: () => budgetGroupsApi.comparison(month),
+  })
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['budget-groups'] })
+    queryClient.invalidateQueries({ queryKey: ['forecast'] })
+  }
+  const close = () => { setDialogOpen(false); setEditing(null) }
+  const saveMutation = useMutation({
+    mutationFn: (data: Parameters<typeof budgetGroupsApi.update>[1]): Promise<BudgetGroup> =>
+      editing ? budgetGroupsApi.update(editing.id, data) : budgetGroupsApi.create(data as BudgetGroupInput),
+    onSuccess: () => {
+      invalidate()
+      toast.success(t(editing ? 'budgets.groupUpdated' : 'budgets.groupCreated'))
+      close()
+    },
+    onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
+  })
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => budgetGroupsApi.delete(id),
+    onSuccess: () => {
+      invalidate()
+      setDeleting(null)
+      toast.success(t('budgets.groupDeleted'))
+    },
+    onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
+  })
+
+  return (
+    <div className="mt-6">
+      <SectionCard>
+        <SectionHeader
+          title={t('budgets.groupsTitle')}
+          hint={t('budgets.groupsHint')}
+          action={
+            canWrite ? (
+              <Button size="sm" className="gap-1.5 h-8" onClick={() => { setEditing(null); setDialogOpen(true) }}>
+                <Plus size={13} /> {t('budgets.addGroup')}
+              </Button>
+            ) : undefined
+          }
+        />
+        {comparison && comparison.length > 0 ? (
+          <table className="w-full">
+            <BudgetTableHead nameLabel={t('budgets.groupName')} limitLabel={t('budgets.groupCap')} />
+            <tbody>
+              {comparison.map((group) => (
+                <BudgetRow
+                  key={group.id}
+                  testId="budget-group"
+                  icon={
+                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 bg-primary/10 text-primary">
+                      <Layers size={14} />
+                    </div>
+                  }
+                  name={group.name}
+                  extra={<MemberChip ids={group.category_ids} displayCategories={displayCategories} />}
+                  isRecurring={group.is_recurring}
+                  endMonth={group.end_month}
+                  spent={Number(group.projected_amount)}
+                  limit={Number(group.amount)}
+                  pct={group.percentage_used}
+                  inForecast={forecastChoices.hasGroup(group.id)}
+                  onForecastChange={(on) => forecastChoices.setGroup(group.id, on)}
+                  forecastDisabled={forecastChoices.pending}
+                  onEdit={() => { setEditing(group); setDialogOpen(true) }}
+                  onDelete={() => setDeleting(group)}
+                />
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="text-sm text-muted-foreground text-center py-10">{t('budgets.groupsEmpty')}</p>
+        )}
+      </SectionCard>
+
+      <Dialog open={dialogOpen} onOpenChange={close}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editing ? t('budgets.editGroup') : t('budgets.addGroup')}</DialogTitle>
+          </DialogHeader>
+          <BudgetGroupForm
+            key={editing?.id ?? 'new'}
+            group={editing}
+            month={month}
+            selectedMonth={selectedMonth}
+            categories={categories}
+            groups={groups}
+            loading={saveMutation.isPending}
+            onCancel={close}
+            onSave={(data) => saveMutation.mutate(data)}
+          />
+        </DialogContent>
+      </Dialog>
+
+      <DeleteConfirmationDialog
+        open={!!deleting}
+        title={t('budgets.confirmDeleteGroupTitle')}
+        description={t('budgets.confirmDeleteGroupDescription', { name: deleting?.name ?? '' })}
+        isPending={deleteMutation.isPending}
+        onClose={() => setDeleting(null)}
+        onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
+      />
+    </div>
+  )
+}
+
+function BudgetGroupForm({
+  group,
+  month,
+  selectedMonth,
+  categories,
+  groups,
+  loading,
+  onCancel,
+  onSave,
+}: {
+  group: BudgetGroupVsActual | null
+  month: string
+  selectedMonth: string
+  categories: Category[]
+  groups: CategoryGroup[]
+  loading: boolean
+  onCancel: () => void
+  onSave: (data: Parameters<typeof budgetGroupsApi.update>[1]) => void
+}) {
+  const { t } = useTranslation()
+  const [name, setName] = useState(group?.name ?? '')
+  const [amount, setAmount] = useState(group ? String(Number(group.amount)) : '')
+  const [isRecurring, setIsRecurring] = useState(group?.is_recurring ?? true)
+  const [endMonth, setEndMonth] = useState(toMonthInput(group?.end_month))
+  const [chosen, setChosen] = useState<string[]>(group?.category_ids ?? [])
+  // Fork: expense categories only: not transfers, ignored or hidden ones.
+  const spending = useMemo(
+    () => categories.filter((c) => !c.treat_as_transfer && !c.is_ignored && !c.is_hidden),
+    [categories],
+  )
+  const sections = [
+    ...groups.map((g) => ({ key: g.id, label: g.name, items: spending.filter((c) => c.group_id === g.id) })),
+    { key: 'none', label: '', items: spending.filter((c) => !c.group_id || !groups.some((g) => g.id === c.group_id)) },
+  ].filter((section) => section.items.length > 0)
+  // Fork: a group made a single month while viewing a later one becomes that
+  // month's, not its first month's (where it would vanish from view).
+  const start = group && group.is_recurring && !isRecurring ? month : group?.month ?? month
+
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (chosen.length === 0) {
+          toast.error(t('budgets.pickCategories'))
+          return
+        }
+        const cap = parseFloat(amount)
+        // Fork: the cap shown is this month's. Unchanged, it is not sent (it
+        // would overwrite the group's first cap); new from a later month, it
+        // starts in that month and the months before keep theirs (as a
+        // budget's amount does).
+        const capChanged = !group || cap !== Number(group.amount)
+        const fromHere = group && group.is_recurring && isRecurring && capChanged
+          && toMonthInput(group.month) < selectedMonth
+        onSave({
+          name,
+          ...(capChanged ? { amount: cap } : {}),
+          month: start,
+          is_recurring: isRecurring,
+          end_month: isRecurring ? fromMonthInput(endMonth) : null,
+          category_ids: chosen,
+          ...(fromHere ? { effective_month: month } : {}),
+        })
+      }}
+    >
+      <div className="space-y-2">
+        <Label htmlFor="group-name">{t('budgets.groupName')}</Label>
+        <Input id="group-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} required />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="group-cap">{t('budgets.groupCap')}</Label>
+        <Input id="group-cap" type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+      </div>
+      <div className="space-y-2">
+        <Label>{t('budgets.groupCategories')}</Label>
+        <div className="max-h-48 overflow-y-auto rounded-lg border border-border p-2 space-y-2" data-testid="group-categories">
+          {sections.map((section) => (
+            <div key={section.key} className="space-y-1">
+              {section.label && <p className="text-[11px] font-semibold text-muted-foreground">{section.label}</p>}
+              {section.items.map((c) => (
+                <label key={c.id} className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="rounded border-border"
+                    checked={chosen.includes(c.id)}
+                    onChange={() =>
+                      setChosen((ids) => (ids.includes(c.id) ? ids.filter((id) => id !== c.id) : [...ids, c.id]))
+                    }
+                  />
+                  {c.name}
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          className="rounded border-border"
+          checked={isRecurring}
+          onChange={(e) => setIsRecurring(e.target.checked)}
+        />
+        <span className="text-sm text-foreground">{t('budgets.repeatEveryMonth')}</span>
+      </label>
+      {isRecurring && (
+        <div className="space-y-2">
+          <Label htmlFor="group-end-month">{t('budgets.untilOptional')}</Label>
+          <MonthField
+            id="group-end-month"
+            value={endMonth}
+            onChange={setEndMonth}
+            min={toMonthInput(start) || selectedMonth}
+          />
+        </div>
+      )}
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel}>{t('common.cancel')}</Button>
+        <Button type="submit" disabled={loading}>{t('common.save')}</Button>
+      </DialogFooter>
+    </form>
   )
 }

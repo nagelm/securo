@@ -1060,6 +1060,34 @@ export interface Budget {
   amount: number
   month: string
   is_recurring: boolean
+  /** Fork: a recurring budget's last month (first day, inclusive); null = open-ended. */
+  end_month?: string | null
+}
+
+/** Fork: one cap over several categories. */
+export interface BudgetGroup {
+  id: string
+  user_id: string
+  name: string
+  amount: number | string
+  month: string
+  is_recurring: boolean
+  end_month: string | null
+  category_ids: string[]
+}
+
+/** Fork: a group's cap for a month against its members' spending. */
+export interface BudgetGroupVsActual {
+  id: string
+  name: string
+  amount: number | string
+  month: string
+  is_recurring: boolean
+  end_month: string | null
+  category_ids: string[]
+  actual_amount: number | string
+  projected_amount: number | string
+  percentage_used: number | null
 }
 
 export interface BudgetVsActual {
@@ -1076,6 +1104,8 @@ export interface BudgetVsActual {
   projected_prev_month_amount: number
   percentage_used: number | null
   is_recurring: boolean
+  /** Fork: the budget's last month, if it has one. */
+  end_month?: string | null
 }
 
 export interface BudgetSuggestion {

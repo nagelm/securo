@@ -64,6 +64,8 @@ function makeAccount(): Account {
   return {
     id: 'acc-1',
     user_id: 'u-1',
+    position: 0,
+    loan_details: null,
     connection_id: null,
     external_id: null,
     name: 'Checking A',

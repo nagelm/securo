@@ -46,7 +46,7 @@ vi.mock('@/contexts/auth-context', () => ({
   useAuth: () => ({ user: { preferences: { currency_display: 'BRL' } } }),
 }))
 vi.mock('@/contexts/workspace-context', () => ({
-  useWorkspace: () => ({ canWrite: true }),
+  useWorkspace: () => ({ canWrite: true, hasModule: () => true }),
 }))
 
 const account = {

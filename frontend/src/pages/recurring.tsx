@@ -31,6 +31,7 @@ import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { formatCurrency } from '@/lib/format'
+import { nthOccurrence, remainingCount } from '@/lib/recurring-schedule'
 
 const TH = 'text-xs font-medium text-muted-foreground py-3'
 
@@ -75,9 +76,10 @@ export function RecurringTab() {
   const [editing, setEditing] = useState<RecurringTransaction | null>(null)
   const [deletingRecurring, setDeletingRecurring] = useState<RecurringTransaction | null>(null)
 
+  // Fork (owner 2026-10-15): every recurring item, one kind, listed here.
   const { data: recurringList } = useQuery({
     queryKey: ['recurring'],
-    queryFn: recurringApi.list,
+    queryFn: () => recurringApi.list(),
   })
 
   const { data: categoriesList } = useQuery({
@@ -175,6 +177,18 @@ export function RecurringTab() {
     return map[f] ?? f
   }
 
+  const accountLabel = (id: string | null | undefined) =>
+    getAccountName(accountsList?.find((a) => a.id === id) ?? { name: '—' })
+  const longDate = (iso: string) =>
+    new Date(iso + 'T00:00:00').toLocaleDateString(dateLocale, { day: 'numeric', month: 'short', year: 'numeric' })
+  // Fork: how a schedule ends: its last date and the payments still to come.
+  const endNote = (rt: RecurringTransaction) => {
+    if (!rt.end_date) return null
+    const left = rt.is_active ? remainingCount(rt) : 0
+    if (!left) return t('recurring.endedOn', { date: longDate(rt.end_date) })
+    return `${t('recurring.untilDate', { date: longDate(rt.end_date) })} · ${t('recurring.leftCount', { count: left })}`
+  }
+
   return (
     <>
       <SectionCard>
@@ -215,9 +229,42 @@ export function RecurringTab() {
             <tbody>
               {recurringList.map((rt) => (
                 <tr key={rt.id} className="border-b border-border last:border-0 hover:bg-muted transition-colors">
-                  <td className="py-3 pl-4 sm:pl-5 text-sm font-medium text-foreground">{rt.description}</td>
-                  <td className={`py-3 text-xs sm:text-sm font-bold tabular-nums ${rt.type === 'credit' ? 'text-emerald-600' : 'text-rose-500'}`}>
-                    {mask(`${rt.type === 'credit' ? '+' : '−'}${formatCurrency(rt.amount, rt.currency, locale)}`)}
+                  <td className="py-3 pl-4 sm:pl-5 text-sm font-medium text-foreground">
+                    {/* Fork: the payee's icon or logo, as on the transactions list. */}
+                    <div className="flex items-center gap-2 md:gap-3">
+                      <PayeeIcon
+                        icon={rt.payee_icon}
+                        logoUrl={rt.payee_logo_url}
+                        fallbackIcon={categoryById.get(rt.category_id ?? '')?.icon}
+                        fallbackColor={categoryById.get(rt.category_id ?? '')?.color}
+                        size="md"
+                      />
+                      <div className="min-w-0">
+                        {rt.description}
+                        {rt.transfer_account_id && (
+                          <div className="text-[11px] font-normal text-muted-foreground" data-testid="recurring-transfer">
+                            {t('recurring.transferRowNote', {
+                              from: accountLabel(rt.account_id),
+                              to: accountLabel(rt.transfer_account_id),
+                            })}
+                          </div>
+                        )}
+                        {endNote(rt) && (
+                          <div className="text-[11px] font-normal text-muted-foreground" data-testid="recurring-end">
+                            {endNote(rt)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                  {/* Fork: a transfer between own accounts moves money, so it has no sign. */}
+                  <td className={cn(
+                    'py-3 text-xs sm:text-sm font-bold tabular-nums',
+                    rt.transfer_account_id
+                      ? 'text-foreground'
+                      : rt.type === 'credit' ? 'text-emerald-600' : 'text-rose-500',
+                  )}>
+                    {mask(`${rt.transfer_account_id ? '' : rt.type === 'credit' ? '+' : '−'}${formatCurrency(rt.amount, rt.currency, locale)}`)}
                     {rt.currency !== userCurrency && rt.amount_primary != null && (
                       <div className="flex items-center gap-1 text-[11px] font-normal text-muted-foreground">
                         <span>{mask(formatCurrency(rt.amount_primary, userCurrency, locale))}</span>
@@ -350,7 +397,11 @@ function RecurringForm({
   const [description, setDescription] = useState(recurring?.description ?? '')
   const [amount, setAmount] = useState(recurring?.amount?.toString() ?? '')
   const [currency, setCurrency] = useState(recurring?.currency ?? userCurrency)
-  const [type, setType] = useState<'debit' | 'credit'>(recurring?.type ?? 'debit')
+  // Fork: a standard item can be a transfer to another own account.
+  const [type, setType] = useState<'debit' | 'credit' | 'transfer'>(
+    recurring?.transfer_account_id ? 'transfer' : recurring?.type ?? 'debit',
+  )
+  const [transferTo, setTransferTo] = useState(recurring?.transfer_account_id ?? '')
   const [frequency, setFrequency] = useState(recurring?.frequency ?? 'monthly')
   const [weekendAdjustment, setWeekendAdjustment] = useState<RecurringTransaction['weekend_adjustment']>(
     recurring?.weekend_adjustment ?? 'none'
@@ -358,6 +409,9 @@ function RecurringForm({
   const [dayOfMonth, setDayOfMonth] = useState(recurring?.day_of_month?.toString() ?? '')
   const [startDate, setStartDate] = useState(recurring?.start_date ?? localDateString())
   const [endDate, setEndDate] = useState(recurring?.end_date ?? '')
+  // Fork: how the schedule ends: never, on a date, or after a number of payments.
+  const [ends, setEnds] = useState<'never' | 'on_date' | 'after'>(recurring?.end_date ? 'on_date' : 'never')
+  const [endCount, setEndCount] = useState('')
   const [categoryId, setCategoryId] = useState(recurring?.category_id ?? '')
   const [payeeId, setPayeeId] = useState(recurring?.payee_id ?? '')
   const [accountId, setAccountId] = useState(recurring?.account_id ?? '')
@@ -365,6 +419,13 @@ function RecurringForm({
   const [autoGenerate, setAutoGenerate] = useState(recurring?.auto_generate ?? true)
 
   const selectClass = 'w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary'
+  const isTransfer = type === 'transfer'
+  const count = parseInt(endCount, 10)
+  const lastByCount = ends === 'after' && count >= 1 && startDate
+    ? nthOccurrence(startDate, frequency, count, dayOfMonth ? parseInt(dayOfMonth) : null)
+    : null
+  const finalEnd = ends === 'on_date' ? endDate || null : ends === 'after' ? lastByCount : null
+  const dateLocale = useDateLocale()
 
   return (
     <form
@@ -374,17 +435,19 @@ function RecurringForm({
           description,
           amount: parseFloat(amount),
           currency,
-          type,
+          type: isTransfer ? 'debit' : type,
           frequency,
           weekend_adjustment: weekendAdjustment,
           day_of_month: dayOfMonth ? parseInt(dayOfMonth) : null,
           start_date: startDate,
-          end_date: endDate || null,
+          end_date: finalEnd,
           category_id: categoryId || null,
           payee_id: payeeId || null,
           account_id: accountId || null,
+          // Fork: a transfer to another own account; null makes it a plain payment.
+          transfer_account_id: isTransfer ? transferTo || null : null,
           is_active: isActive,
-          auto_generate: autoGenerate,
+          auto_generate: isTransfer ? false : autoGenerate,
         } as Partial<RecurringTransaction>)
       }}
       className="space-y-4"
@@ -412,16 +475,22 @@ function RecurringForm({
         </div>
         <div className="space-y-2">
           <Label>{t('recurring.type')}</Label>
-          <select className={selectClass} value={type} onChange={(e) => setType(e.target.value as 'debit' | 'credit')}>
+          <select
+            aria-label={t('recurring.type')}
+            className={selectClass}
+            value={type}
+            onChange={(e) => setType(e.target.value as 'debit' | 'credit' | 'transfer')}
+          >
             <option value="debit">{t('recurring.expense')}</option>
             <option value="credit">{t('recurring.income')}</option>
+            <option value="transfer">{t('recurring.transfer')}</option>
           </select>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>{t('recurring.frequency')}</Label>
-          <select className={selectClass} value={frequency} onChange={(e) => setFrequency(e.target.value as RecurringTransaction['frequency'])}>
+          <Label htmlFor="recurring-frequency">{t('recurring.frequency')}</Label>
+          <select id="recurring-frequency" className={selectClass} value={frequency} onChange={(e) => setFrequency(e.target.value as RecurringTransaction['frequency'])}>
             <option value="monthly">{t('recurring.monthly')}</option>
             <option value="quarterly">{t('recurring.quarterly')}</option>
             <option value="semiannual">{t('recurring.semiannual')}</option>
@@ -455,10 +524,44 @@ function RecurringForm({
           <DatePickerInput value={startDate} onChange={setStartDate} className="w-full justify-start" />
         </div>
         <div className="space-y-2">
-          <Label>{t('recurring.endDate')}</Label>
-          <DatePickerInput value={endDate} onChange={setEndDate} placeholder={t('recurring.endDate')} className="w-full justify-start" />
+          <Label htmlFor="recurring-ends">{t('recurring.ends')}</Label>
+          <select
+            id="recurring-ends"
+            className={selectClass}
+            value={ends}
+            onChange={(e) => setEnds(e.target.value as 'never' | 'on_date' | 'after')}
+          >
+            <option value="never">{t('recurring.endsNever')}</option>
+            <option value="on_date">{t('recurring.endsOnDate')}</option>
+            <option value="after">{t('recurring.endsAfter')}</option>
+          </select>
         </div>
       </div>
+      {ends === 'on_date' && (
+        <div className="space-y-2">
+          <Label>{t('recurring.endDateLabel')}</Label>
+          <DatePickerInput value={endDate} onChange={setEndDate} placeholder={t('recurring.endDateLabel')} className="w-full justify-start" />
+        </div>
+      )}
+      {ends === 'after' && (
+        <div className="space-y-2">
+          <Label htmlFor="recurring-end-count">{t('recurring.endsAfterCount')}</Label>
+          <Input
+            id="recurring-end-count"
+            type="number"
+            min="1"
+            step="1"
+            value={endCount}
+            onChange={(e) => setEndCount(e.target.value)}
+            required
+          />
+          {lastByCount && (
+            <p className="text-xs text-muted-foreground" data-testid="recurring-last-payment">
+              {t('recurring.endsLastPayment', { date: new Date(lastByCount + 'T00:00:00').toLocaleDateString(dateLocale) })}
+            </p>
+          )}
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>{t('recurring.category')}</Label>
@@ -473,8 +576,9 @@ function RecurringForm({
           />
         </div>
         <div className="space-y-2">
-          <Label>{t('recurring.account')}</Label>
+          <Label htmlFor="recurring-account">{isTransfer ? t('recurring.fromAccount') : t('recurring.account')}</Label>
           <select
+            id="recurring-account"
             className={selectClass}
             value={accountId}
             onChange={(e) => setAccountId(e.target.value)}
@@ -487,6 +591,23 @@ function RecurringForm({
           </select>
         </div>
       </div>
+      {isTransfer && (
+        <div className="space-y-2">
+          <Label htmlFor="recurring-transfer-to">{t('recurring.transferTo')}</Label>
+          <select
+            id="recurring-transfer-to"
+            className={selectClass}
+            value={transferTo}
+            onChange={(e) => setTransferTo(e.target.value)}
+            required
+          >
+            <option value="" disabled>{t('recurring.noAccount')}</option>
+            {sortedAccounts.filter((acc) => acc.id !== accountId).map((acc) => (
+              <option key={acc.id} value={acc.id}>{getAccountName(acc)}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <label className="flex items-start gap-2 cursor-pointer">
         <input
           type="checkbox"

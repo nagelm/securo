@@ -60,7 +60,10 @@ import type {
   ProjectedTransaction,
   TransactionCalendarResponse,
   Budget,
+  BudgetGroup,
+  BudgetGroupVsActual,
   BudgetVsActual,
+  ForecastBudgetChoices,
   BudgetSuggestionResponse,
   Rule,
   RuleAction,
@@ -1435,11 +1438,20 @@ export const budgets = {
     const { data } = await api.get('/budgets', { params: { month } })
     return data
   },
-  create: async (budget: { category_id: string; amount: number; month: string; is_recurring?: boolean }): Promise<Budget> => {
+  create: async (budget: {
+    category_id: string
+    amount: number
+    month: string
+    is_recurring?: boolean
+    end_month?: string | null
+  }): Promise<Budget> => {
     const { data } = await api.post('/budgets', budget)
     return data
   },
-  update: async (id: string, budget: { amount?: number }): Promise<Budget> => {
+  update: async (
+    id: string,
+    budget: { amount?: number; effective_month?: string; end_month?: string | null },
+  ): Promise<Budget> => {
     const { data } = await api.patch(`/budgets/${id}`, budget)
     return data
   },
@@ -1460,6 +1472,38 @@ export const budgets = {
     items: { category_id: string; amount: number }[]
   }): Promise<Budget[]> => {
     const { data } = await api.post('/budgets/batch', payload)
+    return data
+  },
+}
+
+// Fork: budget groups, one cap over several categories.
+export type BudgetGroupInput = {
+  name: string
+  amount: number
+  month: string
+  is_recurring: boolean
+  end_month: string | null
+  category_ids: string[]
+}
+export const budgetGroups = {
+  list: async (month?: string): Promise<BudgetGroup[]> => {
+    const { data } = await api.get('/budget-groups', { params: { month } })
+    return data
+  },
+  create: async (group: BudgetGroupInput): Promise<BudgetGroup> => {
+    const { data } = await api.post('/budget-groups', group)
+    return data
+  },
+  // Fork: effective_month starts a repeating group's new cap in that month.
+  update: async (id: string, group: Partial<BudgetGroupInput> & { effective_month?: string }): Promise<BudgetGroup> => {
+    const { data } = await api.patch(`/budget-groups/${id}`, group)
+    return data
+  },
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/budget-groups/${id}`)
+  },
+  comparison: async (month?: string): Promise<BudgetGroupVsActual[]> => {
+    const { data } = await api.get('/budget-groups/comparison', { params: { month } })
     return data
   },
 }

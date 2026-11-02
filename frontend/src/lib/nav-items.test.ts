@@ -39,7 +39,7 @@ describe('nav catalog', () => {
   })
 
   it('has a link for every module in the catalog', () => {
-    const covered = navItems.filter((i) => i.type === 'link').map((i) => i.module)
+    const covered = new Set(navItems.filter((i) => i.type === 'link').map((i) => i.module))
     expect([...covered].sort()).toEqual([...MODULE_IDS].sort())
   })
 
@@ -47,6 +47,8 @@ describe('nav catalog', () => {
     const links = navItems.filter((i) => i.type === 'link')
     const covered = links.filter((i) => i.key !== 'forecast' && i.key !== 'insights').map((i) => i.module)
     expect(new Set(covered).size).toBe(covered.length)
+    expect(links.find((i) => i.key === 'forecast')?.module).toBe('recurring')
+    expect(links.find((i) => i.key === 'insights')?.module).toBe('reports')
   })
 })
 
@@ -58,7 +60,11 @@ describe('visibleNavItems', () => {
       'accounts',
       'import',
       'reports',
+      // Fork: Insights sits under Reports in Analysis.
+      'insights',
       'assets',
+      // Fork: Forecast sits in Analysis; Recurring is its own page in Setup.
+      'forecast',
       'budgets',
       'goals',
       'recurring',
