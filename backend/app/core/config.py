@@ -76,6 +76,25 @@ class Settings(BaseSettings):
     openexchangerates_app_id: str = ""
     supported_currencies: str = "USD,EUR,GBP,BRL,CAD,AUD,CHF,ARS,JPY,MXN,INR,SEK,DKK,NOK,PLN,CZK,HUF,RON,CRC,IDR,COP,CLP,DOP,KZT,RUB,GTQ,PHP,UAH,NZD,VND,SGD,AZN,TRY,PKR,MDL,AED,THB,EGP,MYR,CNY,SAR,QAR,JMD,RSD,MKD,HKD,TWD,ZAR,GEL"  # comma-separated list
     fx_sync_mode: str = "on_demand"  # "on_demand" or "scheduled"
+    # Fork: False stops a conversion on a past date from calling the provider
+    # for that day (one API call per distinct date); it uses the closest stored
+    # rate instead. For plans with a small monthly quota, paired with a
+    # scheduled daily sync and a one-off backfill of past rates.
+    fx_fetch_history_on_demand: bool = True
+
+    # Fork: how often a sync may ask the provider to re-read the bank.
+    provider_refresh_minutes: int = 1200
+
+    # Fork: server-side database backups (app/services/db_backup_service.py).
+    # Empty DB_BACKUP_DIR turns them off. The worker writes a pg_dump file there
+    # whenever the newest one is DB_BACKUP_INTERVAL_HOURS old (0: only on demand,
+    # `python -m app.cli db-backup <label>`). After each backup the folder keeps
+    # the newest DB_BACKUP_KEEP_LATEST plus, per tier in DB_BACKUP_TIERS_DAYS,
+    # the oldest backup younger than that many days.
+    db_backup_dir: str = ""
+    db_backup_interval_hours: int = 24
+    db_backup_keep_latest: int = 3
+    db_backup_tiers_days: str = "14,60"
 
     # Storage
     storage_provider: str = "local"  # "local" or "s3"
