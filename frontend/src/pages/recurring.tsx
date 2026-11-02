@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { getAccountName, sortAccountsByDisplayName } from '@/lib/account-utils'
+import { getAccountName, sortAccountsByPosition } from '@/lib/account-utils'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -321,7 +321,7 @@ function RecurringForm({
   const { t } = useTranslation()
   const { user } = useAuth()
   const userCurrency = user?.preferences?.currency_display ?? 'USD'
-  const sortedAccounts = useMemo(() => sortAccountsByDisplayName(accounts), [accounts])
+  const sortedAccounts = useMemo(() => sortAccountsByPosition(accounts), [accounts])
   const { data: supportedCurrencies } = useQuery({
     queryKey: ['currencies'],
     queryFn: currenciesApi.list,

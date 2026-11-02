@@ -182,6 +182,9 @@ export interface Account {
   external_id: string | null
   name: string
   display_name: string | null
+  // Place in the user's account order, smallest first (set on the Accounts
+  // page). The API lists accounts in this order. Display only.
+  position: number
   // Last 4 chars of the bank's identifier for the account, when the provider
   // exposes one. Tells apart accounts a bank reports under an identical name.
   masked_number: string | null
@@ -218,6 +221,10 @@ export interface Account {
   card_brand: string | null
   card_level: string | null
   shared_balance_group: string | null
+  // Loan accounts only (type === 'loan'); null on every other type.
+  // Loan facts (rate, term, maturity, repayment) in Akahu's shape, typed in
+  // by the user or merged in by sync (lib/loan-details.ts). Display only.
+  loan_details: Record<string, unknown> | null
   // Open bill (due today or later) of a card on a shared credit line, in the
   // account's currency. Null when the card has no such bill; the row then
   // keeps showing the balance.
@@ -227,6 +234,7 @@ export interface Account {
   is_closed: boolean
   closed_at: string | null
 }
+
 
 export interface CreditCardBill {
   id: string

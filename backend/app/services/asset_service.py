@@ -831,6 +831,14 @@ async def delete_asset(
     asset = result.scalar_one_or_none()
     if not asset:
         return False
+    # Unlink loans secured against this asset. The foreign key does the same
+    # (ON DELETE SET NULL); doing it here keeps the ORM state right and holds
+    # on databases that do not enforce foreign keys.
+    await session.execute(
+        update(Account)
+        .where(Account.secured_asset_id == asset.id)
+        .values(secured_asset_id=None)
+    )
     await session.delete(asset)
     await session.commit()
     return True

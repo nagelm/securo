@@ -1061,7 +1061,7 @@ export default function GroupDetailPage() {
                         onChange={(e) => setSettleAccountId(e.target.value)}
                       >
                         <option value="">{t('splitGroups.selectAccount')}</option>
-                        {sortAccountsByDisplayName(accountsList ?? []).map((a) => (
+                        {sortAccountsByPosition(accountsList ?? []).map((a) => (
                           <option key={a.id} value={a.id}>
                             {getAccountName(a)}
                           </option>

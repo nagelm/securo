@@ -25,6 +25,7 @@ from app.models.credit_card_bill import CreditCardBill
 from app.models.mortgage_payment_allocation import MortgagePaymentAllocation
 from app.models.transaction import Transaction
 from app.schemas.account import AccountCreate, AccountUpdate, LoanBalanceUpdate
+from app.services.account_order import ACCOUNT_LIST_ORDER, next_account_position
 from app.services._query_filters import (
     foreign_row_account_amount,
     counts_as_pnl,
@@ -81,10 +82,17 @@ def _provider_to_internal_balance(provider: str, account_type: str, balance: Dec
     return balance
 
 
+#: Account types whose user-entered balance is an amount owed: a positive
+#: figure is booked as a debit opening row, so the balance reads negative.
+_DEBT_ENTRY_TYPES = frozenset({"credit_card", "loan"})
+
+#: Columns that only mean something on a `loan` account.
+_LOAN_FIELDS = ("secured_asset_id", "loan_details")
+
+
 def _opening_balance_values(account_type: str, balance: Decimal) -> tuple[Decimal, str]:
     amount = abs(balance)
-    # A loan is entered as the amount owed, like a card, and is debt in the ledger.
-    is_credit = (balance > 0) == (account_type not in {"credit_card", "loan"})
+    is_credit = (balance > 0) == (account_type not in _DEBT_ENTRY_TYPES)
     return amount, "credit" if is_credit else "debit"
 
 
@@ -294,7 +302,7 @@ async def get_accounts(session: AsyncSession, workspace_id: uuid.UUID, include_c
     query = _accounts_with_balances_query(workspace_id, *_balance_subqueries(app_today()))
     if not include_closed:
         query = query.where(Account.is_closed == False)
-    query = query.order_by(Account.name)
+    query = query.order_by(*ACCOUNT_LIST_ORDER)
     result = await session.execute(query)
     return [
             serialize_account(
@@ -387,6 +395,7 @@ def serialize_account(
         "external_id": acc.external_id,
         "name": acc.name,
         "display_name": acc.display_name,
+        "position": acc.position,
         "masked_number": acc.masked_number,
         "type": acc.type,
         "secured_asset_id": acc.secured_asset_id,
@@ -410,6 +419,7 @@ def serialize_account(
         "loan_first_payment_date": acc.loan_first_payment_date,
         "loan_amortization": acc.loan_amortization,
         "shared_balance_group": acc.shared_balance_group,
+        "loan_details": acc.loan_details,
         # The card's own open bill, when it sits on a shared credit line.
         # Null for every other account and for shared cards without one.
         "open_bill_total": float(open_bill_total) if open_bill_total is not None else None,
@@ -501,6 +511,11 @@ async def create_account(
 ) -> Account:
     await _validate_secured_asset(session, workspace_id, data.type, data.secured_asset_id)
     is_cc = data.type == "credit_card"
+    await _validate_loan_fields(
+        session, workspace_id, data.type, data.secured_asset_id, data.loan_details
+    )
+    loan_details = normalize_user_loan_details(data.loan_details)
+    _validate_loan_credit_limit(data.type, loan_details, data.credit_limit)
     account = Account(
         user_id=user_id,
         workspace_id=workspace_id,
@@ -515,6 +530,8 @@ async def create_account(
         minimum_payment=data.minimum_payment if is_cc else None,
         card_brand=data.card_brand if is_cc else None,
         card_level=data.card_level if is_cc else None,
+        loan_details=loan_details,
+        position=await next_account_position(session, workspace_id),
         **{field: getattr(data, field) if data.type == "loan" else None for field in LOAN_TERM_FIELDS},
     )
     session.add(account)
@@ -584,6 +601,22 @@ async def update_account(
         ),
     )
 
+    # Validate loan fields against the type the account will have, before
+    # anything is written. Fields left out of the request keep their value,
+    # unless the type leaves `loan` (then they are cleared below).
+    await _validate_loan_fields(
+        session,
+        workspace_id,
+        update_data.get("type", account.type),
+        update_data.get("secured_asset_id"),
+        update_data.get("loan_details"),
+    )
+    if "loan_details" in update_data:
+        update_data["loan_details"] = normalize_user_loan_details(update_data["loan_details"])
+    new_type = update_data.get("type", account.type)
+    new_loan_details = update_data.get("loan_details", account.loan_details)
+    _validate_loan_credit_limit(new_type, new_loan_details, update_data.get("credit_limit"))
+
     # Track whether we need to recompute effective_date for all transactions.
     # Changes to the CC cycle days shift which bill each historical purchase
     # belongs to, so stored effective_dates need to be rebuilt.
@@ -598,8 +631,13 @@ async def update_account(
     # sometimes misreport it (e.g. Enable Banking labels an mBank savings
     # account as "checking"; issue #271). Sync only writes `type` on initial
     # account creation and never overwrites it afterwards, so the override
-    # survives subsequent syncs without a separate field.
+    # survives subsequent syncs without a separate field. A connected account
+    # may become a `loan` (its provider balance is already negative, and no
+    # read site negates a loan), and its loan subtype, secured asset and loan
+    # details are the user's to set (sync later replaces only the detail keys
+    # the provider sends: loan_details.merge_provider_details).
     if account.connection_id is not None:
+        loan_fields = {"loan_details"}
         # The contract terms describe the agreement with the lender, not
         # anything the provider reports, so a connected loan can carry them
         # and the sync has nothing to say about them.
@@ -614,13 +652,13 @@ async def update_account(
             "card_brand",
             "card_level",
             *LOAN_TERM_FIELDS,
-        }
+        } | loan_fields
         disallowed = set(update_data.keys()) - editable_fields
         if disallowed:
             raise ValueError("Cannot edit bank-connected accounts")
         old_type = account.type
         new_type = update_data.get("type", account.type)
-        cc_fields = editable_fields - {"display_name", "type", "secured_asset_id", *LOAN_TERM_FIELDS}
+        cc_fields = editable_fields - {"display_name", "type", "secured_asset_id", *LOAN_TERM_FIELDS} - loan_fields
         cc_update = {k: v for k, v in update_data.items() if k in cc_fields}
         if new_type == "loan":
             # A loan's credit limit was checked above (revolving only).
@@ -665,8 +703,7 @@ async def update_account(
             account.minimum_payment = None
             account.card_brand = None
             account.card_level = None
-        if new_type != "loan":
-            account.secured_asset_id = None
+        _clear_loan_fields_unless_loan(account)
         if cycle_fields_changed:
             await _recompute_effective_dates(session, account)
         await session.commit()
@@ -684,10 +721,7 @@ async def update_account(
         account.minimum_payment = None
         account.card_brand = None
         account.card_level = None
-    if account.type != "loan":
-        account.secured_asset_id = None
-        for field in LOAN_TERM_FIELDS:
-            setattr(account, field, None)
+    _clear_loan_fields_unless_loan(account)
 
     opening_balance_type_changed = old_type != account.type and "loan" in {old_type, account.type}
     # When balance changes, sync the opening_balance transaction
@@ -899,7 +933,15 @@ async def sync_opening_balance_for_connected_account(
         )
     )
     oldest_date = oldest_result.scalar()
-    opening_date = (oldest_date - timedelta(days=1)) if oldest_date else app_today()
+    # Fork: an account with no transactions (Akahu investment accounts carry a
+    # balance only) keeps the date its opening row already has; re-dating it to
+    # today on every sync made the balance look newly arrived each day.
+    if oldest_date:
+        opening_date = oldest_date - timedelta(days=1)
+    elif existing_tx is not None:
+        opening_date = existing_tx.date
+    else:
+        opening_date = app_today()
 
     # Sign convention matches the rest of the codebase: credit = +, debit = -
     # regardless of account type. A positive offset needs a credit to raise the

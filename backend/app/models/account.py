@@ -1,9 +1,9 @@
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, SmallInteger, String
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,11 +41,7 @@ class Account(Base):
     # duplicating the account after a reconnect. Refreshed alongside `name`,
     # never blanked by a missing value.
     stable_external_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    type: Mapped[str] = mapped_column(String(50))  # checking, savings, credit_card, loan
-    # Loan accounts only: the property or vehicle this loan is secured against.
-    secured_asset_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("assets.id", ondelete="SET NULL"), nullable=True, index=True
-    )
+    type: Mapped[str] = mapped_column(String(50))  # checking, savings, credit_card, loan, ...
     balance: Mapped[Decimal] = mapped_column(Numeric(precision=15, scale=2), default=Decimal("0.00"))
     # Loan accounts only: the contract terms, all optional. The payment
     # schedule is computed from them on read (app/services/loan_schedule.py).
@@ -73,6 +69,25 @@ class Account(Base):
         UUID(as_uuid=True), ForeignKey("institutions.id", ondelete="SET NULL"),
         nullable=True, index=True,
     )
+    # Loan accounts (type="loan"). A loan's balance is negative: the amount
+    # owed. `secured_asset_id` links the loan
+    # to the asset it is secured against (many loans per asset); deleting the
+    # asset unlinks it. `loan_details` holds loan facts in Akahu's shape,
+    # entered by the user or merged in by sync (app.services.loan_details),
+    # and is never read by P&L, budget or net-worth code. All three are
+    # cleared when the account stops being a loan.
+    secured_asset_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("assets.id", ondelete="SET NULL", name="fk_accounts_secured_asset_id_assets"),
+        nullable=True,
+        index=True,
+    )
+    loan_details: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    # Where the account sits in every account list of its workspace, smallest
+    # first (app.services.account_order). User-owned: set by reordering,
+    # appended for new accounts, never touched by sync. Display only: no
+    # balance, net worth or P&L figure reads it.
+    position: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     is_closed: Mapped[bool] = mapped_column(Boolean, default=False)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 

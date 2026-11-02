@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,6 +32,11 @@ class AccountCreate(BaseModel):
     minimum_payment: Optional[Decimal] = None
     card_brand: Optional[str] = None
     card_level: Optional[str] = None
+    # Loan accounts only; a non-null value on any other type is a 400.
+    secured_asset_id: Optional[uuid.UUID] = None
+    # Akahu-shaped loan facts the user enters (app.services.loan_details);
+    # checked by the service so a bad key is a 400.
+    loan_details: Optional[dict[str, Any]] = None
     # Loan accounts only: contract terms, all optional (see loan_schedule.py).
     loan_kind: Optional[LoanKind] = None
     loan_original_amount: Optional[Decimal] = Field(default=None, gt=0)
@@ -55,6 +60,9 @@ class AccountUpdate(BaseModel):
     minimum_payment: Optional[Decimal] = None
     card_brand: Optional[str] = None
     card_level: Optional[str] = None
+    secured_asset_id: Optional[uuid.UUID] = None
+    # Replaces the stored loan details as a whole; null clears them.
+    loan_details: Optional[dict[str, Any]] = None
     # Loan accounts only: contract terms, all optional (see loan_schedule.py).
     loan_kind: Optional[LoanKind] = None
     loan_original_amount: Optional[Decimal] = Field(default=None, gt=0)
@@ -65,12 +73,21 @@ class AccountUpdate(BaseModel):
     loan_amortization: Optional[LoanAmortization] = None
 
 
+class AccountOrderUpdate(BaseModel):
+    # Accounts of the workspace in their new order. A subset is fine: the
+    # named accounts swap among their own places (app.services.account_order).
+    account_ids: list[uuid.UUID] = Field(min_length=1)
+
+
 class AccountRead(AccountBase):
     id: uuid.UUID
     user_id: uuid.UUID
     connection_id: Optional[uuid.UUID] = None
     external_id: Optional[str] = None
     display_name: Optional[str] = None
+    # Place in the workspace's account lists, smallest first; set through
+    # PUT /api/accounts/order.
+    position: int = 0
     # Last 4 chars of the bank's identifier, when the provider exposes one.
     # Read-only: absent from AccountUpdate because sync owns it.
     masked_number: Optional[str] = None
@@ -104,6 +121,11 @@ class AccountRead(AccountBase):
     loan_first_payment_date: Optional[date] = None
     loan_amortization: Optional[str] = None
     shared_balance_group: Optional[str] = None
+    secured_asset_id: Optional[uuid.UUID] = None
+    # Loan facts (rate, term, maturity, repayment), entered by the user or
+    # written by sync, in one Akahu-shaped object (app.services.loan_details).
+    # Display only.
+    loan_details: Optional[dict[str, Any]] = None
     # Open bill of a card on a shared credit line (earliest due_date on or
     # after today), in the account's currency. The sidebar leads with it so
     # every card stops repeating the contract-wide balance. Null when the

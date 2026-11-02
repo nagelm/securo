@@ -16,6 +16,7 @@ from app.core.workspace_context import (
 )
 from app.schemas.account import (
     AccountCreate,
+    AccountOrderUpdate,
     AccountRead,
     AccountRunningBalancePoint,
     LoanBalanceAdjustment,
@@ -25,7 +26,8 @@ from app.schemas.account import (
     AccountUpdate,
     CreditCardBillRead,
 )
-from app.services import account_service
+from app.schemas.loan_summary import LoanSummary
+from app.services import account_order, account_service, loan_summary
 from app.services.admin_service import get_credit_card_accounting_mode
 from app.services.fx_rate_service import _resolve_rate
 
@@ -47,6 +49,26 @@ async def list_accounts(
     for acc in accounts:
         await _convert_to_primary(session, acc, ctx.user.primary_currency)
     return accounts
+
+
+@router.put("/order", status_code=status.HTTP_204_NO_CONTENT)
+async def reorder_accounts(
+    payload: AccountOrderUpdate,
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Put the named accounts in this order, in the places they already hold.
+
+    A subset is fine (the Accounts page sends one group at a time); the
+    workspace's other accounts keep their places. Display only.
+    """
+    try:
+        await account_order.reorder_accounts(session, ctx.workspace.id, payload.account_ids)
+    except account_order.AccountOrderError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except account_order.AccountNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    await session.commit()
 
 
 async def _convert_to_primary(session: AsyncSession, acc: dict, primary_currency: str) -> None:
