@@ -746,6 +746,7 @@
     "confirmDeleteDesc": "„{{name}}“ sa odstráni. Tvoje účty ani údaje to neovplyvní."
   },
   "auth": {
+    "reauthRequired": "For your security, please sign in again to make that change.",
     "login": "Prihlásiť sa",
     "register": "Vytvoriť účet",
     "logout": "Odhlásiť sa",

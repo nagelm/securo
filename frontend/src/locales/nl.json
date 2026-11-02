@@ -738,6 +738,7 @@
     "confirmDeleteDesc": "\"{{name}}\" wordt verwijderd. Uw accounts en gegevens worden niet beïnvloed."
   },
   "auth": {
+    "reauthRequired": "For your security, please sign in again to make that change.",
     "login": "Inloggen",
     "register": "Account aanmaken",
     "logout": "Uitloggen",

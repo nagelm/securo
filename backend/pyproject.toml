@@ -48,6 +48,7 @@ dependencies = [
     "fastembed>=0.4.0",
     # Resolve the host's IANA timezone when no app setting or TZ override exists.
     "tzlocal>=5.0.0",
+    "regex>=2026.9.29",
 ]
 
 [project.optional-dependencies]

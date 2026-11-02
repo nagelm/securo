@@ -738,6 +738,7 @@
     "confirmDeleteDesc": "「{{name}}」を削除します。口座とデータには影響しません。"
   },
   "auth": {
+    "reauthRequired": "For your security, please sign in again to make that change.",
     "login": "ログイン",
     "register": "アカウント作成",
     "logout": "ログアウト",

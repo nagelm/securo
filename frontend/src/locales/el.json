@@ -738,6 +738,7 @@
     "confirmDeleteDesc": "Η συλλογή \"{{name}}\" θα αφαιρεθεί. Οι λογαριασμοί και τα δεδομένα σας δεν επηρεάζονται."
   },
   "auth": {
+    "reauthRequired": "For your security, please sign in again to make that change.",
     "login": "Σύνδεση",
     "register": "Δημιουργία λογαριασμού",
     "logout": "Αποσύνδεση",

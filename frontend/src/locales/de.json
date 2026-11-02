@@ -738,6 +738,7 @@
     "confirmDeleteDesc": "\"{{name}}\" wird entfernt. Deine Konten und Daten sind nicht betroffen."
   },
   "auth": {
+    "reauthRequired": "For your security, please sign in again to make that change.",
     "login": "Einloggen",
     "register": "Konto erstellen",
     "logout": "Ausloggen",

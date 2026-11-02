@@ -746,6 +746,7 @@
     "confirmDeleteDesc": "«{{name}}» будет удалена. Ваши счета и данные не пострадают."
   },
   "auth": {
+    "reauthRequired": "For your security, please sign in again to make that change.",
     "login": "Войти",
     "register": "Создать аккаунт",
     "logout": "Выйти",

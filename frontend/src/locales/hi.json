@@ -738,6 +738,7 @@
     "confirmDeleteDesc": "\"{{name}}\" हटा दिया जाएगा। आपके खाते और डेटा पर कोई असर नहीं पड़ता।"
   },
   "auth": {
+    "reauthRequired": "For your security, please sign in again to make that change.",
     "login": "लॉग इन",
     "register": "खाता बनाएँ",
     "logout": "लॉग आउट",

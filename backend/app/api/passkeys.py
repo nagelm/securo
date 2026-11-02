@@ -25,7 +25,7 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
-from app.core.auth import current_active_user, get_jwt_strategy
+from app.core.auth import current_active_user, get_jwt_strategy, require_recent_login
 from app.core.auth_policy import require_local_auth_enabled
 from app.core.config import get_settings
 from app.core.database import get_async_session
@@ -203,7 +203,7 @@ async def list_passkeys(
 @router.post(
     "/passkeys/register/options",
     response_model=PasskeyOptionsResponse,
-    dependencies=[Depends(require_local_auth_enabled)],
+    dependencies=[Depends(require_local_auth_enabled), Depends(require_recent_login)],
 )
 async def passkey_registration_options(
     request: Request,
@@ -249,7 +249,7 @@ async def passkey_registration_options(
 @router.post(
     "/passkeys/register/verify",
     response_model=PasskeyRead,
-    dependencies=[Depends(require_local_auth_enabled)],
+    dependencies=[Depends(require_local_auth_enabled), Depends(require_recent_login)],
 )
 async def verify_passkey_registration(
     body: PasskeyRegisterVerifyRequest,
@@ -293,7 +293,11 @@ async def verify_passkey_registration(
     return passkey
 
 
-@router.delete("/passkeys/{passkey_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/passkeys/{passkey_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_recent_login)],
+)
 async def delete_passkey(
     passkey_id: uuid.UUID,
     user: User = Depends(current_active_user),

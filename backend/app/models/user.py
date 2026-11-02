@@ -4,7 +4,9 @@ from typing import TYPE_CHECKING, Optional
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID
 from sqlalchemy import JSON, Boolean, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import TypeDecorator
 
+from app.core.crypto import TOTP_SALT, decrypt, encrypt
 from app.core.database import Base
 
 if TYPE_CHECKING:
@@ -12,6 +14,20 @@ if TYPE_CHECKING:
     from app.models.category_group import CategoryGroup
     from app.models.bank_connection import BankConnection
     from app.models.passkey import UserPasskey
+
+
+class _EncryptedTotpSecret(TypeDecorator):
+    """Plain text to the code, ciphertext in the database. A secret that can't be
+    decrypted (a rotated SECRET_KEY) reads as None; login then refuses it."""
+
+    impl = String(255)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return encrypt(value, TOTP_SALT)
+
+    def process_result_value(self, value, dialect):
+        return decrypt(value, TOTP_SALT)
 
 
 class User(SQLAlchemyBaseUserTableUUID, Base):
@@ -42,7 +58,7 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
         },
     )
 
-    totp_secret: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, default=None)
+    totp_secret: Mapped[Optional[str]] = mapped_column(_EncryptedTotpSecret, nullable=True, default=None)
     is_2fa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     oidc_issuer: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     oidc_subject: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
