@@ -16,6 +16,7 @@ export const ACCOUNT_TYPE_CONFIG: Record<
   wallet:      { icon: Wallet,      color: 'text-rose-600',    bg: 'bg-rose-100',    label: 'accounts.typeWallet' },
 }
 
+
 export function getAccountTypeConfig(type: string) {
   return ACCOUNT_TYPE_CONFIG[type as AccountType] ?? ACCOUNT_TYPE_CONFIG.checking
 }

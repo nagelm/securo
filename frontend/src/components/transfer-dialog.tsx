@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { getAccountLabel, sortAccountsByDisplayName } from '@/lib/account-utils'
+import { getAccountLabel, sortAccountsByPosition } from '@/lib/account-utils'
 import { useTranslation } from 'react-i18next'
 import { localDateString } from '@/lib/date-utils'
 import { Button } from '@/components/ui/button'
@@ -40,7 +40,7 @@ export function TransferDialog({
   defaultFromAccountId?: string
 }) {
   const { t } = useTranslation()
-  const sortedAccounts = useMemo(() => sortAccountsByDisplayName(accounts), [accounts])
+  const sortedAccounts = useMemo(() => sortAccountsByPosition(accounts), [accounts])
   const firstAccountId = sortedAccounts[0]?.id ?? ''
   const [fromAccountId, setFromAccountId] = useState(defaultFromAccountId || firstAccountId)
   const [toAccountId, setToAccountId] = useState('')

@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { getAccountName, sortAccountsByDisplayName } from '@/lib/account-utils'
+import { getAccountName, sortAccountsByPosition } from '@/lib/account-utils'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
 import { startOfMonth, startOfYear, subDays } from 'date-fns'
@@ -146,7 +146,7 @@ export function TransactionsFilterBar({
   const [draftMaxAmount, setDraftMaxAmount] = useState<string>(filterMaxAmount)
   const [mobileFilterView, setMobileFilterView] = useState<MobileFilterView>('root')
   const searchRef = useRef<HTMLInputElement>(null)
-  const sortedAccounts = useMemo(() => sortAccountsByDisplayName(accounts), [accounts])
+  const sortedAccounts = useMemo(() => sortAccountsByPosition(accounts), [accounts])
 
   // When a CheckRow is clicked inside a submenu, Radix tries to close the submenu
   // even if we preventDefault in onSelect. We intercept the close request so the

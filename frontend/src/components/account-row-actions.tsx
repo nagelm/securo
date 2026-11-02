@@ -1,6 +1,6 @@
 import type { MouseEvent } from 'react'
 import type { TFunction } from 'i18next'
-import { Archive, MoreHorizontal, Pencil, Trash2, type LucideIcon } from 'lucide-react'
+import { Archive, ArrowDown, ArrowUp, MoreHorizontal, Pencil, Trash2, type LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
   DropdownMenu,
@@ -16,6 +16,7 @@ type AccountAction = {
   icon: LucideIcon
   run: () => void
   tone: AccountActionTone
+  disabled?: boolean
 }
 
 export type AccountRowActionsProps = {
@@ -24,10 +25,22 @@ export type AccountRowActionsProps = {
   onClose: () => void
   onDelete?: () => void
   deletePending: boolean
+  /** Shows move up/down when the row can be reordered; a missing direction is disabled (end of the list). */
+  reorder?: { moveUp?: () => void; moveDown?: () => void }
+}
+
+function moveActions(t: TFunction, reorder: AccountRowActionsProps['reorder']): AccountAction[] {
+  if (!reorder) return []
+  const noop = () => {}
+  return [
+    { label: t('accounts.moveUp'), icon: ArrowUp, run: reorder.moveUp ?? noop, tone: 'default', disabled: !reorder.moveUp },
+    { label: t('accounts.moveDown'), icon: ArrowDown, run: reorder.moveDown ?? noop, tone: 'default', disabled: !reorder.moveDown },
+  ]
 }
 
 function buildAccountActions(t: TFunction, props: AccountRowActionsProps) {
   const actions: AccountAction[] = [
+    ...moveActions(t, props.reorder),
     { label: t('common.edit'), icon: Pencil, run: props.onEdit, tone: 'default' },
     { label: t('accounts.close'), icon: Archive, run: props.onClose, tone: 'warning' },
   ]
@@ -46,7 +59,7 @@ function accountActionClass(tone: AccountActionTone) {
     return 'rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-rose-50 hover:text-rose-500'
   if (tone === 'warning')
     return 'rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-amber-50 hover:text-amber-600'
-  return 'rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+  return 'rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30'
 }
 
 function DesktopActionButton({ action, deletePending }: {
@@ -62,7 +75,7 @@ function DesktopActionButton({ action, deletePending }: {
       type="button"
       className={accountActionClass(action.tone)}
       onClick={runAction}
-      disabled={action.tone === 'destructive' && deletePending}
+      disabled={action.disabled || (action.tone === 'destructive' && deletePending)}
       title={action.label}
       aria-label={action.label}
     >
@@ -94,7 +107,7 @@ function MobileActionItem({ action, deletePending }: {
   return (
     <DropdownMenuItem
       variant={action.tone === 'destructive' ? 'destructive' : 'default'}
-      disabled={action.tone === 'destructive' && deletePending}
+      disabled={action.disabled || (action.tone === 'destructive' && deletePending)}
       onSelect={action.run}
     >
       <action.icon size={14} />

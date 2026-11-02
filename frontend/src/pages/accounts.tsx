@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { formatAccountMask, getAccountLabel, getAccountName } from '@/lib/account-utils'
+import { applyAccountOrder, formatAccountMask, getAccountLabel, getAccountName } from '@/lib/account-utils'
 import { getConnectionName } from '@/lib/connection-utils'
 import { SYNC_FAILURE_MESSAGE_KEY, syncFailureAction, syncFailureCodeFromResponse } from '@/lib/sync-failure'
 import { Link, useNavigate } from 'react-router-dom'
@@ -31,6 +31,8 @@ import { getAccountTypeConfig } from '@/lib/account-type-config'
 import { isRevolvingLoan } from '@/lib/loan-details'
 import { AccountPageActions } from '@/components/account-page-actions'
 import { AccountRowActions } from '@/components/account-row-actions'
+import { SortableAccountList } from '@/components/sortable-account-list'
+import { extractApiError } from '@/lib/api-errors'
 import { PageHeader } from '@/components/page-header'
 import { PageRefreshButton } from '@/components/page-refresh-button'
 import { BankConnectDialog } from '@/components/bank-connect-dialog'
@@ -61,6 +63,7 @@ const ACCOUNT_TYPE_OPTIONS = [
   { value: 'loan', labelKey: 'accounts.typeLoan' },
   { value: 'investment', labelKey: 'accounts.typeInvestment' },
   { value: 'wallet', labelKey: 'accounts.typeWallet' },
+  { value: 'loan', labelKey: 'accounts.loan.type' },
 ] as const
 
 function daysUntil(dateStr: string | null): number | null {
@@ -276,7 +279,7 @@ export default function AccountsPage() {
   const deletingOnDisconnect = alreadyDisconnected || deleteOnDisconnect
 
   const createMutation = useMutation({
-    mutationFn: (data: { name: string; type: string; balance?: number; currency?: string }) =>
+    mutationFn: (data: Parameters<typeof accounts.create>[0]) =>
       accounts.create(data),
     onSuccess: () => {
       invalidateFinancialQueries(queryClient)
@@ -333,9 +336,36 @@ export default function AccountsPage() {
     onError: () => toast.error(t('common.error')),
   })
 
+  // Reordering shows at once: every cached account list takes the new order
+  // (the same swap the server does), and goes back if the save fails. Only
+  // lists move; no balance depends on the order, so nothing else refetches.
+  const reorderMutation = useMutation({
+    mutationFn: (ids: string[]) => accounts.reorder(ids),
+    onMutate: async (ids) => {
+      await queryClient.cancelQueries({ queryKey: ['accounts'] })
+      const previous = queryClient.getQueriesData<Account[]>({ queryKey: ['accounts'] })
+      queryClient.setQueriesData<Account[]>({ queryKey: ['accounts'] }, (old) =>
+        Array.isArray(old) ? applyAccountOrder(old, ids) : old,
+      )
+      return { previous }
+    },
+    onError: (error, _ids, context) => {
+      for (const [key, data] of context?.previous ?? []) queryClient.setQueryData(key, data)
+      toast.error(extractApiError(error, t('common.error')))
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['accounts'] }),
+  })
+  const reorderProps = {
+    enabled: canWrite,
+    onReorder: (ids: string[]) => reorderMutation.mutate(ids),
+    label: getAccountName,
+  }
+
   const isLoading = accountsLoading || connectionsLoading
   const manualAccounts = accountsList?.filter((a) => a.connection_id === null && inActiveCollection(a)) ?? []
   const bankAccounts = accountsList?.filter((a) => a.connection_id !== null && inActiveCollection(a)) ?? []
+  // With bank accounts and no manual ones, an empty Manual Accounts card is just noise.
+  const showManualSection = manualAccounts.length > 0 || bankAccounts.length === 0
 
   return (
     <div className="space-y-6">
@@ -365,13 +395,14 @@ export default function AccountsPage() {
       ) : (
         <div className="space-y-6">
           {/* Manual Accounts */}
+          {showManualSection && (
           <div className="bg-card rounded-xl border border-border shadow-sm">
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
               <h2 className="text-sm font-medium text-muted-foreground">{t('accounts.manualAccounts')}</h2>
             </div>
             {manualAccounts.length > 0 ? (
               <div className="divide-y divide-muted">
-                {manualAccounts.map((acc) => {
+                <SortableAccountList accounts={manualAccounts} {...reorderProps} renderRow={(acc, reorder) => {
                   const cfg = getAccountTypeConfig(acc.type)
                   const bal = Number(acc.current_balance)
                   const isCC = acc.type === 'credit_card'
@@ -384,7 +415,8 @@ export default function AccountsPage() {
                   const dueClass = dueIn != null && dueIn <= 3 ? 'text-amber-600' : 'text-muted-foreground'
                   const accountMask = formatAccountMask(acc)
                   return (
-                    <div key={acc.id} className="group flex items-center px-5 py-3 hover:bg-muted/50 transition-colors">
+                    <div className="group flex items-center px-5 py-3 hover:bg-muted/50 transition-colors">
+                      {reorder.handle}
                       <Link to={`/accounts/${acc.id}`} className="flex items-center gap-3 flex-1 min-w-0">
                         <AccountIcon account={acc} />
                         <div className="min-w-0 flex-1">
@@ -418,11 +450,12 @@ export default function AccountsPage() {
                           onClose={() => setClosingAccountId(acc.id)}
                           onDelete={() => setDeletingId(acc.id)}
                           deletePending={deleteMutation.isPending}
+                          reorder={reorder.reorderable ? reorder : undefined}
                         />
                       )}
                     </div>
                   )
-                })}
+                }} />
               </div>
             ) : (
               <div className="px-5 py-8 text-center">
@@ -432,6 +465,7 @@ export default function AccountsPage() {
               </div>
             )}
           </div>
+          )}
 
           {/* Bank Connections */}
           {connectionsList && connectionsList.length > 0 ? (
@@ -578,7 +612,7 @@ export default function AccountsPage() {
                     {/* Accounts list */}
                     {connAccounts.length > 0 ? (
                       <div className="divide-y divide-muted">
-                        {connAccounts.map((acc) => {
+                        <SortableAccountList accounts={connAccounts} {...reorderProps} renderRow={(acc, reorder) => {
                           const cfg = getAccountTypeConfig(acc.type)
                           const bal = Number(acc.current_balance)
                           const isCC = acc.type === 'credit_card'
@@ -591,7 +625,8 @@ export default function AccountsPage() {
                           const dueClass = dueIn != null && dueIn <= 3 ? 'text-amber-600' : 'text-muted-foreground'
                           const accountMask = formatAccountMask(acc)
                           return (
-                            <div key={acc.id} className="group flex items-center px-5 py-3 hover:bg-muted/50 transition-colors">
+                            <div className="group flex items-center px-5 py-3 hover:bg-muted/50 transition-colors">
+                              {reorder.handle}
                               <Link to={`/accounts/${acc.id}`} className="flex items-center gap-3 flex-1 min-w-0">
                                 <AccountIcon account={acc} />
                                 <div className="min-w-0 flex-1">
@@ -624,11 +659,12 @@ export default function AccountsPage() {
                                   onEdit={() => { setEditingAccount(acc); setDialogOpen(true) }}
                                   onClose={() => setClosingAccountId(acc.id)}
                                   deletePending={deleteMutation.isPending}
+                                  reorder={reorder.reorderable ? reorder : undefined}
                                 />
                               )}
                             </div>
                           )
-                        })}
+                        }} />
                       </div>
                     ) : (
                       <div className="px-5 py-4">
@@ -865,7 +901,7 @@ export default function AccountsPage() {
           if (editingAccount) {
             updateMutation.mutate({ id: editingAccount.id, ...data })
           } else {
-            createMutation.mutate(data as { name: string; type: string; balance?: number; balance_date?: string; currency?: string })
+            createMutation.mutate(data as Parameters<typeof accounts.create>[0])
           }
         }}
         loading={createMutation.isPending || updateMutation.isPending}
@@ -1005,6 +1041,9 @@ export function AccountDialog({
     setTermsOpen(account?.loan_original_amount != null)
   }
 
+  const isLoan = type === 'loan'
+
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent>
@@ -1137,6 +1176,11 @@ export function AccountDialog({
               {type === 'credit_card' && (
                 <p className="text-xs text-muted-foreground -mt-2">
                   {t('accounts.balanceCreditCardHint')}
+                </p>
+              )}
+              {isLoan && (
+                <p className="text-xs text-muted-foreground -mt-2">
+                  {t('accounts.loan.amountOwedHint')}
                 </p>
               )}
             </>
