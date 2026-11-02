@@ -312,12 +312,13 @@ async def get_category_usage(
         ("budgets", Budget),
         ("recurring_transactions", RecurringTransaction),
     ):
+        uses_category = model.category_id == category_id
         result = await session.execute(
             select(func.count())
             .select_from(model)
             .where(
                 model.workspace_id == workspace_id,
-                model.category_id == category_id,
+                uses_category,
             )
         )
         counts[key] = int(result.scalar_one())

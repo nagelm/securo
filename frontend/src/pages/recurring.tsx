@@ -3,7 +3,7 @@ import { getAccountName, sortAccountsByPosition } from '@/lib/account-utils'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { categories as categoriesApi, categoryGroups as categoryGroupsApi, recurring as recurringApi, accounts as accountsApi, currencies as currenciesApi } from '@/lib/api'
+import { categories as categoriesApi, categoryGroups as categoryGroupsApi, recurring as recurringApi, accounts as accountsApi, currencies as currenciesApi, payees as payeesApi } from '@/lib/api'
 import { extractApiError } from '@/lib/api-errors'
 import { localDateString } from '@/lib/date-utils'
 import { invalidateFinancialQueries } from '@/lib/invalidate-queries'
@@ -19,11 +19,13 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import type { Category, CategoryGroup, RecurringTransaction } from '@/types'
+import type { Account, Category, CategoryGroup, Payee, RecurringTransaction } from '@/types'
 import { Pencil, Trash2, Plus, RefreshCw, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/page-header'
 import { CategorySelect } from '@/components/category-select'
+import { PayeeIcon } from '@/components/payee-icon'
+import { PayeeSelect } from '@/components/payee-select'
 import { DatePickerInput } from '@/components/ui/date-picker-input'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
@@ -99,35 +101,46 @@ function RecurringTab() {
     queryFn: () => accountsApi.list(),
   })
 
+  const { data: payeesList } = useQuery({
+    queryKey: ['payees'],
+    queryFn: payeesApi.list,
+    enabled: dialogOpen,
+  })
+
+  // A transfer into a loan moves the loan pages and the asset equity they feed
+  // too, on top of the money views.
+  const invalidateAfterChange = () => {
+    invalidateFinancialQueries(queryClient)
+    queryClient.invalidateQueries({ queryKey: ['recurring'] })
+    queryClient.invalidateQueries({ queryKey: ['assets'] })
+  }
+
   const createMutation = useMutation({
     mutationFn: (data: Partial<RecurringTransaction>) => recurringApi.create(data),
     onSuccess: () => {
-      invalidateFinancialQueries(queryClient)
-      queryClient.invalidateQueries({ queryKey: ['recurring'] })
+      invalidateAfterChange()
       setDialogOpen(false)
       toast.success(t('recurring.created'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
   })
 
   const updateMutation = useMutation({
     mutationFn: ({ id, ...data }: Partial<RecurringTransaction> & { id: string }) =>
       recurringApi.update(id, data),
     onSuccess: () => {
-      invalidateFinancialQueries(queryClient)
-      queryClient.invalidateQueries({ queryKey: ['recurring'] })
+      invalidateAfterChange()
       setDialogOpen(false)
       setEditing(null)
       toast.success(t('recurring.updated'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
   })
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => recurringApi.delete(id),
     onSuccess: () => {
-      invalidateFinancialQueries(queryClient)
-      queryClient.invalidateQueries({ queryKey: ['recurring'] })
+      invalidateAfterChange()
       setDeletingRecurring(null)
       toast.success(t('recurring.deleted'))
     },
@@ -139,12 +152,16 @@ function RecurringTab() {
   const generateMutation = useMutation({
     mutationFn: () => recurringApi.generate(),
     onSuccess: (data) => {
-      invalidateFinancialQueries(queryClient)
-      queryClient.invalidateQueries({ queryKey: ['recurring'] })
+      invalidateAfterChange()
       toast.success(t('recurring.generated', { count: data.generated }))
     },
     onError: () => toast.error(t('common.error')),
   })
+
+  const categoryById = useMemo(
+    () => new Map((categoriesList ?? []).map((c) => [c.id, c])),
+    [categoriesList],
+  )
 
   const frequencyLabel = (f: string) => {
     const map: Record<string, string> = {
@@ -274,6 +291,7 @@ function RecurringTab() {
               (category) => category.id === editing?.category_id
             )}
             accounts={accountsList ?? []}
+            payees={payeesList ?? []}
             onSave={(data) => {
               if (editing) {
                 updateMutation.mutate({ id: editing.id, ...data })
@@ -305,6 +323,7 @@ function RecurringForm({
   categoryGroups,
   currentCategory,
   accounts,
+  payees,
   onSave,
   onCancel,
   loading,
@@ -313,7 +332,8 @@ function RecurringForm({
   categories: Category[]
   categoryGroups: CategoryGroup[]
   currentCategory?: Category
-  accounts: { id: string; name: string; display_name?: string | null }[]
+  accounts: Account[]
+  payees: Payee[]
   onSave: (data: Partial<RecurringTransaction>) => void
   onCancel: () => void
   loading: boolean
@@ -339,6 +359,7 @@ function RecurringForm({
   const [startDate, setStartDate] = useState(recurring?.start_date ?? localDateString())
   const [endDate, setEndDate] = useState(recurring?.end_date ?? '')
   const [categoryId, setCategoryId] = useState(recurring?.category_id ?? '')
+  const [payeeId, setPayeeId] = useState(recurring?.payee_id ?? '')
   const [accountId, setAccountId] = useState(recurring?.account_id ?? '')
   const [isActive, setIsActive] = useState(recurring?.is_active ?? true)
   const [autoGenerate, setAutoGenerate] = useState(recurring?.auto_generate ?? true)
@@ -360,6 +381,7 @@ function RecurringForm({
           start_date: startDate,
           end_date: endDate || null,
           category_id: categoryId || null,
+          payee_id: payeeId || null,
           account_id: accountId || null,
           is_active: isActive,
           auto_generate: autoGenerate,
@@ -370,6 +392,10 @@ function RecurringForm({
       <div className="space-y-2">
         <Label>{t('recurring.description')}</Label>
         <Input value={description} onChange={(e) => setDescription(e.target.value)} required />
+      </div>
+      <div className="space-y-2">
+        <Label>{t('payees.payee')}</Label>
+        <PayeeSelect value={payeeId} onChange={setPayeeId} payees={payees} creatable />
       </div>
       <div className="grid grid-cols-3 gap-4">
         <div className="space-y-2">
@@ -464,13 +490,16 @@ function RecurringForm({
       <label className="flex items-start gap-2 cursor-pointer">
         <input
           type="checkbox"
-          checked={autoGenerate}
+          checked={isTransfer ? false : autoGenerate}
+          disabled={isTransfer}
           onChange={(e) => setAutoGenerate(e.target.checked)}
           className="h-4 w-4 mt-0.5 rounded border-border"
         />
         <span className="text-sm text-foreground">
           {t('recurring.autoGenerate')}
-          <span className="block text-xs text-muted-foreground">{t('recurring.autoGenerateHelp')}</span>
+          <span className="block text-xs text-muted-foreground">
+            {isTransfer ? t('recurring.transferAutoGenerateHelp') : t('recurring.autoGenerateHelp')}
+          </span>
         </span>
       </label>
       {recurring && (

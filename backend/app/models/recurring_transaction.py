@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, cast
 
 from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
@@ -13,6 +13,7 @@ from app.core.database import Base
 if TYPE_CHECKING:
     from app.models.account import Account
     from app.models.category import Category
+    from app.models.payee import Payee
     from app.models.transaction import Transaction
     from app.models.user import User
 
@@ -56,10 +57,30 @@ class RecurringTransaction(Base):
     amount_primary: Mapped[Optional[Decimal]] = mapped_column(Numeric(precision=15, scale=2), nullable=True)
     fx_rate_used: Mapped[Optional[Decimal]] = mapped_column(Numeric(precision=20, scale=10), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Fork: with `transfer_account_id` this is a transfer from `account_id` to
+    # another of the user's own accounts (projection only).
+    transfer_account_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # Fork: the payee the rows this item generates or links are for (f012).
+    payee_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("payees.id", ondelete="SET NULL", name="fk_recurring_transactions_payee_id_payees"),
+        nullable=True,
+        index=True,
+    )
 
     user: Mapped["User"] = relationship()
-    account: Mapped[Optional["Account"]] = relationship()
-    category: Mapped[Optional["Category"]] = relationship()
+    account: Mapped[Optional["Account"]] = relationship(foreign_keys=[account_id])
+    category: Mapped[Optional["Category"]] = relationship(foreign_keys=[category_id])
+    # Named like Transaction's, so app.services.payee_display.apply_payee_display
+    # fills the display fields below the same way for both.
+    payee_entity: Mapped[Optional["Payee"]] = relationship(foreign_keys=[payee_id])
     transactions: Mapped[list["Transaction"]] = relationship(
         back_populates="recurring_transaction"
     )
+
+    # Populated by the service from payee_entity (not DB columns).
+    payee_name = cast(Optional[str], None)
+    payee_logo_url = cast(Optional[str], None)
+    payee_icon = cast(Optional[str], None)

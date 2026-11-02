@@ -1,10 +1,14 @@
 import calendar
+import logging
 import uuid
+from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Optional
+from decimal import Decimal
+from typing import Any, Optional
 
 from sqlalchemy import and_, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.app_clock import app_today, get_workspace_timezone, today_in
 from app.models.account import Account
@@ -15,6 +19,10 @@ from app.schemas.recurring_transaction import RecurringTransactionCreate, Recurr
 from app.services import recurring_match_service
 from app.services.credit_card_service import apply_effective_date
 from app.services.fx_rate_service import stamp_primary_amount
+from app.services.payee_display import apply_payee_display
+
+logger = logging.getLogger(__name__)
+
 
 
 async def _verify_account_in_workspace(
@@ -36,15 +44,83 @@ async def _verify_account_in_workspace(
         raise ValueError("Account not found")
 
 
+# ---------------------------------------------------------------------------
+# Fork: transfers (transfer_account_id set)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RecurringLeg:
+    """One row an occurrence of a recurring transfer stands for."""
+
+    role: str  # cash, to
+    account_id: uuid.UUID
+    type: str
+    amount: Decimal
+    category_id: Optional[uuid.UUID]
+    is_transfer: bool
+
+
+def recurring_legs(recurring: RecurringTransaction) -> list[RecurringLeg]:
+    """Fork: a standard transfer's two legs (out of ``account_id``, into
+    ``transfer_account_id``, both transfers). Empty for a plain payment."""
+    if recurring.account_id is None or recurring.transfer_account_id is None:
+        return []
+    total = Decimal(str(recurring.amount))
+    return [
+        RecurringLeg("cash", recurring.account_id, "debit", total, None, True),
+        RecurringLeg("to", recurring.transfer_account_id, "credit", total, None, True),
+    ]
+
+
+async def _check_transfer(
+    session: AsyncSession, workspace_id: uuid.UUID, values: dict[str, Any]
+) -> None:
+    """Fork: a standard transfer moves money out of ``account_id`` into
+    another of the workspace's accounts."""
+    to_account = values.get("transfer_account_id")
+    if to_account is None:
+        return
+    try:
+        await _verify_account_in_workspace(session, workspace_id, to_account)
+    except ValueError:
+        raise ValueError("Transfer account not found")
+    if to_account == values.get("account_id"):
+        raise ValueError("A transfer needs two different accounts")
+    if values.get("type") != "debit":
+        raise ValueError("A transfer is money out of the from-account (type debit)")
+
+
+async def _ensure_payee_in_workspace(
+    session: AsyncSession, workspace_id: uuid.UUID, payee_id: Optional[uuid.UUID]
+) -> None:
+    # Lazy: transaction_service imports this module.
+    from app.services.transaction_service import _ensure_payee_in_workspace as ensure
+
+    await ensure(session, workspace_id, payee_id)
+
+
+async def _load_payee_display(session: AsyncSession, recurring: RecurringTransaction) -> None:
+    """Fork: (re)load the item's payee and fill its display fields."""
+    await session.refresh(recurring, attribute_names=["payee_entity"])
+    apply_payee_display(recurring)
+
+
 async def get_recurring_transactions(
     session: AsyncSession, workspace_id: uuid.UUID
 ) -> list[RecurringTransaction]:
-    result = await session.execute(
+    stmt = (
         select(RecurringTransaction)
         .where(RecurringTransaction.workspace_id == workspace_id)
+        .options(selectinload(RecurringTransaction.payee_entity))
         .order_by(RecurringTransaction.next_occurrence)
     )
-    return list(result.scalars().all())
+    result = await session.execute(stmt)
+    items = list(result.scalars().all())
+    # Fork: each row is drawn with its payee's icon or logo.
+    for recurring in items:
+        apply_payee_display(recurring)
+    return items
 
 
 async def get_recurring_transaction(
@@ -64,6 +140,12 @@ async def create_recurring_transaction(
     data: RecurringTransactionCreate,
 ) -> RecurringTransaction:
     await _verify_account_in_workspace(session, workspace_id, data.account_id)
+    await _ensure_payee_in_workspace(session, workspace_id, data.payee_id)
+    values = data.model_dump()
+    await _check_transfer(session, workspace_id, values)
+    # Fork: a transfer only forecasts (generating would write one leg).
+    if values["transfer_account_id"] is not None:
+        values["auto_generate"] = False
     next_occ = data.start_date
     if data.skip_first:
         next_occ = _advance_date(
@@ -74,18 +156,20 @@ async def create_recurring_transaction(
         user_id=user_id,
         workspace_id=workspace_id,
         account_id=data.account_id,
-        category_id=data.category_id,
+        category_id=values["category_id"],
+        payee_id=data.payee_id,
         description=data.description,
-        amount=data.amount,
-        currency=data.currency,
-        type=data.type,
+        amount=values["amount"],
+        currency=values["currency"],
+        type=values["type"],
         frequency=data.frequency,
         weekend_adjustment=data.weekend_adjustment,
         day_of_month=data.day_of_month,
         start_date=data.start_date,
         end_date=data.end_date,
-        auto_generate=data.auto_generate,
+        auto_generate=values["auto_generate"],
         next_occurrence=next_occ,
+        transfer_account_id=values["transfer_account_id"],
     )
     session.add(recurring)
     await session.flush()
@@ -93,9 +177,40 @@ async def create_recurring_transaction(
         session, user_id, recurring,
         date_field="start_date",
     )
+    await _link_transfer(session, recurring)
     await session.commit()
     await session.refresh(recurring)
+    await _load_payee_display(session, recurring)
     return recurring
+
+
+async def _link_transfer(session: AsyncSession, recurring: RecurringTransaction) -> None:
+    """Fork: a standard transfer whose bank transfer pairs have already
+    landed is linked to them at once (``link_recurring_transfers``)."""
+    if recurring.transfer_account_id is not None:
+        from app.services.forecast_service import link_recurring_transfers
+
+        await link_recurring_transfers(session, recurring.workspace_id, recurring_ids=[recurring.id])
+
+
+def schedule_occurrences(recurring: RecurringTransaction, first: date, last: date) -> list[date]:
+    """Fork: a schedule's payment dates in ``[first, last]``, asked a year at
+    a time because ``get_occurrences_in_range`` stops after 200 dates."""
+    out: list[date] = []
+    lo = first
+    while lo <= last:
+        hi = min(lo + timedelta(days=366), last + timedelta(days=1))
+        out += get_occurrences_in_range(
+            start=recurring.start_date,
+            frequency=recurring.frequency,
+            end_date=recurring.end_date,
+            range_start=lo,
+            range_end=hi,
+            intended_day=recurring.day_of_month or recurring.start_date.day,
+            weekend_adjustment=recurring.weekend_adjustment,
+        )
+        lo = hi
+    return out
 
 
 async def update_recurring_transaction(
@@ -120,6 +235,16 @@ async def update_recurring_transaction(
         if new_account_id != recurring.account_id:
             await _verify_account_in_workspace(session, workspace_id, new_account_id)
 
+    if "payee_id" in update_data:
+        await _ensure_payee_in_workspace(session, workspace_id, update_data["payee_id"])
+
+    merged = {
+        field: update_data.get(field, getattr(recurring, field))
+        for field in ("account_id", "transfer_account_id", "type")
+    }
+    await _check_transfer(session, workspace_id, merged)
+    if merged["transfer_account_id"] is not None:
+        update_data["auto_generate"] = False  # Fork: a transfer only forecasts
     schedule_changed = any(
         key in update_data and update_data[key] != getattr(recurring, key)
         for key in _SCHEDULE_FIELDS
@@ -137,8 +262,11 @@ async def update_recurring_transaction(
             floor=previous_next_occurrence,
         )
 
+    await session.flush()
+    await _link_transfer(session, recurring)
     await session.commit()
     await session.refresh(recurring)
+    await _load_payee_display(session, recurring)
     return recurring
 
 
@@ -368,6 +496,7 @@ async def generate_pending(
             )
             if existing_real is not None:
                 existing_real.recurring_transaction_id = recurring.id
+                recurring_match_service.carry_payee(recurring, existing_real)
             else:
                 account = await session.get(Account, recurring.account_id)
                 # Only occurrences that already came due reach this point, so
@@ -392,6 +521,7 @@ async def generate_pending(
                     user_id=user_id,
                     account_id=recurring.account_id,
                     category_id=recurring.category_id,
+                    payee_id=recurring.payee_id,  # Fork: the item's payee
                     description=recurring.description,
                     amount=recurring.amount,
                     currency=recurring.currency,
@@ -419,3 +549,4 @@ async def generate_pending(
 
     await session.commit()
     return count
+

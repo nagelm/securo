@@ -29,8 +29,11 @@ from app.services._query_filters import (
 )
 from app.services import invoice_forecast_service
 from app.services.admin_service import get_credit_card_accounting_mode
-from app.services.recurring_transaction_service import get_occurrences_in_range
-from app.services.asset_service import get_asset_values_at
+from app.services.recurring_transaction_service import (
+    get_occurrences_in_range,
+    recurring_legs,
+)
+from app.services.asset_service import get_asset_values_at, linked_holdings_values
 from app.services.fx_rate_service import _resolve_rate, convert
 from app.models.user import User
 
@@ -116,7 +119,12 @@ async def _get_recurring_projections(
         .where(*filters)
     )
     if account_ids:
-        stmt = stmt.where(RecurringTransaction.account_id.in_(account_ids))
+        stmt = stmt.where(
+            or_(
+                RecurringTransaction.account_id.in_(account_ids),
+                RecurringTransaction.transfer_account_id.in_(account_ids),
+            )
+        )
     result = await session.execute(stmt)
     recurring_list = list(result.scalars().all())
 
@@ -147,6 +155,33 @@ async def _get_recurring_projections(
         )
         for occ_date in occurrences:
             if (rec.id, occ_date) in materialized_occurrences:
+                continue
+            # Fork: a standard transfer is projected leg by leg too.
+            if rec.transfer_account_id is not None:
+                for leg in recurring_legs(rec):
+                    if account_ids is not None and leg.account_id not in account_ids:
+                        continue
+                    leaves_scope = keep_external and (
+                        rec.transfer_account_id not in account_ids
+                        if leg.account_id == rec.account_id
+                        else rec.account_id not in account_ids
+                    )
+                    if leg.is_transfer and not include_transfer_like and not leaves_scope:
+                        continue
+                    projections.append({
+                        "category_id": leg.category_id,
+                        "amount": float(leg.amount),
+                        "type": leg.type,
+                        "currency": rec.currency,
+                        "date": occ_date,
+                        **({"recurring_transaction_id": rec.id} if with_recurring_id else {}),
+                    })
+                continue
+            if keep_external and rec.id in transfer_like_ids and not (
+                rec.account_id in account_ids
+                and rec.transfer_account_id is not None
+                and rec.transfer_account_id not in account_ids
+            ):
                 continue
             projections.append({
                 "account_id": rec.account_id,

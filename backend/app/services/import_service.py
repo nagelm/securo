@@ -1144,6 +1144,7 @@ async def import_transactions(
             txn_data.type,
             txn_data.date,
             preview.description,
+            payee_id=import_payee_id or preview.payee_id,
         )
         if placeholder and not placeholder.is_ignored:
             placeholder.source = source
@@ -1152,12 +1153,15 @@ async def import_transactions(
             placeholder.status = "posted"
             # The rules already ran, against the incoming charge, to build
             # `preview`. Fold that result in rather than re-running them
-            # against the placeholder: its description is the recurring
-            # definition's own wording, so conditions written for the bank's
-            # text would no longer match. Everything the user can already see
-            # wins, the charge only fills what is still empty, and only its
-            # provenance is recorded outright.
+            # against the placeholder. Fork: the bank's row replaces the
+            # placeholder, so its date, wording (after rules) and counterparty
+            # win; only what the user chose for the occurrence (category,
+            # payee entity, notes) carries over when the charge has none.
             placeholder.original_description = txn_data.description
+            placeholder.description = preview.description
+            placeholder.description_is_rule_managed = preview.description_is_rule_managed
+            placeholder.date = incoming.date
+            placeholder.effective_date = incoming.effective_date
             if placeholder.amount != txn_data.amount or txn_data.fx_rate:
                 # Matched under a tolerance, or the file says what the charge
                 # cost in the primary currency: the row now stands for what was
@@ -1170,7 +1174,7 @@ async def import_transactions(
                     await stamp_primary_amount(session, user_id, placeholder)
             if placeholder.category_id is None:
                 placeholder.category_id = preview.category_id
-            if import_payee_raw and not placeholder.payee:
+            if import_payee_raw:
                 placeholder.payee = import_payee_raw
             if placeholder.payee_id is None:
                 placeholder.payee_id = preview.payee_id
@@ -1189,10 +1193,13 @@ async def import_transactions(
             txn_data.type,
             txn_data.date,
             preview.description,
+            payee_id=import_payee_id or preview.payee_id,
         )
         incoming.recurring_transaction_id = (
             recurring_link.id if recurring_link else None
         )
+        if recurring_link is not None:
+            recurring_match_service.carry_payee(recurring_link, incoming)
         if txn_data.fx_rate:
             incoming.fx_rate_used = txn_data.fx_rate
             incoming.amount_primary = txn_data.amount * txn_data.fx_rate

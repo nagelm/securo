@@ -13,14 +13,18 @@ It now lives in `reconciliation_engine`, under policy documents in
 **an invoice and a scheduled occurrence are the same kind of promise**: money
 that is expected, waiting for the movement that confirms it.
 
-**The decisions are unchanged, deliberately.** Same account, same direction,
-exact amount, three days before and five after (two and two for a weekly bill,
-five either side against a placeholder), description token-overlap at 0.6, and
-the better-matching candidate wins rather than both being refused. This lands
-under bills that have been reconciling this way since #116, and a matcher that
-started finding pairs it used to miss would be a behaviour change nobody asked
-for. What is gained today is only that those numbers are now reachable: a
-threshold buried in a module is a threshold no one can ever be shown or offered.
+**Two rules, in order.** The first is the one #116 shipped: same account, same
+direction, exact amount, three days before and five after (two and two for a
+weekly bill, five either side against a placeholder), description token-overlap
+at 0.6, and the better-matching candidate wins rather than both being refused.
+The second ignores the wording, because a bank's text for a charge often shares
+nothing with the name the schedule was given: same account, exact amount, two
+days either side, and it links only when exactly one candidate fits. It speaks
+only when the first rule found nothing.
+
+The engine is asked once per candidate here (see `pick_linked`), so the order of the
+rules and "only one candidate" are applied across the answers rather than by
+the engine itself, which only ever sees one candidate at a time.
 
 The amount is part of that. The queries no longer filter on it, because a
 filter in SQL decides before the policy is consulted and so would silently
@@ -54,7 +58,11 @@ from app.models.account import Account
 from app.models.recurring_transaction import RecurringTransaction
 from app.models.transaction import Transaction
 from app.services import reconciliation_policy, reconciliation_rule_service
-from app.services.reconciliation_engine import Expectation, Movement, evaluate
+from app.services.reconciliation_engine import (
+    Expectation,
+    Movement,
+    evaluate,
+)
 
 # Real-transaction sources a recurring charge can arrive under. Excludes
 # "recurring" itself: that is the generated placeholder, handled separately.
@@ -77,6 +85,14 @@ def _date_reach(policy: dict[str, Any]) -> tuple[int, int]:
         after = max(after, int(window.get("after_days", 0)))
     return before, after
 
+#: Fork: the queries leave the amount to the policy too. A workspace rule
+#: on the Rules page may accept an amount within a tolerance (a power bill
+#: or a meal kit that varies week to week); filtering on the exact amount
+#: in SQL would hide every such charge from it. The shipped rules still
+#: ask for the exact amount, so what they link is unchanged.
+
+#: A candidate of either kind: a charge, or a bill.
+
 
 def _as_movement(transaction: Transaction) -> Movement:
     return Movement(
@@ -86,6 +102,7 @@ def _as_movement(transaction: Transaction) -> Movement:
         when=transaction.date,
         description=transaction.description,
         counterparty=transaction.payee,
+        payee_id=transaction.payee_id,
         account_id=transaction.account_id,
         source=transaction.source,
     )
@@ -108,6 +125,7 @@ def _as_occurrence(
         direction=recurring.type,
         when=when,
         description=recurring.description,
+        payee_id=recurring.payee_id,
         account_id=recurring.account_id,
     )
 
@@ -185,6 +203,7 @@ async def find_placeholder_for_incoming(
     tx_type: str,
     tx_date: date,
     description: Optional[str],
+    payee_id: Optional[uuid.UUID] = None,
 ) -> Optional[Transaction]:
     """Find an unmatched generated placeholder this incoming charge fulfills.
 
@@ -257,6 +276,7 @@ async def find_placeholder_for_incoming(
         direction=tx_type,
         when=tx_date,
         description=description,
+        payee_id=payee_id,
         account_id=account_id,
     )
     found = _best_movement([row[0] for row in rows], incoming, policy)
@@ -305,6 +325,7 @@ async def find_bill_for_incoming(
     tx_type: str,
     tx_date: date,
     description: Optional[str],
+    payee_id: Optional[uuid.UUID] = None,
 ) -> Optional[RecurringTransaction]:
     """Find an active bill whose next expected occurrence this charge fulfills.
 
@@ -325,6 +346,9 @@ async def find_bill_for_incoming(
             RecurringTransaction.is_active.is_(True),
             RecurringTransaction.currency == currency,
             RecurringTransaction.type == tx_type,
+            # Fork: a standard transfer is settled only by a leg of a bank
+            # transfer pair, once paired (forecast_service.link_recurring_transfers).
+            RecurringTransaction.transfer_account_id.is_(None),
         )
     )
     charge = Movement(
@@ -333,6 +357,7 @@ async def find_bill_for_incoming(
         direction=tx_type,
         when=tx_date,
         description=description,
+        payee_id=payee_id,
         account_id=account_id,
     )
 
@@ -340,7 +365,9 @@ async def find_bill_for_incoming(
     # The workspace's rules are fetched once for the batch and then
     # narrowed per bill, rather than queried per candidate: every bill here
     # belongs to one account, so they share a workspace, and the only thing
-    # that varies between them is how often they repeat.
+    # that varies between them is how often they repeat. Narrowing changes
+    # windows only, never the rules or their order, so `pick_linked` reads the
+    # order off the composed policy.
     composed: Optional[dict] = None
     for recurring in result.scalars():
         if composed is None:
@@ -364,6 +391,12 @@ async def find_bill_for_incoming(
     if composed is None:
         return None
     return reconciliation_rule_service.pick_linked(linked, composed)[0]
+
+
+def carry_payee(recurring: RecurringTransaction, transaction: Transaction) -> None:
+    """Fork: a row linked to a recurring item takes its payee if it has none."""
+    if transaction.payee_id is None and recurring.payee_id is not None:
+        transaction.payee_id = recurring.payee_id
 
 
 def advance_past(recurring: RecurringTransaction, fulfilled_date: date) -> None:

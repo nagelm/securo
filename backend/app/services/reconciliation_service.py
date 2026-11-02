@@ -383,6 +383,11 @@ async def _suggest_recurring(
         select(RecurringTransaction).where(
             RecurringTransaction.workspace_id == workspace_id,
             RecurringTransaction.is_active.is_(True),
+            # Fork: a recurring transfer is settled only by a leg of a bank
+            # transfer pair, once paired (forecast_service.link_recurring_transfers),
+            # as in recurring_match_service.find_bill_for_incoming. Offering it
+            # here asks a question the pair's other account already answers.
+            RecurringTransaction.transfer_account_id.is_(None),
         )
     )
     bills = list(result.scalars().all())
