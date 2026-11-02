@@ -316,11 +316,13 @@ async def nzd_user(session: AsyncSession, user) -> None:
 async def money_view(session: AsyncSession, workspace, user, **collection) -> dict:
     """Net worth (dashboard, report, net-worth goal) and P&L as the user sees them."""
     summary = await get_summary(session, workspace.id, user.id, month=date(2026, 10, 1), **collection)
+    # A past month shows its closing position; net worth is today's.
+    current = await get_summary(session, workspace.id, user.id, **collection)
     report = await get_net_worth_report(
         session, workspace.id, user.id, months=1, interval="daily", **collection
     )
     view = {
-        "dashboard": round(Decimal(str(summary.total_balance_primary)), 2),
+        "dashboard": round(Decimal(str(current.total_balance_primary)), 2),
         "report": round(Decimal(str(report.summary.primary_value)), 2),
         # Every past day too: the history must not change.
         "history": [(p.date, round(p.value, 2)) for p in report.trend],
