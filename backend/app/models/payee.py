@@ -63,6 +63,16 @@ class Payee(Base):
     phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     address: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     website: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # The payee's logo image: one the user set in the payee form, or the
+    # merchant logo a provider supplied (Akahu `meta.logo` on a row it
+    # matched to a merchant). Sync fills it only while it is empty, so a
+    # user's URL is never overwritten. Null means no logo; the API then
+    # falls back to a favicon built from `website`.
+    logo_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    # An icon the user picked (a name from the category icon set). Wins over
+    # any logo, so it resolves the payees no logo could be found for and
+    # replaces a logo that turned out wrong.
+    icon: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Dynamically set by payee_service; not a DB column

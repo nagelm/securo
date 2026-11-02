@@ -596,7 +596,7 @@ async def get_transactions(
         counts = {row[0]: row[1] for row in count_rows.all()}
         for tx in transactions:
             tx.attachment_count = counts.get(tx.id, 0)
-            tx.payee_name = tx.payee_entity.name if tx.payee_entity else None
+            apply_payee_display(tx)
         # Tag shared rows with the viewer's share + the source group.
         # Owned rows stay as-is. We pre-compute the viewer's linked
         # member ids → group ids once, then look up each transaction's
@@ -820,7 +820,8 @@ async def get_transaction(
             )
         )
         transaction.attachment_count = count_result.scalar_one()
-        transaction.payee_name = transaction.payee_entity.name if transaction.payee_entity else None
+        apply_payee_display(transaction)
+        await attach_transfer_counterpart_accounts(session, [transaction])
     return transaction
 
 
@@ -1218,7 +1219,7 @@ async def get_transfer_candidates(
         counts = {row[0]: row[1] for row in count_rows.all()}
         for tx in candidates:
             tx.attachment_count = counts.get(tx.id, 0)
-            tx.payee_name = tx.payee_entity.name if tx.payee_entity else None
+            apply_payee_display(tx)
 
     return candidates
 
@@ -1254,7 +1255,7 @@ async def get_transfer_pair(
     )
     pair = result.scalars().first()
     if pair:
-        pair.payee_name = pair.payee_entity.name if pair.payee_entity else None
+        apply_payee_display(pair)
     return pair
 
 

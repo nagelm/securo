@@ -49,11 +49,13 @@ async def list_payees(
     q: Optional[str] = Query(None),
     type: Optional[str] = Query(None),
     is_favorite: Optional[bool] = Query(None),
+    needs_icon: bool = Query(False),
     ctx: WorkspaceContext = Depends(current_workspace),
     session: AsyncSession = Depends(get_async_session),
 ):
     return await payee_service.get_payees(
-        session, ctx.workspace.id, q=q, type=type, is_favorite=is_favorite
+        session, ctx.workspace.id, q=q, type=type, is_favorite=is_favorite,
+        needs_icon=needs_icon,
     )
 
 

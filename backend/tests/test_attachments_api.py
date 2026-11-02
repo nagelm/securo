@@ -387,6 +387,13 @@ async def test_get_attachment_settings(client: AsyncClient):
     assert data["max_attachments_per_transaction"] == 10
 
 
+@pytest.mark.asyncio
+async def test_get_logo_settings(client: AsyncClient):
+    response = await client.get("/api/settings/logos")
+    assert response.status_code == 200
+    assert response.json() == {"logo_size": 128}
+
+
 # ── Max attachments ────────────────────────────────────────
 
 
