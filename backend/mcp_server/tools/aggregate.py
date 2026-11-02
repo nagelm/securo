@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.transaction import Transaction
 from app.models.category import Category
 from app.services._query_filters import (
+    counts_as_pnl,
     is_not_transfer,
     line_category_id,
     line_primary_or_amount,
@@ -26,7 +27,11 @@ from mcp_server.tools._helpers import num, parse_date, parse_uuid_list, resolve_
         "Returns a list of {bucket, value, count} rows. Amounts use the "
         "user's primary currency when available, falling back to native. "
         "By default counts only POSTED transactions (already settled) — "
-        "set status='all' or 'pending' to include scheduled/recurring rows."
+        "set status='all' or 'pending' to include scheduled/recurring rows. "
+        "With tx_type (expense or income) only rows that count in income and "
+        "expense reports are summed, whatever exclude_transfers says: paired "
+        "transfers (including loan principal repayments), transfer-like and "
+        "ignored categories, credits on loans and opening balances are left out."
     ),
     parameters={
         "type": "object",
@@ -39,7 +44,7 @@ from mcp_server.tools._helpers import num, parse_date, parse_uuid_list, resolve_
             "category_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}},
             "payee_id": {"type": "string", "format": "uuid", "description": "Restrict to a single payee — useful for 'how much did I spend at X?'"},
             "currency": {"type": "string", "description": "Restrict to one native currency (BRL, USD, EUR, ...)"},
-            "tx_type": {"type": "string", "enum": ["expense", "income"], "description": "Filter to expenses or income only"},
+            "tx_type": {"type": "string", "enum": ["expense", "income"], "description": "Filter to expenses or income only, as the income/expense reports count them (transfers and loan principal never count)"},
             "description_contains": {"type": "string", "description": "Case-insensitive substring match against the transaction description — use this to scope to a merchant/keyword like 'uber', 'spotify', 'amigos do bem'."},
             "status": {"type": "string", "enum": ["posted", "pending", "all"], "default": "posted", "description": "Default 'posted' = only money that already moved. Use 'pending' for scheduled/recurring not yet settled, or 'all' to include both."},
             "exclude_transfers": {"type": "boolean", "default": True, "description": "Leave out transfers: paired transfer legs and rows in a category flagged treat_as_transfer."},
@@ -152,6 +157,11 @@ async def aggregate(
         # Paired transfers and rows in a `treat_as_transfer` category, the
         # same transfers the reports leave out of income and expenses.
         q = q.where(is_not_transfer(category_col))
+    if tx_type in ("expense", "income"):
+        # An expense or income total is a P&L figure: apply the reports'
+        # filter regardless of exclude_transfers, or the cash leg of a loan
+        # repayment (principal) would be summed as spending.
+        q = q.where(counts_as_pnl(category_col), Transaction.source != "opening_balance")
 
     q = q.group_by(bucket_id).order_by(value_expr.desc().nulls_last()).limit(int(limit))
 

@@ -19,7 +19,8 @@ export type PostTodayButtonProps = {
  */
 export function PostTodayButton({ id, status, source, canWrite, onPostToday }: PostTodayButtonProps) {
   const { t } = useTranslation()
-  if (!canWrite || !shouldShowPendingBadge({ status, source })) return null
+  // Fork: bank-synced pending rows show the badge too, but the bank settles those.
+  if (!canWrite || source === 'sync' || !shouldShowPendingBadge({ status, source })) return null
 
   const label = t('transactions.postToday')
   return (

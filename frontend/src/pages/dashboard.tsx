@@ -63,6 +63,8 @@ import { useCollectionFilter } from '@/contexts/collection-filter-context'
 import { resolveDateFnsLocale } from '@/lib/date-fns-locale'
 import type { Rule, Transaction } from '@/types'
 import { formatCompactCurrency, formatCurrency, ltrAmount } from '@/lib/format'
+import { useSeriesToggle } from '@/hooks/use-series-toggle'
+import { LegendToggle } from '@/components/chart-legend-toggle'
 import { shouldShowPendingBadge } from '@/lib/transaction-status'
 import { readCalendarDateBasis } from '@/lib/transaction-calendar'
 import { WidgetGrid } from '@/components/widget-grid'
@@ -525,6 +527,8 @@ export default function DashboardPage() {
     }
     return result
   }, [balanceHistory, selectedMonth])
+  // Legend toggles for the balance chart: a hidden month leaves the chart.
+  const balanceToggle = useSeriesToggle(['current', 'previous'])
 
   const lastCurrentPoint = [...cumulativeData].reverse().find(d => d.current !== null)
   const lastDay = lastCurrentPoint?.day ?? 0
@@ -1237,10 +1241,10 @@ export default function DashboardPage() {
               )}
             </div>
             <div className="flex items-center gap-3 mt-2">
-              <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <LegendToggle seriesKey="current" toggle={balanceToggle} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 <span className="inline-block w-3 h-0.5 rounded-full bg-chart-income" />
                 {t('dashboard.balanceCurrentMonthLegend')}
-              </span>
+              </LegendToggle>
               {comparisonMonths.length === 1 ? (
                 <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <span className="inline-block w-3 border-t-2 border-dashed border-chart-muted" />
@@ -1382,6 +1386,7 @@ export default function DashboardPage() {
                     dot={false}
                     activeDot={{ r: 3, fill: 'var(--chart-income)' }}
                     connectNulls={false}
+                    hide={balanceToggle.isHidden('current')}
                   />
                   <Line
                     type="monotone"

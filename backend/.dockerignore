@@ -9,3 +9,4 @@ htmlcov/
 .env
 *.egg-info/
 secrets/
+tests/
