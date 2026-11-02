@@ -1,0 +1,800 @@
+"""Fork: the Insights page, a monthly briefing of patterns in the payment data.
+
+Everything here is deterministic: rules and robust statistics over the
+workspace's own transactions, no language model. Two layers:
+
+  * ``load_rows`` reads the rows that count as income or spending, with the
+    same rule the reports use (``counts_as_pnl``), plus opening balances and
+    pending rows left out;
+  * ``analyse`` is pure Python over those rows, so every signal can be tested
+    without a database.
+
+Signals favour behaviour over single totals: a month against its usual
+month, twelve-month totals that peak or climb, the share of income kept,
+price steps on regular payments, new and stopped payees, income changes and
+bursts of small charges. Two guards keep them honest. Categories whose spending
+is mostly one-off purchases are left out (one big purchase is not a pattern),
+and categories paid on a fixed cycle are left out of the month comparison when
+the month simply held one more or one fewer payment.
+"""
+from __future__ import annotations
+
+import calendar
+import statistics
+import uuid
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import date, timedelta
+from typing import Any, Optional, Sequence
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.app_clock import app_today
+from app.models.account import Account
+from app.models.category import Category
+from app.models.payee import Payee
+from app.models.transaction import Transaction
+from app.services._query_filters import counts_as_pnl
+
+# A single charge at or above this is a one-off purchase, not everyday spending.
+ONE_OFF_THRESHOLD = 1000.0
+# A category whose last two years of spending is at least this share one-offs
+# is "lumpy" and stays out of the month comparison and trend signals.
+LUMPY_SHARE = 0.5
+# Months of history read before the briefing month. The rolling twelve-month
+# figures need twelve points, each covering twelve months.
+HISTORY_MONTHS = 24
+USUAL_MONTHS = 6
+CARDS_PER_SIDE = 4
+# A month card needs a difference of at least this much and this share of
+# the usual month; categories with spending in fewer than SPORADIC_MONTHS of
+# the last twelve need double (one purchase swings them).
+MIN_DIFF = 150.0
+MIN_SHARE = 0.25
+SPORADIC_MONTHS = 6
+# Twelve-month trends are for habits: spending in at least this many of the
+# last twelve months.
+HABIT_MONTHS = 8
+# Payers whose arrival alongside a drop in pay reads as leave (New Zealand's
+# Paid Parental Leave is paid by Inland Revenue).
+LEAVE_PAYERS = ("ird", "inland revenue")
+
+
+@dataclass(frozen=True)
+class Row:
+    when: date
+    amount: float  # always positive, in the workspace's primary currency
+    is_debit: bool
+    category_id: Optional[str]
+    category: Optional[str]
+    payee_id: Optional[str]
+    payee: Optional[str]
+    account_id: Optional[str] = None
+    description: Optional[str] = None
+
+
+@dataclass
+class Card:
+    kind: str
+    direction: str  # "better" | "worse"
+    score: float
+    params: dict[str, Any] = field(default_factory=dict)
+    series: list[float] = field(default_factory=list)
+    category_id: Optional[str] = None
+    payee_id: Optional[str] = None
+    link_from: Optional[str] = None
+    link_to: Optional[str] = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "direction": self.direction,
+            "params": self.params,
+            "series": [round(v, 2) for v in self.series],
+            "category_id": self.category_id,
+            "payee_id": self.payee_id,
+            "link_from": self.link_from,
+            "link_to": self.link_to,
+        }
+
+
+# ---------------------------------------------------------------------------
+# month arithmetic
+# ---------------------------------------------------------------------------
+
+
+def _mi(d: date) -> int:
+    return d.year * 12 + d.month - 1
+
+
+def _month_start(i: int) -> date:
+    return date(i // 12, i % 12 + 1, 1)
+
+
+def _month_end(i: int) -> date:
+    s = _month_start(i)
+    return date(s.year, s.month, calendar.monthrange(s.year, s.month)[1])
+
+
+def _ym(i: int) -> str:
+    s = _month_start(i)
+    return f"{s.year:04d}-{s.month:02d}"
+
+
+def default_month(today: Optional[date] = None) -> date:
+    """The last complete month."""
+    today = today or app_today()
+    return _month_start(_mi(today) - 1)
+
+
+# ---------------------------------------------------------------------------
+# loading
+# ---------------------------------------------------------------------------
+
+
+async def load_rows(session: AsyncSession, workspace_id: uuid.UUID, start: date, end: date) -> list[Row]:
+    amount = func.coalesce(Transaction.amount_primary, Transaction.amount)
+    result = await session.execute(
+        select(
+            Transaction.date, amount, Transaction.type, Category.id, Category.name, Payee.id, Payee.name,
+            Transaction.account_id, Transaction.description,
+        )
+        .select_from(Transaction)
+        .join(Account, Transaction.account_id == Account.id)
+        .outerjoin(Category, Transaction.category_id == Category.id)
+        .outerjoin(Payee, Transaction.payee_id == Payee.id)
+        .where(
+            Transaction.workspace_id == workspace_id,
+            Transaction.date >= start,
+            Transaction.date <= end,
+            Transaction.status == "posted",
+            Transaction.source != "opening_balance",
+            counts_as_pnl(),
+        )
+    )
+    rows = []
+    for when, amt, type_, cat_id, cat_name, payee_id, payee_name, account_id, description in result.all():
+        rows.append(Row(
+            when=when,
+            amount=abs(float(amt or 0)),
+            is_debit=type_ == "debit",
+            category_id=str(cat_id) if cat_id else None,
+            category=cat_name,
+            payee_id=str(payee_id) if payee_id else None,
+            payee=payee_name,
+            account_id=str(account_id),
+            description=description,
+        ))
+    return rows
+
+
+async def get_briefing(
+    session: AsyncSession, workspace_id: uuid.UUID, currency: str, month: Optional[date] = None,
+) -> dict[str, Any]:
+    month = month or default_month()
+    m0 = _mi(month)
+    rows = await load_rows(session, workspace_id, _month_start(m0 - HISTORY_MONTHS + 1), _month_end(m0))
+    first = await session.scalar(
+        select(func.min(Transaction.date)).where(
+            Transaction.workspace_id == workspace_id, Transaction.source != "opening_balance",
+        )
+    )
+    briefing = analyse(rows, month)
+    briefing["currency"] = currency
+    briefing["first_month"] = _ym(_mi(first)) if first else None
+    briefing["last_month"] = _ym(_mi(default_month()))
+    return briefing
+
+
+# ---------------------------------------------------------------------------
+# analysis
+# ---------------------------------------------------------------------------
+
+
+def _median(values: Sequence[float]) -> float:
+    return float(statistics.median(values)) if values else 0.0
+
+
+@dataclass
+class _Regular:
+    payee_id: str
+    payee: str
+    category_id: Optional[str]
+    category: Optional[str]
+    cycle: float  # days between charges
+    dates: list[date]
+    amounts: list[float]
+
+
+def _regulars(rows: list[Row], end: date, debit: bool) -> list[_Regular]:
+    """Payees charged (or paying) on a steady cycle, weekly to monthly.
+
+    Keyed by payee and account: one lender charging interest on several loan
+    accounts is several cycles, not one irregular one.
+    """
+    by_payee: dict[tuple[str, Optional[str]], list[Row]] = defaultdict(list)
+    for r in rows:
+        if r.is_debit == debit and r.payee_id and r.when <= end:
+            by_payee[(r.payee_id, r.account_id)].append(r)
+    out = []
+    for (payee_id, _account), rs in by_payee.items():
+        rs.sort(key=lambda r: r.when)
+        # One charge per day: a split payment is still one cycle.
+        daily: dict[date, float] = defaultdict(float)
+        for r in rs:
+            daily[r.when] += r.amount
+        dates = sorted(daily)
+        if len(dates) < 4:
+            continue
+        gaps = [(b - a).days for a, b in zip(dates[-9:], dates[-8:])]
+        gap = _median(gaps)
+        if not 6 <= gap <= 40:
+            continue
+        spread = statistics.pstdev(gaps) / gap if len(gaps) > 1 else 0
+        if spread >= 0.35:
+            continue
+        out.append(_Regular(
+            payee_id=payee_id, payee=rs[-1].payee or "", category_id=rs[-1].category_id,
+            category=rs[-1].category, cycle=gap, dates=dates, amounts=[daily[d] for d in dates],
+        ))
+    return out
+
+
+def _seasonal_pause(reg: _Regular, silent: int) -> bool:
+    """The payee went quiet at this time of year before and came back.
+
+    Lessons paid per school term stop over the summer holidays every year;
+    a silence that began within six weeks of the same date a year or two
+    earlier, and lasts no more than twice that earlier break, is the break
+    again, not a stop.
+    """
+    since = reg.dates[-1]
+    for a, b in zip(reg.dates, reg.dates[1:]):
+        gap = (b - a).days
+        if gap <= 1.5 * reg.cycle or silent > 2 * gap:
+            continue
+        if any(abs((a - (since - timedelta(days=365 * years))).days) <= 45 for years in (1, 2)):
+            return True
+    return False
+
+
+def _who(r: Row) -> tuple[str, str]:
+    """A key and a label for who a row was paid to: the payee, or failing
+    that the first words of the bank's description ("Tickets example")."""
+    if r.payee_id:
+        return r.payee_id, r.payee or ""
+    words = [w for w in (r.description or "").replace("*", " ").split() if not any(ch.isdigit() for ch in w)]
+    label = " ".join(words[:3])
+    return ("d:" + label.lower(), label) if label else ("", "")
+
+
+def _driver_params(found: list[dict[str, Any]]) -> dict[str, Any]:
+    if not found:
+        return {}
+    return {"driver": found[0]["payee"], "driver_diff": found[0]["diff"]}
+
+
+def analyse(rows: list[Row], month: date) -> dict[str, Any]:
+    m0 = _mi(month)
+    first_m = m0 - HISTORY_MONTHS + 1
+    month_start, month_end = _month_start(m0), _month_end(m0)
+    window = (_month_start(m0 - 11).isoformat(), month_end.isoformat())
+
+    spend: dict[Optional[str], dict[int, float]] = defaultdict(lambda: defaultdict(float))
+    visits: dict[Optional[str], dict[int, int]] = defaultdict(lambda: defaultdict(int))
+    one_off: dict[Optional[str], float] = defaultdict(float)
+    all_debits: dict[Optional[str], float] = defaultdict(float)
+    names: dict[Optional[str], str] = {}
+    everyday_total: dict[int, float] = defaultdict(float)
+    income: dict[int, float] = defaultdict(float)
+    month_one_offs: list[Row] = []
+    # Everyday spending per category, payee and month, to say who moved a category.
+    by_payee: dict[Optional[str], dict[str, dict[int, float]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(float))
+    )
+    payee_names: dict[str, str] = {}
+    income_by_payer: dict[str, dict[int, float]] = defaultdict(lambda: defaultdict(float))
+    payer_names: dict[str, str] = {}
+    for r in rows:
+        mi = _mi(r.when)
+        if mi < first_m or mi > m0:
+            continue
+        if not r.is_debit:
+            income[mi] += r.amount
+            key, label = _who(r)
+            income_by_payer[key][mi] += r.amount
+            payer_names[key] = label or (r.category or "")
+            continue
+        names[r.category_id] = r.category or ""
+        all_debits[r.category_id] += r.amount
+        if r.amount >= ONE_OFF_THRESHOLD:
+            one_off[r.category_id] += r.amount
+            if mi == m0:
+                month_one_offs.append(r)
+            continue
+        spend[r.category_id][mi] += r.amount
+        visits[r.category_id][mi] += 1
+        payee_key, label = _who(r)
+        by_payee[r.category_id][payee_key][mi] += r.amount
+        payee_names[payee_key] = label
+
+    lumpy = {c for c, total in all_debits.items() if total > 0 and one_off[c] / total >= LUMPY_SHARE}
+    usual_range = range(m0 - USUAL_MONTHS, m0)
+    # The same month a year earlier, once the data reaches back that far.
+    first_seen = min((_mi(r.when) for r in rows), default=m0)
+    ly = m0 - 12
+    has_ly = first_seen <= ly
+    # Everyday spending leaves out project categories (mostly one-off
+    # purchases) entirely, their small purchases included: a renovation's
+    # trips to the hardware store are part of the project, not of daily life.
+    for c, by_m in spend.items():
+        if c in lumpy:
+            continue
+        for mi, amount in by_m.items():
+            everyday_total[mi] += amount
+
+    def active_months(c: Optional[str]) -> int:
+        return sum(1 for m in range(m0 - 11, m0 + 1) if spend[c][m] > 0)
+
+    def material(c: Optional[str], diff: float, u: float) -> bool:
+        factor = 2 if active_months(c) < SPORADIC_MONTHS else 1
+        return abs(diff) >= factor * max(MIN_DIFF, MIN_SHARE * u)
+
+    def baseline(c: Optional[str]) -> list[int]:
+        """The months a category's usual month is measured over.
+
+        Normally the six before the briefing month. When the category clearly
+        changed level inside those six (every later month well above, or well
+        below, every earlier one), only the months since the change count: a
+        subscription that started in April makes April onwards the usual, not
+        a median that still mixes in the months before it.
+        """
+        months = list(usual_range)
+        values = [spend[c][m] for m in months]
+        # At least three months on the new level, and a real move: the new
+        # level is at least $100 a month and at least double (or half) the old.
+        for k in range(1, len(months) - 2):
+            before, after = values[:k], values[k:]
+            up = min(after) > 1.5 * max(before) and _median(after) >= max(100, 2 * _median(before))
+            down = max(after) * 1.5 < min(before) and _median(before) >= max(100, 2 * _median(after))
+            if up or down:
+                return months[k:]
+        return months
+
+    def usual(c: Optional[str]) -> float:
+        return _median([spend[c][m] for m in baseline(c)])
+
+    def drivers(c: Optional[str], diff: float) -> list[dict[str, Any]]:
+        """The payees behind most of a category's difference, biggest first.
+
+        Only for a difference big enough to matter, only named payees, and
+        never one whose own move is far bigger than the category's (that is a
+        payee offset by others, not the story of the month).
+        """
+        if not material(c, diff, usual(c)):
+            return []
+        months = baseline(c)
+        moves = []
+        for p, by_m in by_payee[c].items():
+            if not p:
+                continue
+            delta = by_m[m0] - _median([by_m[m] for m in months])
+            if delta * diff > 0 and abs(delta) >= 20 and abs(delta) <= 1.5 * abs(diff):
+                moves.append((p, delta))
+        moves.sort(key=lambda x: -abs(x[1]))
+        out = []
+        covered = 0.0
+        for p, delta in moves[:2]:
+            out.append({"payee_id": p or None, "payee": payee_names.get(p) or "", "diff": round(delta, 2)})
+            covered += delta
+            if abs(covered) >= 0.5 * abs(diff):
+                break
+        return out if abs(covered) >= 0.5 * abs(diff) else []
+
+    # --- fixed-cycle categories: one more or one fewer payment is not a change
+    regulars = _regulars(rows, month_end, debit=True)
+    cadence_note: dict[Optional[str], str] = {}
+    by_cat_regular: dict[Optional[str], list[_Regular]] = defaultdict(list)
+    for reg in regulars:
+        recent = reg.amounts[-8:]
+        mean = sum(recent) / len(recent)
+        # Bills and instalments, not a shop visited every week: the amount
+        # barely moves from one charge to the next.
+        if mean > 0 and statistics.pstdev(recent) / mean < 0.3:
+            by_cat_regular[reg.category_id].append(reg)
+
+    def charges(regs: list[_Regular], m: int) -> tuple[int, float]:
+        hits = [a for reg in regs for d, a in zip(reg.dates, reg.amounts) if _mi(d) == m]
+        return len(hits), sum(hits)
+
+    for c, regs in by_cat_regular.items():
+        cat_usual_total = sum(spend[c][m] for m in usual_range)
+        if cat_usual_total <= 0:
+            continue
+        reg_usual_total = sum(charges(regs, m)[1] for m in usual_range)
+        if reg_usual_total / cat_usual_total < 0.7:
+            continue
+        now_count, now_total = charges(regs, m0)
+        usual_count = _median([charges(regs, m)[0] for m in usual_range])
+        if now_count == usual_count or usual_count == 0 or now_count == 0:
+            continue
+        per_usual = reg_usual_total / sum(charges(regs, m)[0] for m in usual_range)
+        if per_usual and abs((now_total / now_count) / per_usual - 1) <= 0.1:
+            cadence_note[c] = "more_payments" if now_count > usual_count else "fewer_payments"
+
+    # --- the month against its usual month, by category
+    compared: list[tuple[Optional[str], float, float]] = []  # (category, month, usual)
+    for c in set(spend) | set(names):
+        if c in lumpy or c in cadence_note:
+            continue
+        now, u = round(spend[c][m0], 2), round(usual(c), 2)
+        if max(now, u) >= 50:
+            compared.append((c, now, u))
+    compared.sort(key=lambda x: x[1] - x[2])
+    categories = []
+    for c, now, u in compared:
+        months = baseline(c)
+        categories.append({
+            "category_id": c, "name": names.get(c) or "", "amount": now, "usual": u, "diff": round(now - u, 2),
+            "usual_since": _ym(months[0]) if len(months) < USUAL_MONTHS else None,
+            "drivers": drivers(c, now - u),
+            "last_year": round(spend[c][ly], 2) if has_ly else None,
+        })
+    excluded = (
+        [{"category_id": c, "name": names.get(c) or "", "reason": cadence_note[c]} for c in cadence_note]
+        + [{"category_id": c, "name": names.get(c) or "", "reason": "one_off"}
+           for c in lumpy if spend[c][m0] or one_off[c]]
+    )
+
+    cards: list[Card] = []
+    series_range = range(m0 - 11, m0 + 1)
+
+    for c, now, u in compared:
+        diff = round(now - u, 2)
+        if not material(c, diff, u):
+            continue
+        quiet = 0
+        for m in range(m0 - 1, m0 - 12, -1):
+            if diff > 0 and spend[c][m] < 0.6 * u or diff < 0 and spend[c][m] > 1.4 * u:
+                quiet += 1
+            else:
+                break
+        # Seasonal: the same month last year made the same move against its
+        # own usual and this one goes no further than about that (power in
+        # winter, gifts in December). Still told, but as the season, and
+        # ranked lower.
+        then = spend[c][ly]
+        then_usual = _median([spend[c][m] for m in range(ly - USUAL_MONTHS, ly)])
+        seasonal = (
+            first_seen <= ly - USUAL_MONTHS and (then - then_usual) * diff > 0
+            and material(c, then - then_usual, then_usual)
+            and (now <= 1.25 * then if diff > 0 else now >= 0.75 * then)
+        )
+        cards.append(Card(
+            kind="category_month", direction="worse" if diff > 0 else "better",
+            score=abs(diff) / 2 if seasonal else abs(diff),
+            params={
+                "last_year": round(then, 2) if has_ly else None, "seasonal": seasonal,
+                "category": names.get(c) or "", "amount": now, "usual": u, "diff": diff,
+                "visits": visits[c][m0], "usual_visits": _median([visits[c][m] for m in usual_range]),
+                "previous": round(spend[c][m0 - 1], 2), "streak": quiet,
+                "usual_since": _ym(baseline(c)[0]) if len(baseline(c)) < USUAL_MONTHS else "",
+                **_driver_params(drivers(c, diff)),
+            },
+            series=[spend[c][m] for m in series_range], category_id=c,
+            link_from=month_start.isoformat(), link_to=month_end.isoformat(),
+        ))
+
+    # --- twelve-month totals: peaks passed and steady climbs
+    for c in set(spend):
+        if c in lumpy or active_months(c) < HABIT_MONTHS:
+            continue
+        ttm = [sum(spend[c][k] for k in range(m - 11, m + 1)) for m in series_range]
+        then = sum(spend[c][k] for k in range(first_m, first_m + 12))
+        now = ttm[-1]
+        peak = max(ttm[:-3]) if len(ttm) > 3 else 0
+        if peak >= 1000 and now <= 0.8 * peak:
+            peak_m = m0 - 11 + ttm.index(peak)
+            cards.append(Card(
+                kind="trend_cooling", direction="better", score=(peak - now) / 12,
+                params={"category": names.get(c) or "", "total": round(now, 2), "peak": round(peak, 2),
+                        "peak_month": _ym(peak_m)},
+                series=ttm, category_id=c, link_from=window[0], link_to=window[1],
+            ))
+        elif then >= 500 and now >= 1.4 * then and now - then >= 500:
+            cards.append(Card(
+                kind="trend_rising", direction="worse", score=(now - then) / 12,
+                params={"category": names.get(c) or "", "total": round(now, 2), "before": round(then, 2),
+                        "change_pct": round(100 * (now / then - 1))},
+                series=ttm, category_id=c, link_from=window[0], link_to=window[1],
+            ))
+
+    # --- share of income kept after everyday spending, over twelve months
+    rates: list[Optional[float]] = []
+    for m in series_range:
+        inc = sum(income[k] for k in range(m - 11, m + 1))
+        out = sum(everyday_total[k] for k in range(m - 11, m + 1))
+        rates.append(round(100 * (inc - out) / inc, 1) if inc > 0 else None)
+    savings_rate = rates[-1]
+    savings_rate_before = rates[0]
+    now_months, before_months = range(m0 - 11, m0 + 1), range(m0 - 23, m0 - 11)
+
+    def twelve(by_m: dict[int, float], months: range) -> float:
+        return sum(by_m[k] for k in months)
+
+    payer_moves = sorted(
+        ((k, twelve(v, now_months) - twelve(v, before_months)) for k, v in income_by_payer.items()),
+        key=lambda x: x[1],
+    )
+    # Leave: a payer that used to pay little or nothing (Inland Revenue) now
+    # pays, while another payer pays clearly less. The year is then about
+    # leave, not drift, and says so.
+    leave_payer = next(
+        (k for k, delta in payer_moves
+         if delta > 0 and any(n in payer_names.get(k, "").lower() for n in LEAVE_PAYERS)
+         and twelve(income_by_payer[k], before_months) < 0.1 * twelve(income_by_payer[k], now_months)),
+        None,
+    )
+    reduced = [
+        (k, d) for k, d in payer_moves
+        if d < 0 and twelve(income_by_payer[k], now_months) < 0.8 * twelve(income_by_payer[k], before_months)
+    ]
+    leave = leave_payer is not None and bool(reduced)
+
+    if savings_rate is not None and savings_rate_before is not None:
+        change = savings_rate - savings_rate_before
+        if abs(change) >= 8:
+            inc12 = sum(income[k] for k in range(m0 - 11, m0 + 1))
+            income_change = sum(income[k] for k in now_months) - sum(income[k] for k in before_months)
+            spend_change = sum(everyday_total[k] for k in now_months) - sum(everyday_total[k] for k in before_months)
+            cat_moves = sorted(
+                ((c, twelve(spend[c], now_months) - twelve(spend[c], before_months)) for c in spend if c not in lumpy),
+                key=lambda x: -x[1] if spend_change >= 0 else x[1],
+            )
+            income_side = payer_moves if income_change < 0 else list(reversed(payer_moves))
+            params: dict[str, Any] = {
+                "rate": savings_rate, "before": savings_rate_before, "change": round(change, 1),
+                "income_change": round(income_change, 2), "spend_change": round(spend_change, 2),
+                "income_movers": [
+                    {"name": payer_names.get(k) or "", "diff": round(d, 2)}
+                    for k, d in income_side[:2] if d * income_change > 0
+                ],
+                "spend_movers": [
+                    {"name": names.get(c) or "", "diff": round(d, 2)}
+                    for c, d in cat_moves[:3] if d * spend_change > 0
+                ],
+                "leave": leave,
+                "leave_payer": payer_names.get(leave_payer, "") if leave_payer else "",
+            }
+            cards.append(Card(
+                kind="savings_rate", direction="better" if change > 0 else "worse",
+                score=abs(change) / 100 * inc12 / 12 + 10_000,  # leads its column
+                params=params,
+                series=[r if r is not None else 0.0 for r in rates],
+                link_from=window[0], link_to=window[1],
+            ))
+
+    # --- price steps on regular payments
+    payee_category: dict[str, Optional[str]] = {}
+    for reg in regulars:
+        if reg.category_id in lumpy or len(reg.amounts) < 4:
+            continue
+        last = reg.amounts[-1]
+        start = len(reg.amounts) - 1
+        while start > 0 and abs(reg.amounts[start - 1] / last - 1) <= 0.05:
+            start -= 1
+        # The new amount has to repeat before it counts as a new price: twice
+        # for a monthly charge, three times for a weekly or fortnightly one.
+        # A part period, a holiday fee or a final bill is not a step.
+        repeats = 2 if reg.cycle > 16 else 3
+        if start == 0 or start > len(reg.amounts) - repeats:
+            continue
+        stepped_on = reg.dates[start]
+        if not (month_end - timedelta(days=92) < stepped_on <= month_end):
+            continue
+        before = _median(reg.amounts[max(0, start - 3):start])
+        if before <= 0 or abs(last / before - 1) < 0.05 or abs(last - before) < 1:
+            continue
+        per_month = 30.4 / reg.cycle
+        # A step about a year after the previous one is a yearly review
+        # (rates each July, an insurance anniversary): expected, not news.
+        yearly = False
+        for j in range(start - 1, 0, -1):
+            if abs(reg.amounts[j] / reg.amounts[j - 1] - 1) > 0.05:
+                yearly = 330 <= (stepped_on - reg.dates[j]).days <= 400
+                break
+        cards.append(Card(
+            kind="price_up" if last > before else "price_down",
+            direction="worse" if last > before else "better",
+            score=abs(last - before) * per_month,
+            params={"payee": reg.payee, "before": round(before, 2), "after": round(last, 2),
+                    "since": stepped_on.isoformat(), "cycle_days": round(reg.cycle), "yearly": yearly},
+            series=reg.amounts[-12:], payee_id=reg.payee_id,
+            link_from=_month_start(m0 - 11).isoformat(), link_to=month_end.isoformat(),
+        ))
+        payee_category[reg.payee_id] = reg.category_id
+
+    # --- regular payments that stopped recently
+    for reg in regulars:
+        silent = (month_end - reg.dates[-1]).days
+        # A holiday pause is not a stop: at least 45 days of silence.
+        if reg.category_id in lumpy or silent <= max(2.5 * reg.cycle, 45) or silent > 120:
+            continue
+        if _seasonal_pause(reg, silent):
+            continue
+        typical = _median(reg.amounts[-6:])
+        cards.append(Card(
+            kind="payee_stopped", direction="better", score=typical * 30.4 / reg.cycle,
+            params={"payee": reg.payee, "category": reg.category or "", "amount": round(typical, 2), "last": reg.dates[-1].isoformat(),
+                    "cycle_days": round(reg.cycle)},
+            series=reg.amounts[-12:], payee_id=reg.payee_id,
+        ))
+        payee_category[reg.payee_id] = reg.category_id
+
+    payee_month: dict[str, dict[int, float]] = defaultdict(lambda: defaultdict(float))
+    payee_small: dict[str, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+    payee_info: dict[str, Row] = {}
+    payee_first: dict[str, date] = {}
+    payee_last: dict[str, date] = {}
+    for r in rows:
+        if not r.is_debit or not r.payee_id or r.amount >= ONE_OFF_THRESHOLD:
+            continue
+        mi = _mi(r.when)
+        payee_month[r.payee_id][mi] += r.amount
+        # Withholding tax on interest arrives as cent-sized debits from the tax
+        # office on every savings account: never a burst of purchases.
+        if 1 <= r.amount < 20 and not any(n in (r.payee or "").lower() for n in LEAVE_PAYERS):
+            payee_small[r.payee_id][mi] += 1
+        payee_info[r.payee_id] = r
+        payee_first[r.payee_id] = min(payee_first.get(r.payee_id, r.when), r.when)
+        payee_last[r.payee_id] = max(payee_last.get(r.payee_id, r.when), r.when)
+
+    # --- a payee that has suddenly become a real cost
+    for p, by_m in payee_month.items():
+        info = payee_info[p]
+        if info.category_id in lumpy:
+            continue
+        recent = by_m[m0] + by_m[m0 - 1]
+        earlier = sum(by_m[m] for m in range(m0 - 13, m0 - 1))
+        if by_m[m0] >= 150 and earlier < 0.1 * recent:
+            cards.append(Card(
+                kind="payee_new", direction="worse", score=by_m[m0],
+                params={"payee": info.payee or "", "category": info.category or "", "amount": round(by_m[m0], 2)},
+                series=[by_m[m] for m in series_range], payee_id=p, category_id=info.category_id,
+                link_from=month_start.isoformat(), link_to=month_end.isoformat(),
+            ))
+
+    # --- bursts of small charges (in-app purchases and the like)
+    for p, by_m in payee_small.items():
+        count = by_m[m0]
+        before = sum(by_m[m] for m in usual_range) / USUAL_MONTHS
+        if count >= 10 and count >= 3 * max(before, 1):
+            info = payee_info[p]
+            cards.append(Card(
+                kind="small_burst", direction="worse", score=payee_month[p][m0] + 100,
+                params={"payee": info.payee or "", "count": count, "usual_count": round(before, 1),
+                        "amount": round(payee_month[p][m0], 2)},
+                series=[float(by_m[m]) for m in series_range], payee_id=p,
+                link_from=month_start.isoformat(), link_to=month_end.isoformat(),
+            ))
+
+    # --- a habit that ended: a payee in most months for half a year, then
+    # nothing for three months, whatever its rhythm (bus card top-ups).
+    stopped_ids = {c.payee_id for c in cards if c.kind == "payee_stopped"}
+    for p, by_m in payee_month.items():
+        info = payee_info[p]
+        if info.category_id in lumpy or p in stopped_ids:
+            continue
+        present = [m for m in range(m0 - 8, m0 - 2) if by_m[m] > 0]
+        if len(present) >= 4 and all(by_m[m] == 0 for m in range(m0 - 2, m0 + 1)):
+            monthly = sum(by_m[m] for m in present) / len(present)
+            if monthly >= 30 and _mi(payee_last[p]) == m0 - 3:
+                cards.append(Card(
+                    kind="habit_ended", direction="better", score=monthly,
+                    params={"payee": info.payee or "", "category": info.category or "", "monthly": round(monthly, 2),
+                            "last": payee_last[p].isoformat()},
+                    series=[by_m[m] for m in series_range], payee_id=p,
+                ))
+
+    # --- income from a regular payer changed. During leave this folds into
+    # the savings card: one payer's drop and the tax office's payments are one
+    # story, not an alarming "paying 70% less".
+    for reg in ([] if leave else _regulars(rows, month_end, debit=False)):
+        if len(reg.amounts) < 6 or (month_end - reg.dates[-1]).days > 2 * reg.cycle:
+            continue
+        now = _median(reg.amounts[-3:])
+        before = _median(reg.amounts[-9:-3])
+        if before <= 0 or abs(now / before - 1) < 0.05:
+            continue
+        cards.append(Card(
+            kind="income_change", direction="better" if now > before else "worse",
+            score=abs(now - before) * 30.4 / reg.cycle,
+            params={"payee": reg.payee, "before": round(before, 2), "after": round(now, 2),
+                    "change_pct": round(100 * (now / before - 1)), "cycle_days": round(reg.cycle)},
+            series=reg.amounts[-12:], payee_id=reg.payee_id,
+        ))
+
+    # --- splits and switches: one payee in a category falls or stops while
+    # another starts in the same weeks (water moving from the council to a
+    # water company; one tool replacing another). Told as one card with the
+    # combined monthly cost, instead of a "costs less" and a "new cost".
+    regular_by_id = {reg.payee_id: reg for reg in regulars}
+    downs = [c for c in cards if c.kind in ("price_down", "payee_stopped") and c.payee_id]
+    for down in downs:
+        cat = payee_category.get(down.payee_id or "")
+        old = regular_by_id.get(down.payee_id or "")
+        if old is None:
+            continue
+        when = date.fromisoformat(str(down.params.get("since") or down.params["last"]))
+        # The newcomer: a payee in the same category first seen within two
+        # months of the drop, and new (nothing from it in the year before).
+        newcomers = [
+            p for p, first_seen in payee_first.items()
+            if p != down.payee_id and payee_info[p].category_id == cat
+            and abs((first_seen - when).days) <= 60 and first_seen > month_end - timedelta(days=150)
+        ]
+        if not newcomers:
+            continue
+        p = max(newcomers, key=lambda q: payee_month[q][m0])
+        new = regular_by_id.get(p)
+        per = 30.4 / old.cycle
+        before = float(down.params.get("before", down.params.get("amount", 0))) * per
+        if new:
+            new_monthly = new.amounts[-1] * 30.4 / new.cycle
+        else:
+            # Too new to be "regular" yet: read its rhythm from the charges so far.
+            seen = sorted(r.when for r in rows if r.is_debit and r.payee_id == p)
+            gaps = [(y - x).days for x, y in zip(seen, seen[1:]) if (y - x).days > 0]
+            amounts = [r.amount for r in rows if r.is_debit and r.payee_id == p]
+            new_monthly = _median(amounts) * 30.4 / _median(gaps) if gaps else payee_month[p][m0]
+        after = float(down.params.get("after", 0)) * per + new_monthly
+        cards.remove(down)
+        cards[:] = [c for c in cards if not (c.kind == "payee_new" and c.payee_id == p)]
+        cards.append(Card(
+            kind="payee_switch", direction="worse" if after > before else "better",
+            score=abs(after - before) + 1000,  # outranks a category card the switch explains
+            params={"from_payee": down.params["payee"], "to_payee": payee_info[p].payee or "",
+                    "category": payee_info[p].category or "", "before": round(before, 2),
+                    "after": round(after, 2), "change_pct": round(100 * (after / before - 1)) if before else 0,
+                    "since": payee_first[p].isoformat()},
+            series=[payee_month[p][m] + payee_month[down.payee_id or ""][m] for m in series_range],
+            category_id=cat, link_from=_month_start(m0 - 2).isoformat(), link_to=month_end.isoformat(),
+        ))
+
+    # One card per subject: the strongest card about a category or a payee
+    # wins, so a burst of charges is not also told as a new payee and as a
+    # category over its usual month.
+    kept: list[Card] = []
+    used: set[tuple[str, str]] = set()
+    for card in sorted(cards, key=lambda c: -c.score):
+        keys: set[tuple[str, str]] = set()
+        if card.category_id:
+            keys.add(("c", card.category_id))
+        if card.payee_id:
+            keys.add(("p", card.payee_id))
+        if keys & used:
+            continue
+        used |= keys
+        kept.append(card)
+
+    def side(direction: str) -> list[dict[str, Any]]:
+        return [c.as_dict() for c in kept if c.direction == direction][:CARDS_PER_SIDE]
+
+    usual_total = _median([everyday_total[m] for m in usual_range])
+    return {
+        "month": _ym(m0),
+        "everyday_spend": round(everyday_total[m0], 2),
+        "usual_spend": round(usual_total, 2),
+        "last_year_spend": round(everyday_total[ly], 2) if has_ly else None,
+        "income": round(income[m0], 2),
+        "savings_rate": savings_rate,
+        "savings_rate_before": savings_rate_before,
+        "one_off_count": len(month_one_offs),
+        "one_off_total": round(sum(r.amount for r in month_one_offs), 2),
+        "one_off_threshold": ONE_OFF_THRESHOLD,
+        "categories": categories,
+        "excluded": excluded,
+        "better": side("better"),
+        "worse": side("worse"),
+    }

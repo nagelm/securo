@@ -2195,6 +2195,50 @@ export interface ReconciliationHistoryEvent {
   transaction_description?: string | null
 }
 
+// Fork: the Insights page's monthly briefing.
+export interface InsightCard {
+  kind:
+    | 'category_month' | 'trend_cooling' | 'trend_rising' | 'savings_rate' | 'price_up' | 'price_down'
+    | 'payee_new' | 'payee_stopped' | 'small_burst' | 'income_change' | 'payee_switch' | 'habit_ended'
+  direction: 'better' | 'worse'
+  params: Record<string, string | number | boolean | { name: string; diff: number }[]>
+  series: number[]
+  category_id: string | null
+  payee_id: string | null
+  link_from: string | null
+  link_to: string | null
+}
+
+export interface InsightsBriefing {
+  month: string
+  currency: string
+  first_month: string | null
+  last_month: string
+  everyday_spend: number
+  usual_spend: number
+  // The same month a year earlier; null until the data reaches back a year.
+  last_year_spend?: number | null
+  income: number
+  savings_rate: number | null
+  savings_rate_before: number | null
+  one_off_count: number
+  one_off_total: number
+  one_off_threshold: number
+  categories: {
+    category_id: string | null
+    name: string
+    amount: number
+    usual: number
+    diff: number
+    usual_since: string | null
+    drivers: { payee_id: string | null; payee: string; diff: number }[]
+    last_year?: number | null
+  }[]
+  excluded: { category_id: string | null; name: string; reason: 'one_off' | 'more_payments' | 'fewer_payments' }[]
+  better: InsightCard[]
+  worse: InsightCard[]
+}
+
 export type LoanKind = 'mortgage' | 'auto' | 'personal' | 'student' | 'other'
 export type LoanRatePeriod = 'monthly' | 'yearly_effective' | 'yearly_nominal'
 export type LoanAmortization = 'price' | 'sac'

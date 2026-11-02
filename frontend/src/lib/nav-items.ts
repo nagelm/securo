@@ -3,6 +3,8 @@ import {
   BarChart3,
   Building2,
   Landmark,
+  Lightbulb,
+  LineChart,
   PiggyBank,
   Receipt,
   Repeat,
