@@ -2,10 +2,24 @@ FROM python:3.14-slim
 
 WORKDIR /app
 
-# Install system deps for asyncpg
+# Install system deps for asyncpg, and pg_dump/pg_restore for the server-side
+# database backups (DB_BACKUP_DIR). The client comes from the PostgreSQL apt
+# repository at the server's major version (the shipped compose runs
+# PostgreSQL 18): pg_dump refuses a server newer than itself, and pg_restore
+# cannot read archives written by a newer pg_dump.
+ARG PG_CLIENT_MAJOR=18
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
+    ca-certificates \
+    curl \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+       https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && . /etc/os-release \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+       > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update && apt-get install -y --no-install-recommends postgresql-client-${PG_CLIENT_MAJOR} \
     && rm -rf /var/lib/apt/lists/*
 
 # Dependencies come from uv.lock (the source of truth — see scripts/lock.sh).

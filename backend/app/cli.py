@@ -60,6 +60,20 @@ async def create_user(email: str, password: str) -> None:
         print(f"User created successfully: {email}")
 
 
+def db_backup(label: str) -> None:
+    """Take a named database backup in DB_BACKUP_DIR and apply the retention."""
+    from app.services.db_backup_service import BackupError, take_backup
+
+    try:
+        result = take_backup(label)
+    except BackupError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
+    print(f"Backup written: {result.path}")
+    for name in result.removed:
+        print(f"Removed by retention: {name}")
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print("Usage:")
@@ -76,6 +90,11 @@ def main() -> None:
         asyncio.run(create_user(email, password))
     elif command == "generate-recurring":
         asyncio.run(generate_recurring())
+    elif command == "db-backup":
+        if len(sys.argv) != 3:
+            print("Usage: python -m app.cli db-backup <label>")
+            sys.exit(1)
+        db_backup(sys.argv[2])
     else:
         print(f"Unknown command: {command}")
         print("Available commands: create-user, generate-recurring")

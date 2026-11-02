@@ -143,17 +143,21 @@ services:
       retries: 5
 
   db:
-    # docker.io/pgvector/pgvector:pg16 is a drop-in replacement for postgres:16
+    # docker.io/pgvector/pgvector:pg18 is a drop-in replacement for postgres:18
     # that bundles the pgvector extension, required by the agents
     # knowledge-base (RAG) migration introduced in v0.11.0.
-    image: ${DB_IMAGE:-docker.io/pgvector/pgvector:pg16}
+    image: ${DB_IMAGE:-docker.io/pgvector/pgvector:pg18}
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: securo
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # PostgreSQL 18 images keep their data in /var/lib/postgresql/18/docker
+      # and refuse to start with a volume at /var/lib/postgresql/data. A
+      # volume from PostgreSQL 16 or older holds its data at its root: dump
+      # and restore it into a new volume (or pg_upgrade) before switching.
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s

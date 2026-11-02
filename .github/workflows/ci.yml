@@ -93,7 +93,7 @@ jobs:
         group: [1, 2, 3, 4]
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_USER: securo_test
           POSTGRES_PASSWORD: securo_test
