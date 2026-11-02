@@ -35,7 +35,9 @@ from sqlalchemy import text
 from app.providers.enable_banking import EnableBankingProvider
 
 revision = "102"
-down_revision = "101"
+# Fork: after the fork chain's last migration (f023, which follows 101), so
+# the chain stays one line.
+down_revision = "f023"
 branch_labels = None
 depends_on = None
 
