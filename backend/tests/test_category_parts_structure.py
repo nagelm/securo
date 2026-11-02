@@ -38,6 +38,9 @@ WHOLE_ROW: dict[tuple[str, str], str] = {
         "owner and viewer group-split offsets",
     ("app/services/category_statement_service.py", "get_category_statement"):
         "owner and member group-split offsets",
+    # Fork: a loan's monthly principal and interest, judged row by row.
+    ("app/services/loan_summary.py", "get_loan_summary"):
+        "loan account rows: each row is principal or interest as a whole",
 }
 
 

@@ -9,7 +9,7 @@ from app.core.workspace_context import (
     current_workspace,
     current_writable_workspace,
 )
-from app.schemas.asset_group import AssetGroupCreate, AssetGroupRead, AssetGroupUpdate
+from app.schemas.asset_group import AssetGroupCreate, AssetGroupOrderUpdate, AssetGroupRead, AssetGroupUpdate
 from app.services import asset_group_service
 
 router = APIRouter(prefix="/api/asset-groups", tags=["asset-groups"])
@@ -30,6 +30,22 @@ async def create_group(
     session: AsyncSession = Depends(get_async_session),
 ):
     return await asset_group_service.create_group(session, ctx.workspace.id, ctx.user_id, data)
+
+
+@router.put("/order", status_code=status.HTTP_204_NO_CONTENT)
+async def reorder_groups(
+    payload: AssetGroupOrderUpdate,
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Fork: put the named wallets in this order, in the places they hold."""
+    try:
+        await asset_group_service.reorder_groups(session, ctx.workspace.id, payload.group_ids)
+    except asset_group_service.GroupOrderError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except asset_group_service.GroupNotFound as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    await session.commit()
 
 
 @router.patch("/{group_id}", response_model=AssetGroupRead)

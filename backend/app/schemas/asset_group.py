@@ -1,7 +1,7 @@
 import uuid
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AssetGroupBase(BaseModel):
@@ -20,6 +20,12 @@ class AssetGroupUpdate(BaseModel):
     icon: Optional[str] = None
     color: Optional[str] = None
     position: Optional[int] = None
+
+
+class AssetGroupOrderUpdate(BaseModel):
+    """Fork: wallet ids in the order the user wants them."""
+
+    group_ids: list[uuid.UUID] = Field(min_length=1)
 
 
 class AssetGroupRead(AssetGroupBase):

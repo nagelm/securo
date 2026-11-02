@@ -46,6 +46,9 @@ function asset(currency: string): Asset {
     group_id: null, ticker: null, ticker_exchange: null, last_price: null, last_price_at: null,
     logo_url: null, provider_value_date: null, average_price: null, total_invested: null,
     realized_gain: null, transaction_count: 0,
+    // Fork: loans secured on the asset.
+    linked_loan_ids: [], linked_loans: [], linked_debt: null, linked_debt_primary: null,
+    equity: null, equity_primary: null,
   }
 }
 

@@ -4,9 +4,9 @@ import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
 import { useQuery } from '@tanstack/react-query'
 import { transactions as transactionsApi, dashboard, admin } from '@/lib/api'
 import { AlertTriangle, Clock, Info, Paperclip, X } from 'lucide-react'
-import { CategoryIcon } from '@/components/category-icon'
 import { TransactionCategoryIcon } from '@/components/category-lines-display'
 import { isSplitByCategory } from '@/lib/category-lines'
+import { PayeeIcon } from '@/components/payee-icon'
 import { ProjectedTransactionBadge } from '@/components/projected-transaction-badge'
 import { sumDrillDownTotals } from '@/lib/drill-down-totals'
 import { hasOpenDialog, isInsideOverlayLayer } from '@/lib/overlay-layers'
@@ -56,6 +56,8 @@ type DisplayItem = {
   categoryIcon: string | null
   categoryName: string | null
   categoryColor: string | null
+  payeeIcon: string | null
+  payeeLogoUrl: string | null
   isProjected: boolean
   isPending: boolean
   attachmentCount: number
@@ -184,6 +186,8 @@ export function TransactionDrillDown({
         categoryIcon: (matchedLine?.category ?? tx.category)?.icon ?? null,
         categoryName: (matchedLine?.category ?? tx.category)?.name ?? null,
         categoryColor: (matchedLine?.category ?? tx.category)?.color ?? null,
+        payeeIcon: tx.payee_icon ?? null,
+        payeeLogoUrl: tx.payee_logo_url ?? null,
         isProjected: false,
         isPending: tx.status === 'pending',
         attachmentCount: tx.attachment_count ?? 0,
@@ -230,6 +234,8 @@ export function TransactionDrillDown({
           categoryIcon: null,
           categoryName: null,
           categoryColor: null,
+          payeeIcon: null,
+          payeeLogoUrl: null,
           isProjected: true,
           isPending: false,
           attachmentCount: 0,
@@ -252,6 +258,8 @@ export function TransactionDrillDown({
           categoryIcon: matchedParts[0].category_icon,
           categoryName: matchedParts[0].category_name,
           categoryColor: matchedParts[0].category_color,
+          payeeIcon: null,
+          payeeLogoUrl: null,
           isProjected: true,
           isPending: false,
           attachmentCount: 0,
@@ -272,6 +280,8 @@ export function TransactionDrillDown({
         categoryIcon: pt.category_icon,
         categoryName: pt.category_name,
         categoryColor: pt.category_color ?? null,
+        payeeIcon: null,
+        payeeLogoUrl: null,
         isProjected: true,
         isPending: false,
         attachmentCount: 0,
@@ -415,9 +425,11 @@ export function TransactionDrillDown({
                   {item.transaction && isSplitByCategory(item.transaction) && item.partOf == null ? (
                     <TransactionCategoryIcon tx={item.transaction} size="lg" />
                   ) : (
-                    <CategoryIcon
-                      icon={item.categoryIcon}
-                      color={item.categoryColor}
+                    <PayeeIcon
+                      icon={item.payeeIcon}
+                      logoUrl={item.payeeLogoUrl}
+                      fallbackIcon={item.categoryIcon}
+                      fallbackColor={item.categoryColor}
                       size="lg"
                     />
                   )}

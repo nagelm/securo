@@ -99,6 +99,8 @@ function account(overrides: Partial<Account>): Account {
     card_brand: null,
     card_level: null,
     shared_balance_group: null,
+    secured_asset_id: null,
+    loan_details: null,
     is_closed: false,
     closed_at: null,
     ...overrides,

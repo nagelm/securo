@@ -47,6 +47,7 @@ import { BudgetSpendingProgress } from '@/components/budget-spending-progress'
 import { CategoryIcon } from '@/components/category-icon'
 import { CategorySplitBadge, TransactionCategoryIcon } from '@/components/category-lines-display'
 import { isSplitByCategory, projectedSplitSource } from '@/lib/category-lines'
+import { PayeeIcon } from '@/components/payee-icon'
 import { AccountIcon } from '@/components/account-icon'
 import { TransactionDrillDown, type DrillDownFilter } from '@/components/transaction-drill-down'
 import { TransactionDialog, type TransactionSavePayload } from '@/components/transaction-dialog'
@@ -662,6 +663,8 @@ export default function DashboardPage() {
     categoryIcon: string | null
     categoryName: string | null
     categoryColor: string | null
+    payeeIcon: string | null
+    payeeLogoUrl: string | null
     accountId: string | null
     isProjected: boolean
     attachmentCount: number
@@ -717,6 +720,8 @@ export default function DashboardPage() {
         categoryIcon: tx.category?.icon ?? null,
         categoryName: tx.category?.name ?? null,
         categoryColor: tx.category?.color ?? null,
+        payeeIcon: tx.payee_icon ?? null,
+        payeeLogoUrl: tx.payee_logo_url ?? null,
         accountId: tx.account_id ?? null,
         isProjected: false,
         attachmentCount: tx.attachment_count ?? 0,
@@ -747,6 +752,8 @@ export default function DashboardPage() {
         categoryIcon: pt.category_icon,
         categoryName: pt.category_name,
         categoryColor: pt.category_color ?? null,
+        payeeIcon: null,
+        payeeLogoUrl: null,
         accountId: pt.account_id,
         isProjected: true,
         attachmentCount: 0,
@@ -1563,7 +1570,7 @@ export default function DashboardPage() {
                         <div className="shrink-0">
                           {row.splitSource
                             ? <TransactionCategoryIcon tx={row.splitSource} size="md" />
-                            : <CategoryIcon icon={row.categoryIcon} color={row.categoryColor} size="md" />}
+                            : <PayeeIcon icon={row.payeeIcon} logoUrl={row.payeeLogoUrl} fallbackIcon={row.categoryIcon} fallbackColor={row.categoryColor} size="md" />}
                         </div>
 
                         {/* Content */}
@@ -1683,7 +1690,7 @@ export default function DashboardPage() {
                             <div className="flex items-center gap-3">
                               {row.splitSource
                                 ? <TransactionCategoryIcon tx={row.splitSource} size="lg" />
-                                : <CategoryIcon icon={row.categoryIcon} color={row.categoryColor} size="lg" />}
+                                : <PayeeIcon icon={row.payeeIcon} logoUrl={row.payeeLogoUrl} fallbackIcon={row.categoryIcon} fallbackColor={row.categoryColor} size="lg" />}
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
                                   <p className="text-sm font-semibold text-foreground truncate">{row.description}</p>

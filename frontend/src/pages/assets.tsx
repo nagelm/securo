@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useId } from 'react'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -68,6 +69,9 @@ import { getAssetValuePrimary, getPortfolioShare, getPortfolioTotalPrimary } fro
 import { formatTransactionTotal, getTransactionTotalCurrency } from '@/lib/asset-transaction-total'
 import { MAX_SPLIT_UNITS, canRecordSplit, formatSplitRatio, parseSplitUnits } from '@/lib/asset-split'
 import { formatCurrency } from '@/lib/format'
+import { AssetEquityLine } from '@/components/asset-equity-summary'
+import { SortableAccountList } from '@/components/sortable-account-list'
+import { reorderWallets } from '@/lib/wallet-order'
 
 // Renders a logo image when one is available, falling back to the asset's
 // type-based Lucide icon on missing URL or broken image. Uses the type's
@@ -322,6 +326,10 @@ export default function AssetsPage() {
     const allowed = new Set(activeWalletIds)
     return (rawAssetsList ?? []).filter((a) => a.group_id && allowed.has(a.group_id))
   }, [rawAssetsList, activeWalletIds])
+  // Deleting an asset unlinks the loans secured against it; the dialog says how many.
+  const deletingLinkedLoanCount = deletingId
+    ? (rawAssetsList ?? []).find((a) => a.id === deletingId)?.linked_loans?.length ?? 0
+    : 0
 
   const exchangeRatesNeedSetup = useExchangeRatesNeedSetup(assetsList, userCurrency)
 
@@ -426,6 +434,8 @@ export default function AssetsPage() {
     mutationFn: (id: string) => assets.delete(id),
     onSuccess: () => {
       refetchAssetViews()
+      // Loans secured against the asset were unlinked.
+      if (deletingLinkedLoanCount > 0) queryClient.invalidateQueries({ queryKey: ['accounts'] })
       setDeletingId(null)
       if (expandedId === deletingId) setExpandedId(null)
       toast.success(t('assets.deleted'))
@@ -532,6 +542,23 @@ export default function AssetsPage() {
       toast.success(t('assets.walletUpdated'))
     },
     onError: (e) => toast.error(assetErrorMessage(e, t('common.error'))),
+  })
+
+  // Fork: the user's own wallet order. The list is reordered in the cache at
+  // once and refetched after the save (or put back if it fails).
+  const reorderWalletsMutation = useMutation({
+    mutationFn: (ids: string[]) => assetGroups.reorder(ids),
+    onMutate: async (ids: string[]) => {
+      await queryClient.cancelQueries({ queryKey: ['asset-groups'] })
+      const previous = queryClient.getQueryData<AssetGroup[]>(['asset-groups'])
+      if (previous) queryClient.setQueryData<AssetGroup[]>(['asset-groups'], reorderWallets(previous, ids))
+      return { previous }
+    },
+    onError: (e, _ids, context) => {
+      if (context?.previous) queryClient.setQueryData(['asset-groups'], context.previous)
+      toast.error(assetErrorMessage(e, t('common.error')))
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['asset-groups'] }),
   })
 
   const deleteWalletMutation = useMutation({
@@ -871,6 +898,7 @@ export default function AssetsPage() {
     // screen, so the row just asks how old it is.
     const staleValueDate =
       isSynced && today ? getStaleProviderValueDate(asset, today) : null
+    const hasLinkedLoans = (asset.linked_loans?.length ?? 0) > 0
 
     return (
       <div key={asset.id} className="border-b border-border last:border-b-0">
@@ -921,7 +949,7 @@ export default function AssetsPage() {
                   <Badge variant="outline" className="text-[9px] px-1 py-0 text-rose-600 border-rose-200">{t('assets.sold')}</Badge>
                 )}
                 {isSynced && !isMarketPriced && (
-                  <Badge variant="outline" className="text-[9px] px-1 py-0 text-sky-600 border-sky-200">{t('assets.synced')}</Badge>
+                  <Badge variant="outline" className="text-[9px] px-1 py-0 text-sky-600 border-sky-200" title={asset.account_external_id ? t('assets.inAccountBalance') : undefined}>{t('assets.synced')}</Badge>
                 )}
               </div>
               <span className="text-[11px] text-muted-foreground truncate block">{asset.ticker && !asset.ticker.startsWith('TD:') ? asset.name : (asset.ticker?.startsWith('TD:') ? 'Tesouro Direto' : t(`assets.type${asset.type.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase()).replace(/^./, c => c.toUpperCase())}`))}</span>
@@ -1121,7 +1149,7 @@ export default function AssetsPage() {
     }
   }
 
-  function renderWalletSection(wallet: AssetGroup, walletAssets: Asset[]) {
+  function renderWalletSection(wallet: AssetGroup, walletAssets: Asset[], handle?: ReactNode) {
     const isCollapsed = collapsedWallets.has(wallet.id)
     const isSynced = wallet.source !== 'manual'
     // Sum in the user's primary currency. Fall back to the wallet's own
@@ -1152,6 +1180,7 @@ export default function AssetsPage() {
     return (
       <div key={wallet.id} className="space-y-2">
         <div className="flex items-center gap-3 px-1">
+          {handle}
           <button
             onClick={() => toggleWalletCollapse(wallet.id)}
             className="flex items-center gap-2 flex-1 min-w-0 group"
@@ -1332,7 +1361,15 @@ export default function AssetsPage() {
           {/* Wallets (active assets grouped) */}
           {(sortedWallets.length > 0 || ungroupedAssets.length > 0) && (
             <div className="space-y-4">
-              {sortedWallets.map(w => renderWalletSection(w, assetsByGroup.get(w.id) ?? []))}
+              <SortableAccountList
+                accounts={sortedWallets}
+                enabled={canWrite && !reorderWalletsMutation.isPending}
+                onReorder={(ids) => reorderWalletsMutation.mutate(ids)}
+                label={(w) => w.name}
+                renderRow={(w, controls) => (
+                  renderWalletSection(w, assetsByGroup.get(w.id) ?? [], controls.handle)
+                )}
+              />
 
               {ungroupedAssets.length > 0 && (
                 <div className="space-y-2">
@@ -1792,6 +1829,11 @@ export default function AssetsPage() {
           <p className="text-sm text-muted-foreground">{t('assets.confirmDelete')}</p>
           {assetsList?.find(a => a.id === deletingId)?.connection_id && (
             <p className="text-sm text-amber-600 dark:text-amber-400">{t('assets.confirmDeleteSynced')}</p>
+          )}
+          {deletingLinkedLoanCount > 0 && (
+            <p className="text-sm text-amber-600 dark:text-amber-400" role="note">
+              {t('assets.equity.deleteUnlinksLoans', { count: deletingLinkedLoanCount })}
+            </p>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeletingId(null)}>
