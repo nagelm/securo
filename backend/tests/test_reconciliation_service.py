@@ -655,3 +655,43 @@ async def test_a_single_bill_within_tolerance_is_not_suggested(
     await session.commit()
 
     assert await _pending_for(session, charge_id) == set()
+
+
+@pytest.mark.asyncio
+async def test_recurring_transfers_of_one_amount_are_not_offered_to_a_bank_row(
+    business_ws, session: AsyncSession, account, test_user
+):
+    """Two weekly transfers of the same amount, each to its own savings
+    account, fall due together. A bank row of that amount is a leg of a
+    transfer pair, and the pair's other account says which item it pays
+    (forecast_service.link_recurring_transfers), so asking which of the two
+    it is would be a question the pairing already answers."""
+    targets = []
+    for name in ("Holiday Pot", "Rainy Day Pot"):
+        target = Account(
+            id=uuid.uuid4(), user_id=test_user.id, workspace_id=account.workspace_id,
+            name=name, type="savings", currency="USD", balance=Decimal("0"),
+        )
+        session.add(target)
+        targets.append(target)
+    await session.commit()
+    for target in targets:
+        await create_recurring_transaction(
+            session, account.workspace_id, test_user.id,
+            RecurringTransactionCreate(
+                description=f"To {target.name}", amount=Decimal("15.00"),
+                currency="USD", type="debit", frequency="weekly",
+                start_date=TODAY, account_id=account.id,
+                transfer_account_id=target.id,
+            ),
+        )
+    row = await a_transaction(
+        session, account, test_user, amount=Decimal("15.00"), kind="debit",
+        description="AP#000001 TO SAVINGS",
+    )
+    row_id = row.id
+
+    await reconciliation_service.match_incoming(session, account.workspace_id, [row])
+    await session.commit()
+
+    assert await _pending_for(session, row_id) == set()

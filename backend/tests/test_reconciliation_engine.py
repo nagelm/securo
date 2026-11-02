@@ -343,9 +343,13 @@ def test_a_weekly_bill_gets_a_narrower_window_so_it_cannot_take_its_neighbour():
 
 def test_an_unrelated_charge_of_the_same_amount_is_refused_on_description():
     """The amount alone is not enough for a recurring bill: two
-    subscriptions at R$89,90 on one account are ordinary."""
+    subscriptions at R$89,90 on one account are ordinary.
+
+    Three days late, so only the description rule's window reaches it: the
+    wording-blind rule stops at two days."""
     charge = Movement(
-        amount=Decimal("89.90"), currency="BRL", direction="debit", when=TODAY,
+        amount=Decimal("89.90"), currency="BRL", direction="debit",
+        when=TODAY + timedelta(days=3),
         description="POSTO IPIRANGA", account_id=ACCOUNT, source="sync",
     )
     decision = evaluate(

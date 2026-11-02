@@ -169,9 +169,11 @@ async def test_find_bill_rejects_currency_mismatch(session, test_user, test_work
 @pytest.mark.asyncio
 async def test_find_bill_rejects_low_similarity(session, test_user, test_workspace, account):
     await _make_bill(session, test_workspace, test_user, account)
+    # Three days late: inside the description rule's window, outside the
+    # two days the wording-blind rule allows.
     match = await rms.find_bill_for_incoming(
         session, test_user.id, account.id, Decimal("39.90"), "BRL", "debit",
-        date(2025, 1, 10), "Amazon Prime",
+        date(2025, 1, 13), "Amazon Prime",
     )
     assert match is None
 
@@ -503,9 +505,11 @@ async def test_generate_pending_description_mismatch_creates_placeholder(
     must NOT be swallowed as the bill's occurrence; a placeholder is written and
     the real charge is left untouched."""
     bill = await _make_bill(session, test_workspace, test_user, account)
+    # Three days after the occurrence: outside the two days in which the
+    # only charge of that amount is linked whatever its wording.
     unrelated = await _add_tx(
         session, test_user, test_workspace, account,
-        date=date(2025, 1, 10), source="sync", external_id="bank-x",
+        date=date(2025, 1, 13), source="sync", external_id="bank-x",
         description="Amazon Marketplace",
     )
     count = await generate_pending(session, test_user.id, up_to=date(2025, 1, 20))
@@ -584,6 +588,82 @@ async def test_unlink_recurring_noop_when_not_linked(session, test_user, test_wo
         session, tx.id, test_workspace.id
     )
     assert result is None  # nothing to unlink → 404 at the API layer
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_tolerance_rule_matches_a_bill_that_varies(session, test_user, test_workspace, account):
+    """Fork: a rule on the Rules page that accepts an amount within a
+    tolerance reaches the charges the exact-amount rules never see."""
+    from app.services import reconciliation_rule_service
+
+    bill = await _make_bill(session, test_workspace, test_user, account, description="Power")
+    charge = (session, test_user.id, account.id, Decimal("43.50"), "BRL", "debit", date(2025, 1, 10), "DD POWER CO")
+    assert await rms.find_bill_for_incoming(*charge) is None
+
+    await reconciliation_rule_service.upsert_override(
+        session, test_workspace.id, test_user.id, "reconciliation.match_recurring", "bill_only_candidate",
+        {"when": {"amount": {"match": "tolerance", "percent": "15"}}},
+    )
+    await session.commit()
+    match = await rms.find_bill_for_incoming(*charge)
+    assert match is not None and match.id == bill.id
+    tx = await _add_tx(session, test_user, test_workspace, account, amount=Decimal("43.50"), date=date(2025, 1, 10),
+                       description="DD POWER CO")
+    found = await rms.find_real_tx_for_occurrence(session, bill, date(2025, 1, 10))
+    assert found is not None and found.id == tx.id
+    # Outside the tolerance, still nothing.
+    far = (session, test_user.id, account.id, Decimal("60.00"), "BRL", "debit", date(2025, 1, 10), "DD POWER CO")
+    assert await rms.find_bill_for_incoming(*far) is None
+
+
+async def _payee(session, test_user, test_workspace, name):
+    from app.models.payee import Payee
+
+    payee = Payee(id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id, name=name)
+    session.add(payee)
+    await session.commit()
+    return payee
+
+
+@pytest.mark.asyncio
+async def test_a_bill_whose_amount_varies_links_on_its_payee(session, test_user, test_workspace, account):
+    """Fork: the shipped payee rule links a charge of a different amount
+    when it has the bill's payee and is the only bill that fits."""
+    power = await _payee(session, test_user, test_workspace, "Power Co")
+    other = await _payee(session, test_user, test_workspace, "Someone Else")
+    bill = await _make_bill(session, test_workspace, test_user, account, description="Power", payee_id=power.id)
+
+    def charge(amount, payee_id, when=date(2025, 1, 11)):
+        return rms.find_bill_for_incoming(
+            session, test_user.id, account.id, Decimal(amount), "BRL", "debit", when, "DD 0042", payee_id=payee_id,
+        )
+
+    match = await charge("52.10", power.id)
+    assert match is not None and match.id == bill.id
+    assert await charge("52.10", other.id) is None
+    assert await charge("52.10", None) is None
+    assert await charge("90.00", power.id) is None  # more than twice the bill
+    assert await charge("52.10", power.id, when=date(2025, 1, 20)) is None  # outside the window
+    # Two bills of that payee on the account: a question, not a link.
+    await _make_bill(session, test_workspace, test_user, account, description="Power (second meter)",
+                     payee_id=power.id, amount=Decimal("45.00"))
+    assert await charge("52.10", power.id) is None
+
+
+@pytest.mark.asyncio
+async def test_a_placeholder_whose_amount_varies_links_on_its_payee(session, test_user, test_workspace, account):
+    power = await _payee(session, test_user, test_workspace, "Power Co")
+    bill = await _make_bill(session, test_workspace, test_user, account, description="Power", payee_id=power.id)
+    placeholder = await _add_tx(session, test_user, test_workspace, account, date=date(2025, 1, 10),
+                                description="Power", source="recurring", external_id=None,
+                                recurring_transaction_id=bill.id)
+    placeholder.payee_id = power.id
+    await session.commit()
+
+    match = await rms.find_placeholder_for_incoming(
+        session, account.id, Decimal("47.00"), "BRL", "debit", date(2025, 1, 12), "DD 0042", payee_id=power.id,
+    )
+    assert match is not None and match.id == placeholder.id
 
 
 # ---------------------------------------------------------------------------

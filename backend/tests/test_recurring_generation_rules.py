@@ -305,7 +305,9 @@ async def test_a_renamed_placeholder_is_still_found_by_the_bills_wording(
     )).scalars().all()
     assert [row.id for row in rows] == [placeholder_id]
     assert rows[0].external_id == "gym-jan"
-    assert rows[0].description == "Academia"
+    # Fork (carry/14-recurring): the bank's row replaces the placeholder, so
+    # its wording after rules wins; the rule names only the bill's wording.
+    assert rows[0].description == "Gym membership Ltda"
 
 
 @pytest.mark.asyncio
@@ -341,6 +343,8 @@ async def test_a_later_template_edit_does_not_rename_an_older_occurrence(
             Transaction.source != "opening_balance",
         )
     )).scalars().all()
-    assert len(rows) == 2
-    assert placeholder_id in [row.id for row in rows]
-    assert "Electric utility" in [row.description for row in rows if row.id != placeholder_id]
+    # Fork (`placeholder_only_candidate`): the only placeholder on the
+    # account with the charge's exact amount, two days either side, takes the
+    # charge whatever its wording, so the renamed bill's charge lands on it.
+    assert [row.id for row in rows] == [placeholder_id]
+    assert rows[0].description == "Electric utility"

@@ -21,6 +21,8 @@ const api = vi.hoisted(() => ({
   categoryGroups: { list: vi.fn() },
   accounts: { list: vi.fn() },
   currencies: { list: vi.fn() },
+  // Fork: the recurring page also lists payees.
+  payees: { list: vi.fn(async () => []) },
   recurring: {
     list: vi.fn(),
     create: vi.fn(),
