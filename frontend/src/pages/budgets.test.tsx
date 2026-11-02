@@ -28,6 +28,7 @@ vi.mock('@/lib/api', () => ({
   budgets: api.budgets,
   categories: api.categories,
   categoryGroups: api.categoryGroups,
+  forecast: { budgetChoices: vi.fn(async () => ({ budget_ids: [], budget_group_ids: [] })) },
 }))
 
 vi.mock('@/hooks/use-display-locale', () => ({
