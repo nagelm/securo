@@ -83,6 +83,7 @@ import type {
   MarketSymbolMatch,
   MarketSymbolQuote,
   Attachment,
+  ContributionSuggestion,
   Goal,
   GoalSummary,
   DashboardSummary,
@@ -1396,6 +1397,17 @@ export const goals = {
   create: async (goal: Partial<Goal>): Promise<Goal> => {
     const { data } = await api.post('/goals', goal)
     return data
+  },
+  // Several goals in one request, all or none (quick setup).
+  createMany: async (items: Partial<Goal>[]): Promise<Goal[]> => {
+    const { data } = await api.post('/goals/bulk', { goals: items })
+    return data
+  },
+  // A periodic target read from what already pays into the account; null
+  // when nothing regular does.
+  contributionSuggestion: async (accountId: string): Promise<ContributionSuggestion | null> => {
+    const { data } = await api.get('/goals/contribution-suggestion', { params: { account_id: accountId } })
+    return data ?? null
   },
   update: async (id: string, goal: Partial<Goal>): Promise<Goal> => {
     const { data } = await api.patch(`/goals/${id}`, goal)

@@ -1110,11 +1110,52 @@ export interface AssetValue {
   source: string
 }
 
+// A goal's periodic contribution target recurs weekly, fortnightly
+// (`biweekly`, the recurring-transaction word) or monthly.
+export type ContributionPeriod = 'weekly' | 'biweekly' | 'monthly'
+
+export interface ContributionPeriodResult {
+  start: string
+  end: string
+  contributed: number
+  target: number
+  // met / over: target reached; short: a finished period that fell short;
+  // pending: the current period, not reached yet.
+  status: 'met' | 'over' | 'short' | 'pending'
+  current: boolean
+}
+
+export interface ContributionProgress {
+  period: ContributionPeriod
+  target: number
+  current: ContributionPeriodResult
+  history: ContributionPeriodResult[] // the last ten finished periods and the current one, oldest first
+  streak: number
+  // Ahead or behind the plan since money last left the account (its first
+  // deposit when it never has). All null while nothing has gone in or out.
+  since?: string | null
+  saved_since?: number | null
+  planned_since?: number | null
+  ahead_by?: number | null // saved_since - planned_since; negative: behind
+}
+
+export interface ContributionSuggestion {
+  amount: number
+  period: ContributionPeriod
+  currency: string
+  source: 'recurring' | 'history'
+  recurring_transaction_id: string | null
+  description: string | null
+}
+
 export interface Goal {
   id: string
   user_id: string
   name: string
-  target_amount: number
+  // Null for an ongoing savings goal that only has a periodic target.
+  target_amount: number | null
+  contribution_amount: number | null
+  contribution_period: ContributionPeriod | null
   current_amount: number
   currency: string
   target_amount_primary: number | null
@@ -1134,6 +1175,8 @@ export interface Goal {
   percentage: number
   monthly_contribution: number | null
   on_track: 'ahead' | 'on_track' | 'behind' | 'overdue' | 'achieved' | null
+  // Contributed vs the periodic target; only for a goal on an account.
+  contribution_progress: ContributionProgress | null
   account_name: string | null
   asset_name: string | null
   asset_group_name: string | null
@@ -1142,7 +1185,12 @@ export interface Goal {
 export interface GoalSummary {
   id: string
   name: string
-  target_amount: number
+  target_amount: number | null
+  contribution_amount: number | null
+  contribution_period: ContributionPeriod | null
+  period_contributed: number | null
+  period_status: ContributionPeriodResult['status'] | null
+  contribution_streak: number | null
   current_amount: number
   currency: string
   target_date: string | null

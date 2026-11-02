@@ -599,12 +599,16 @@ async def test_propose_create_goal(session: AsyncSession, ctx: CallContext):
     handler = REGISTRY["propose_create_goal"].handler
     r = await handler(
         session=session, ctx=ctx,
-        name="Viagem para o Japão", target_amount=10000, deadline="2026-12-31",
+        name="Viagem para o Japão", target_amount=10000, target_date="2026-12-31",
     )
     assert r["kind"] == "create_goal"
     assert r["proposed"]["target_amount"] == 10000.0
-    assert r["proposed"]["deadline"] == "2026-12-31"
-    assert r["proposed"]["initial_amount"] == 0.0
+    assert r["proposed"]["target_date"] == "2026-12-31"
+    assert r["proposed"]["current_amount"] == 0.0
+    # The proposal is the POST /api/goals body: only fields the API takes.
+    from app.schemas.goal import GoalCreate
+    assert set(r["proposed"]) <= set(GoalCreate.model_fields)
+    GoalCreate.model_validate(r["proposed"])
 
 
 async def test_propose_create_payee_rule_unknown_category(
@@ -1040,6 +1044,7 @@ async def test_propose_create_goal_external_apply_writes(
         select(Goal).where(Goal.id == uuid.UUID(result["id"]))
     )).scalar_one()
     assert row.name == "Travel fund"
+    assert row.target_amount is not None
     assert float(row.target_amount) == 10000.0
 
 
