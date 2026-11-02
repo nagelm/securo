@@ -25,6 +25,7 @@ from app.models.goal import Goal
 from app.models.collection import collection_accounts, collection_asset_groups
 from app.models.credit_card_bill import CreditCardBill
 from app.models.payee import Payee, PayeeMapping
+from app.models.rule import Rule
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.providers import get_provider
@@ -51,8 +52,12 @@ from app.services.asset_group_service import (
     ensure_group_for_connection,
 )
 from app.services.credit_card_service import apply_effective_date
-from app.services.rule_engine import merge_notes
-from app.services.rule_service import apply_rules_to_transaction, preview_rules_for_transaction
+from app.services.rule_engine import apply_rule_actions, evaluate_conditions, merge_notes
+from app.services.rule_service import (
+    apply_rules_to_transaction,
+    get_assignable_category_ids,
+    preview_rules_for_transaction,
+)
 from app.services.transfer_detection_service import detect_transfer_pairs
 from app.services.fx_rate_service import stamp_primary_amount
 from app.services.loan_details import is_revolving, merge_provider_details
@@ -1732,6 +1737,7 @@ async def handle_oauth_callback(
             session, connection.id, institution_cache, acc_data
         )
         account = Account(
+            **_new_loan_fields(acc_data),
             user_id=user_id,
             workspace_id=workspace_id,
             connection_id=connection.id,
@@ -2782,6 +2788,7 @@ async def sync_connection(
                 continue
 
             if account:
+                _sync_loan_fields(connection.provider, account, acc_data)
                 # Normalize the provider sign using the account's CURRENT type,
                 # which reflects any user override (sync never rewrites `type`).
                 # SimpleFIN reports card debt as negative under a "checking"
@@ -2846,6 +2853,7 @@ async def sync_connection(
             else:
                 is_cc = acc_data.type == "credit_card"
                 account = Account(
+                    **_new_loan_fields(acc_data),
                     user_id=user_id,
                     workspace_id=workspace_id,
                     connection_id=connection.id,
@@ -2969,6 +2977,7 @@ async def sync_connection(
                     # a re-sync can't revive a transaction the user hid.
                     if existing_tx.is_ignored:
                         continue
+                    raw_before = existing_tx.raw_data
                     _merge_sync_metadata(existing_tx, txn_data)
                     if existing_tx.status == "pending" and txn_data.status == "posted":
                         existing_tx.status = "posted"
@@ -2992,6 +3001,53 @@ async def sync_connection(
                             apply_effective_date(
                                 existing_tx, account, bill_due_date=bill.due_date
                             )
+                    # The bank edited the row after posting and the provider
+                    # kept its id: bring the bank-owned fields up to date.
+                    if edits_in_place and existing_tx.source == "sync":
+                        await apply_provider_edit(
+                            session,
+                            user_id=user_id,
+                            account=account,
+                            tx=existing_tx,
+                            txn_data=txn_data,
+                            incoming_currency=(
+                                txn_data.currency or acc_data.currency or user_currency
+                            ),
+                            account_currency=acc_data.currency or user_currency,
+                            user_currency=user_currency,
+                            bill_due_date=next(
+                                (
+                                    b.due_date
+                                    for b in bills_by_external_id.values()
+                                    if b.id == existing_tx.bill_id
+                                ),
+                                None,
+                            ),
+                        )
+                    # The provider can enrich a row after first sending it
+                    # (Akahu adds the merchant category later): a row still
+                    # uncategorized gets what a new row would get.
+                    if (
+                        existing_tx.category_id is None
+                        and existing_tx.transfer_pair_id is None
+                        and existing_tx.raw_data != raw_before
+                    ):
+                        await _fill_late_category(
+                            session, workspace_id, existing_tx, txn_data, use_provider_cats
+                        )
+                    # Likewise the merchant: a row that arrived without one
+                    # links the payee once the provider names it.
+                    if (
+                        existing_tx.payee_id is None
+                        and txn_data.payee
+                        and existing_tx.transfer_pair_id is None
+                        and existing_tx.raw_data != raw_before
+                    ):
+                        late_payee = await get_or_create_payee(
+                            session, user_id, txn_data.payee, workspace_id=workspace_id
+                        )
+                        _fill_payee_website(late_payee, txn_data)
+                        existing_tx.payee_id = late_payee.id
                     continue
 
                 # Pass 2: Fuzzy match against manual transactions
@@ -3120,17 +3176,18 @@ async def sync_connection(
                 # Normalize before recurring reconciliation. A generated
                 # placeholder is upgraded in place; otherwise the normalized
                 # candidate may fulfill an active definition, which advances so
-                # later generation cannot duplicate the occurrence.
-                placeholder = (
-                    await recurring_match_service.find_placeholder_for_incoming(
-                        session,
-                        account.id,
-                        txn_data.amount,
-                        incoming_currency,
-                        txn_data.type,
-                        txn_data.date,
-                        preview.description,
-                    )
+                # later generation cannot duplicate the occurrence. Fork: a
+                # pending charge takes its placeholder's place as well, and
+                # hands the link to its settled row (pending_rows).
+                placeholder = await recurring_match_service.find_placeholder_for_incoming(
+                    session,
+                    account.id,
+                    txn_data.amount,
+                    incoming_currency,
+                    txn_data.type,
+                    txn_data.date,
+                    preview.description,
+                    payee_id=sync_payee_id or preview.payee_id,
                 )
                 if placeholder:
                     if placeholder.is_ignored:
@@ -3166,6 +3223,14 @@ async def sync_connection(
                     )
                     if preview.is_ignored:
                         placeholder.is_ignored = True
+                    if plain_pending:
+                        remember_pending_defaults(placeholder, {
+                            "category_id": preview.category_id or category_id,
+                            "payee_id": sync_payee_id or preview.payee_id,
+                            "notes": preview.notes,
+                            "is_ignored": bool(preview.is_ignored),
+                            "exclude_from_pnl": False,
+                        })
                     merged_count += 1
                     continue
 
