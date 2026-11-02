@@ -14,12 +14,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.core.app_clock import app_today
+from app.core.currency import same_currency
 from app.core.shared_scope import in_bound_workspace, invited_group_member_ids
 from app.models.account import Account
 from app.models.category import Category
 from app.models.transaction import Transaction
 from app.models.transaction_category_line import TransactionCategoryLine
 
+
+
+def foreign_row_account_amount():
+    """SQL: what a row in another currency adds to its account's balance.
+
+    `amount_primary` remains only for rows with no rate for their account's
+    currency yet; it is a fallback, as the raw amount is after it.
+    """
+    return func.coalesce(
+        Transaction.amount_account, Transaction.amount_primary, Transaction.amount
+    )
+
+
+def row_account_amount(tx: Transaction, account_currency: str):
+    """The Python twin of `amount_in_account_currency`: an unconverted row in
+    another currency counts zero, not 1:1 (upstream #1302)."""
+    if same_currency(tx.currency, account_currency):
+        return tx.amount
+    return tx.amount_account or tx.amount_primary or 0
 
 def is_confirmed():
     """SQL filter: the charge is settled rather than merely authorized.
@@ -95,7 +115,8 @@ def amount_in_account_currency(account_currency):
             func.upper(Transaction.currency) == func.upper(account_currency),
             Transaction.amount,
         ),
-        else_=func.coalesce(Transaction.amount_primary, 0),
+        # Fork: the bank's own account-currency figure first (amount_account).
+        else_=func.coalesce(Transaction.amount_account, Transaction.amount_primary, 0),
     )
 
 

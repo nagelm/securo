@@ -18,6 +18,8 @@ from app.models.category import Category
 from app.models.recurring_transaction import RecurringTransaction
 from app.schemas.dashboard import DashboardSummary, SpendingByCategory, MonthlyTrend, ProjectedCategoryLine, ProjectedTransaction, DailyBalance, DailyBaseline, BalanceHistory
 from app.services._query_filters import (
+    foreign_row_account_amount,
+    row_account_amount,
     counts_as_user_pnl,
     line_amount,
     line_amount_primary,
@@ -1310,7 +1312,7 @@ def _signed_transaction_amount(tx: Transaction) -> float:
     amount = (
         tx.amount
         if same_currency(tx.currency, account_currency)
-        else (tx.amount_primary or 0)
+        else (tx.amount_account or tx.amount_primary or 0)
     )
     signed = amount if tx.type == "credit" else -amount
     return float(signed)

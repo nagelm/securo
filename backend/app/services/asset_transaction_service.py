@@ -695,6 +695,8 @@ async def delete_transaction(
             ),
         )
     _raise_if_too_large_to_store(others, asset)
+    # Fork: nor a buy that a later sell needs.
+    _raise_if_oversell(others)
     await session.delete(tx)
     await session.flush()
     await recompute_and_cache(session, asset)

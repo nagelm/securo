@@ -25,6 +25,7 @@ from app.models.transaction import Transaction
 from app.schemas.account import AccountCreate, AccountUpdate, LoanBalanceUpdate
 from app.services._query_filters import (
     amount_in_account_currency,
+    foreign_row_account_amount,
     counts_as_pnl,
     counts_in_current_balance,
     counts_on_bill,
@@ -1065,7 +1066,7 @@ async def get_account_summary(
     # reporting rework, not to the balance helpers, so leave it here.
     effective_amount = case(
         (Transaction.currency == account.currency, Transaction.amount),
-        else_=func.coalesce(Transaction.amount_primary, Transaction.amount),
+        else_=foreign_row_account_amount(),
     )
 
     # For bank-connected accounts, use the stored balance from the provider
@@ -1354,6 +1355,7 @@ async def get_account_summary(
             _scope(summary_select(func.coalesce(func.sum(func.abs(summary_amount)), 0)).where(
                 Transaction.account_id == account_id,
                 Transaction.type == "debit",
+                Transaction.source != "opening_balance",
                 bucket_date <= today,
                 Transaction.status == "posted",
                 summary_filter,
@@ -1395,6 +1397,7 @@ async def get_account_summary(
             _scope(summary_select(func.coalesce(func.sum(func.abs(summary_amount)), 0)).where(
                 Transaction.account_id == account_id,
                 Transaction.type == "debit",
+                Transaction.source != "opening_balance",
                 forecast_condition,
                 summary_filter,
             ))
