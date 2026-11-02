@@ -71,6 +71,7 @@ def _override_redis_with_counter(_mock_redis):
 
         pipe.zremrangebyscore = capture_key
         pipe.zcard = lambda *a: None
+        pipe.zrange = lambda *a, **kw: None
         pipe.zadd = lambda *a, **kw: None
         pipe.expire = lambda *a: None
 

@@ -28,7 +28,7 @@ async def login(
         raise HTTPException(status_code=400, detail="LOGIN_BAD_CREDENTIALS")
 
     available_methods = []
-    if user.is_2fa_enabled and user.totp_secret:
+    if user.is_2fa_enabled:
         available_methods.append("totp")
         # A passkey doubles as a second factor only when the user explicitly
         # enabled 2FA. On its own it is a passwordless login alternative —

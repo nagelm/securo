@@ -5,6 +5,7 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
+from app.core.file_types import download_response_args
 from app.core.workspace_context import (
     WorkspaceContext,
     current_workspace,
@@ -64,7 +65,7 @@ async def download_attachment(
 ):
     try:
         attachment, data = await attachment_service.download_attachment(
-            session, attachment_id, ctx.workspace.id
+            session, attachment_id, ctx.workspace.id, transaction_id
         )
     except FileNotFoundError:
         # The row is there and the bytes are not: storage was cleared or
@@ -76,11 +77,7 @@ async def download_attachment(
         )
     except LookupError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
-    return Response(
-        content=data,
-        media_type=attachment_service.served_content_type(attachment.filename),
-        headers={"Content-Disposition": f'inline; filename="{attachment.filename}"'},
-    )
+    return Response(content=data, **download_response_args(attachment.content_type, attachment.filename))
 
 
 @router.patch("/{attachment_id}", response_model=AttachmentRead)
@@ -93,7 +90,7 @@ async def rename_attachment(
 ):
     try:
         return await attachment_service.rename_attachment(
-            session, attachment_id, ctx.workspace.id, body.filename
+            session, attachment_id, ctx.workspace.id, transaction_id, body.filename
         )
     except LookupError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
@@ -109,6 +106,8 @@ async def delete_attachment(
     session: AsyncSession = Depends(get_async_session),
 ):
     try:
-        await attachment_service.delete_attachment(session, attachment_id, ctx.workspace.id)
+        await attachment_service.delete_attachment(
+            session, attachment_id, ctx.workspace.id, transaction_id
+        )
     except LookupError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")

@@ -465,7 +465,9 @@ async def test_a_file_already_stored_with_a_claimed_type_is_served_by_its_extens
     resp = await client.get(
         f"/api/invoices/{invoice['id']}/attachments/{attachment['id']}", headers=biz_headers
     )
-    assert resp.headers["content-type"] == "application/pdf"
+    # Fork: a stored type that is not a safe inline one downloads as bytes.
+    assert resp.headers["content-type"] == "application/octet-stream"
+    assert resp.headers["content-disposition"].startswith("attachment;")
 
 
 @pytest.mark.asyncio

@@ -46,7 +46,9 @@ export default function LoginPage() {
   const { resolvedTheme } = useTheme()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  const [error, setError] = useState(() =>
+    new URLSearchParams(window.location.search).has('reauth') ? t('auth.reauthRequired') : ''
+  )
   const [isLoading, setIsLoading] = useState(false)
   const [isPasskeyLoading, setIsPasskeyLoading] = useState(false)
   const [passkeySupported] = useState(isPasskeySupported)

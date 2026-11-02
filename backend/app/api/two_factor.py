@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import current_active_user, get_jwt_strategy
+from app.core.auth import current_active_user, get_jwt_strategy, require_recent_login
 from app.core.auth_policy import require_local_auth_enabled
 from app.core.database import get_async_session
 from app.core.rate_limit import login_rate_limit
@@ -52,7 +52,7 @@ def _parse_temp_token_payload(raw: str | bytes) -> dict[str, object] | None:
 @router.post(
     "/2fa/setup",
     response_model=TwoFactorSetupResponse,
-    dependencies=[Depends(require_local_auth_enabled)],
+    dependencies=[Depends(require_local_auth_enabled), Depends(require_recent_login)],
 )
 async def setup_2fa(
     user: User = Depends(current_active_user),

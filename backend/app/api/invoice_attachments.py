@@ -13,12 +13,12 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
+from app.core.file_types import download_response_args
 from app.core.module_gate import require_module, require_module_write
 from app.services.module_service import ModuleId
 from app.core.workspace_context import WorkspaceContext
 from app.schemas.invoice import InvoiceAttachmentRead, InvoiceAttachmentUpdate
 from app.services import invoice_attachment_service
-from app.services.attachment_service import served_content_type
 
 router = APIRouter(
     prefix="/api/invoices/{invoice_id}/attachments", tags=["invoices"]
@@ -96,11 +96,7 @@ async def download_attachment(
         )
     except LookupError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
-    return Response(
-        content=data,
-        media_type=served_content_type(attachment.filename),
-        headers={"Content-Disposition": f'inline; filename="{attachment.filename}"'},
-    )
+    return Response(content=data, **download_response_args(attachment.content_type, attachment.filename))
 
 
 @router.patch("/{attachment_id}", response_model=InvoiceAttachmentRead)

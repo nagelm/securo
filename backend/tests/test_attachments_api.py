@@ -499,10 +499,13 @@ async def test_download_serves_the_extension_type_not_the_claimed_one(
             headers=auth_headers,
             files={"file": ("receipt.pdf", b"<script>1</script>", "text/html")},
         )
-        assert upload_resp.json()["content_type"] == "application/pdf"
+        # Fork: the stored type comes from the bytes, and HTML is no PDF.
+        assert upload_resp.json()["content_type"] == "application/octet-stream"
 
         response = await client.get(
             f"/api/transactions/{txn.id}/attachments/{upload_resp.json()['id']}",
             headers=auth_headers,
         )
-    assert response.headers["content-type"] == "application/pdf"
+    assert response.headers["content-type"] == "application/octet-stream"
+    assert response.headers["content-disposition"].startswith("attachment;")
+    assert response.headers["x-content-type-options"] == "nosniff"

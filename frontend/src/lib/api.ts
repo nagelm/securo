@@ -156,6 +156,10 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       localStorage.removeItem('token')
       window.location.href = '/login'
+    } else if (error.response?.status === 403 && error.response.data?.detail === 'REAUTH_REQUIRED') {
+      // A change to how the account signs in needs a recent login.
+      localStorage.removeItem('token')
+      window.location.href = '/login?reauth=1'
     }
     return Promise.reject(error)
   }

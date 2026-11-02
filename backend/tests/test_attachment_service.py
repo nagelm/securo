@@ -190,14 +190,14 @@ async def test_download_attachment(session: AsyncSession, test_user, test_worksp
     mock_storage = AsyncMock()
     mock_storage.download = AsyncMock(return_value=b"pdf-bytes")
     with patch("app.services.attachment_service.get_storage_provider", return_value=mock_storage):
-        result_att, data = await download_attachment(session, att.id, test_workspace.id)
+        result_att, data = await download_attachment(session, att.id, test_workspace.id, txn_for_attach.id)
     assert data == b"pdf-bytes"
     assert result_att.filename == "dl.pdf"
 
 
 async def test_download_attachment_not_found(session: AsyncSession, test_user, test_workspace):
     with pytest.raises(LookupError, match="not found"):
-        await download_attachment(session, uuid.uuid4(), test_workspace.id)
+        await download_attachment(session, uuid.uuid4(), test_workspace.id, uuid.uuid4())
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +213,7 @@ async def test_rename_preserves_extension(session: AsyncSession, test_user, test
     session.add(att)
     await session.commit()
 
-    result = await rename_attachment(session, att.id, test_workspace.id, "newname.txt")
+    result = await rename_attachment(session, att.id, test_workspace.id, txn_for_attach.id, "newname.txt")
     # Original extension .pdf should be preserved
     assert result.filename == "newname.pdf"
 
@@ -226,13 +226,13 @@ async def test_rename_same_extension(session: AsyncSession, test_user, test_work
     session.add(att)
     await session.commit()
 
-    result = await rename_attachment(session, att.id, test_workspace.id, "renamed.pdf")
+    result = await rename_attachment(session, att.id, test_workspace.id, txn_for_attach.id, "renamed.pdf")
     assert result.filename == "renamed.pdf"
 
 
 async def test_rename_not_found(session: AsyncSession, test_user, test_workspace):
     with pytest.raises(LookupError, match="not found"):
-        await rename_attachment(session, uuid.uuid4(), test_workspace.id, "x.pdf")
+        await rename_attachment(session, uuid.uuid4(), test_workspace.id, uuid.uuid4(), "x.pdf")
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +250,7 @@ async def test_delete_attachment(session: AsyncSession, test_user, test_workspac
 
     mock_storage = AsyncMock()
     with patch("app.services.attachment_service.get_storage_provider", return_value=mock_storage):
-        await delete_attachment(session, att.id, test_workspace.id)
+        await delete_attachment(session, att.id, test_workspace.id, txn_for_attach.id)
     mock_storage.delete.assert_called_once_with("del/key")
 
 
@@ -258,7 +258,7 @@ async def test_delete_attachment_not_found(session: AsyncSession, test_user, tes
     mock_storage = AsyncMock()
     with patch("app.services.attachment_service.get_storage_provider", return_value=mock_storage):
         with pytest.raises(LookupError, match="not found"):
-            await delete_attachment(session, uuid.uuid4(), test_workspace.id)
+            await delete_attachment(session, uuid.uuid4(), test_workspace.id, uuid.uuid4())
 
 
 # ---------------------------------------------------------------------------

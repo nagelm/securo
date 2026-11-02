@@ -51,6 +51,7 @@ dependencies = [
     # S3-compatible attachment storage. Only imported when STORAGE_PROVIDER=s3,
     # so installs on local storage pay nothing at runtime (ADR 0019).
     "aiobotocore>=2.21.0",
+    "regex>=2026.9.29",
 ]
 
 [project.optional-dependencies]

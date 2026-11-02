@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -62,10 +63,11 @@ async def create_connect_token(
         return ConnectTokenResponse(**token_data)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
+        logger.exception("Failed to create connect token")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create connect token: {str(e)}",
+            detail="Failed to create connect token",
         )
 
 
@@ -118,10 +120,11 @@ async def list_provider_institutions(
         return await connection_service.list_provider_institutions(provider, country, session=session)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
+        logger.exception("Failed to load institutions")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to load institutions: {str(e)}",
+            detail="Failed to load institutions",
         )
 
 
@@ -162,10 +165,11 @@ async def oauth_callback(
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
+        logger.exception("Failed to connect")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to connect: {str(e)}",
+            detail="Failed to connect",
         )
 
 
@@ -186,10 +190,11 @@ async def get_reauth_url(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except NotImplementedError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
+        logger.exception("Failed to build reauth URL")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to build reauth URL: {str(e)}",
+            detail="Failed to build reauth URL",
         )
 
 
@@ -239,10 +244,11 @@ async def sync_connection(
         raise HTTPException(status_code=status.HTTP_410_GONE, detail=str(e))
     except ProviderNotConfiguredError as e:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
-    except Exception as e:
+    except Exception:
+        logger.exception("Sync failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Sync failed: {str(e)}",
+            detail="Sync failed",
         )
 
 
@@ -278,10 +284,11 @@ async def get_reconnect_token(
             connection.provider, ctx.user_id, item_id=item_id, session=session
         )
         return ReconnectTokenResponse(**token_data)
-    except Exception as e:
+    except Exception:
+        logger.exception("Failed to create reconnect token")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create reconnect token: {str(e)}",
+            detail="Failed to create reconnect token",
         )
 
 

@@ -1,6 +1,7 @@
 import time
 from collections.abc import Callable
 from uuid import uuid4
+from math import ceil
 
 from fastapi import HTTPException, Request
 from redis.exceptions import RedisError
@@ -81,12 +82,22 @@ class RateLimiter:
             pipe = r.pipeline()
             pipe.zremrangebyscore(key, 0, window_start)
             pipe.zcard(key)
-            # A unique member per request: keyed by the timestamp, two requests
-            # that share a float value would land on the same member and the
-            # window would count them as one.
-            pipe.zadd(key, {uuid4().hex: now})
-            pipe.expire(key, self.window_seconds)
+            # Fork: the oldest recorded request, which says when a refused
+            # caller may try again.
+            pipe.zrange(key, 0, 0, withscores=True)
             results = await pipe.execute()
+
+            request_count = results[1]
+            oldest = results[2] if len(results) > 2 else None
+            if request_count < limit:
+                # Fork: only an allowed request is recorded, so retrying while
+                # locked out doesn't push the wait back. A unique member per
+                # request: two requests sharing a float timestamp would
+                # otherwise count as one.
+                record = r.pipeline()
+                record.zadd(key, {uuid4().hex: now})
+                record.expire(key, self.window_seconds)
+                await record.execute()
         except RedisError as exc:
             # The window lives in Redis. With it unreachable nothing can be
             # counted, and failing open would drop the protection exactly when
@@ -101,10 +112,10 @@ class RateLimiter:
                 detail="Rate limit unavailable",
             ) from exc
 
-        request_count = results[1]
-
         if request_count >= limit:
             retry_after = self.window_seconds
+            if isinstance(oldest, list) and oldest:
+                retry_after = max(1, ceil(oldest[0][1] + self.window_seconds - now))
             raise HTTPException(
                 status_code=429,
                 detail="Too many requests",
