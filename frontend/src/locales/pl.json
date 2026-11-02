@@ -133,7 +133,9 @@
     "documentation": "Dokumentacja",
     "collapseSidebar": "Zwiń pasek boczny",
     "expandSidebar": "Rozwiń pasek boczny",
-    "collections": "Kolekcje"
+    "collections": "Kolekcje",
+    "forecast": "Forecast",
+    "insights": "Wnioski"
   },
   "invoices": {
     "title": "Invoices",
@@ -819,7 +821,8 @@
     "deletePasskey": "Usuń klucz dostępu",
     "passkeyCreated": "Utworzono",
     "passkeyLastUsed": "Ostatnio użyty",
-    "passkeyNeverUsed": "Nigdy"
+    "passkeyNeverUsed": "Nigdy",
+    "reauthRequired": "For your security, please sign in again to make that change."
   },
   "dashboard": {
     "title": "Pulpit",
@@ -1211,7 +1214,14 @@
     "invoiceBadgeTooltip": "Ta transakcja rozlicza fakturę. Otwórz ją.",
     "suggestionBadge": "Pytanie",
     "suggestionBadgeTooltip": "Płatność może opłacić tę fakturę. Otwórz kolejkę, aby odpowiedzieć.",
-    "clearGroupFilter": "Wyczyść filtr grupy"
+    "clearGroupFilter": "Wyczyść filtr grupy",
+    "transferPillFrom": "From",
+    "transferPillTo": "To",
+    "transferPillLabel": "Transfer from {{from}} to {{to}}",
+    "transferLegOut": "Out of {{account}}",
+    "transferLegIn": "Into {{account}}",
+    "transferLegInDate": "Received {{date}}",
+    "selectTransferPair": "Select both sides of this transfer"
   },
   "accounts": {
     "title": "Konta",
@@ -1391,7 +1401,18 @@
       },
       "reconnectTitle": "Połącz ponownie za pomocą nowego tokenu",
       "reconnectDescription": "Wklej nowy token konfiguracji, aby odświeżyć to połączenie bez jego usuwania. Istniejące konta, transakcje, kategorie i reguły zostaną zachowane.",
-      "reconnect": "Połącz ponownie"
+      "reconnect": "Połącz ponownie",
+      "akahu": {
+        "title": "Connect via Akahu",
+        "description": "Uses an Akahu personal app: 1 user, restricted to your own Akahu account. You can get your App + User tokens by signing into Akahu and going to the \"Developers\" page.",
+        "openBridge": "Open the Akahu Developers page",
+        "userTokenLabel": "User Access Token",
+        "appTokenLabel": "App ID Token",
+        "tokenHelp": "Akahu requires both on every request: the User Access Token in the Authorization header and the App ID Token in the X-Akahu-Id header. Securo stores them encrypted.",
+        "reconnectTitle": "Reconnect Akahu",
+        "reconnectDescription": "Akahu has lost access to one of your banks, or no longer accepts these tokens. If a bank shows as disconnected in your Akahu connections, reconnect it there: Securo picks it up at the next sync and clears this warning. To replace your tokens, paste new ones below.",
+        "openConnections": "Open your Akahu connections"
+      }
     },
     "providers": {
       "pluggy": {
@@ -1402,6 +1423,9 @@
       },
       "simplefin": {
         "description": "Banki w USA i międzynarodowe przez SimpleFIN Bridge"
+      },
+      "akahu": {
+        "description": "New Zealand banks, cards and KiwiSaver via an Akahu Personal App"
       }
     },
     "reconnected": "Bank połączony ponownie",
@@ -1409,6 +1433,18 @@
       "active": "Aktywne",
       "error": "Błąd",
       "expired": "Wygasłe"
+    },
+    "moveUp": "Przenieś w górę",
+    "moveDown": "Przenieś w dół",
+    "dragToReorder": "Przeciągnij, aby zmienić kolejność: {{name}}",
+    "showOlder": "Pokaż {{count}} starszych",
+    "loan": {
+      "type": "Loan",
+      "linkedAsset": "Linked asset",
+      "linkedAssetNone": "None",
+      "linkedAssetHint": "The asset this loan is secured against, such as the house for a mortgage.",
+      "amountOwed": "Amount owed",
+      "amountOwedHint": "Enter what you owe as a positive number. It shows as a negative balance."
     }
   },
   "loans": {
@@ -1445,7 +1481,97 @@
     "adjustPreviewFell": "Dług spadł o {{amount}}: saldo zostanie poprawione bez liczenia jako przychód.",
     "adjustPreviewMatches": "Saldo już zgadza się z bankiem.",
     "adjustRecorded": "Saldo zaktualizowane: zapisano {{amount}}",
-    "adjustMatched": "Saldo już się zgadzało, nic nie zapisano"
+    "adjustMatched": "Saldo już się zgadzało, nic nie zapisano",
+    "summary": {
+      "title": "Loan",
+      "securedAgainst": "Secured against",
+      "equity": "Equity",
+      "syncedNote": "Payments and interest come from your bank.",
+      "providerDetails": "Loan details",
+      "last12Months": "Last 12 months",
+      "noActivity": "No payments or interest in the last 12 months.",
+      "month": "Month",
+      "paid": "Paid",
+      "interest": "Interest",
+      "principal": "Principal",
+      "total": "Total",
+      "payments": "Recorded payments"
+    },
+    "details": {
+      "edit": "Edit details",
+      "editTitle": "Loan details",
+      "hint": "For your reference only. Balances, reports and forecasts don't use these.",
+      "syncedHint": "For your reference only. Each sync replaces the values your bank sends and keeps the rest.",
+      "empty": "No details yet.",
+      "saved": "Loan details saved",
+      "notSet": "Not set",
+      "clearDate": "Clear date",
+      "yes": "Yes",
+      "no": "No",
+      "sectionInterest": "Interest",
+      "sectionTerm": "Amount and term",
+      "sectionRepayment": "Repayments",
+      "purpose": "Purpose",
+      "loanType": "Repayment type",
+      "creditLimit": "Credit limit",
+      "creditLimitHint": "How much you can draw on this revolving loan. For your reference only: balances, reports and forecasts don't use it.",
+      "interestRate": "Interest rate",
+      "interestType": "Rate type",
+      "rateExpiresAt": "Rate fixed until",
+      "interestOnly": "Interest only",
+      "interestOnlyExpiresAt": "Interest only until",
+      "initialPrincipal": "Original loan amount",
+      "term": "Term",
+      "termYearsLabel": "Term (years)",
+      "termMonthsLabel": "Term (months)",
+      "termYears_one": "{{count}} year",
+      "termYears_other": "{{count}} years",
+      "termMonths_one": "{{count}} month",
+      "termMonths_other": "{{count}} months",
+      "maturesAt": "Ends on",
+      "repaymentAmount": "Repayment amount",
+      "repaymentFrequency": "Repayment frequency",
+      "nextRepaymentDate": "Next repayment",
+      "purposes": {
+        "HOME": "Home",
+        "PERSONAL": "Personal",
+        "BUSINESS": "Business",
+        "UNKNOWN": "Unknown"
+      },
+      "loanTypes": {
+        "TABLE": "Table (equal repayments)",
+        "REDUCING": "Reducing (equal principal)",
+        "REVOLVING": "Revolving credit",
+        "UNKNOWN": "Unknown"
+      },
+      "interestTypes": {
+        "FIXED": "Fixed",
+        "FLOATING": "Floating"
+      },
+      "frequencies": {
+        "WEEKLY": "Weekly",
+        "FORTNIGHTLY": "Fortnightly",
+        "MONTHLY": "Monthly",
+        "QUARTERLY": "Quarterly",
+        "BIANNUALLY": "Twice a year",
+        "ANNUALLY": "Yearly"
+      },
+      "errors": {
+        "rate": "Enter a rate from 0 to 100.",
+        "amount": "Enter a positive amount.",
+        "years": "Enter whole years, up to 100.",
+        "months": "Enter whole months.",
+        "creditLimit": "Enter an amount of 0 or more."
+      }
+    },
+    "limit": {
+      "title": "Credit limit",
+      "limit": "Limit",
+      "owed": "Owed",
+      "available": "Available to draw",
+      "notSet": "No credit limit set.",
+      "notSetHint": "Add it under Edit details."
+    }
   },
   "connections": {
     "settings": "Ustawienia połączenia",
@@ -1505,7 +1631,32 @@
     "suggestCreate": "Utwórz budżety",
     "suggestCreated": "Utworzono {{count}} budżetów",
     "suggestEmpty": "Brak historii wydatków w wybranym okresie.",
-    "suggestError": "Nie udało się wczytać sugestii. Spróbuj ponownie za chwilę."
+    "suggestError": "Nie udało się wczytać sugestii. Spróbuj ponownie za chwilę.",
+    "untilOptional": "Until (optional)",
+    "untilLabel": "until {{month}}",
+    "groupsTitle": "Budget groups",
+    "groupsHint": "One cap over several categories: it limits their total without fixing how much each one spends. A category's own budget still shows on its own row.",
+    "addGroup": "Add budget group",
+    "editGroup": "Edit budget group",
+    "groupName": "Name",
+    "groupCap": "Cap",
+    "groupCategories": "Categories",
+    "groupsEmpty": "No budget groups for this month",
+    "groupCreated": "Budget group created",
+    "groupUpdated": "Budget group updated",
+    "groupDeleted": "Budget group deleted",
+    "confirmDeleteGroupTitle": "Delete budget group?",
+    "confirmDeleteGroupDescription": "The budget group \"{{name}}\" will be deleted. Its categories and their own budgets stay.",
+    "spentOf": "{{spent}} of {{cap}}",
+    "pickCategories": "Pick at least one category",
+    "noEnd": "No end month",
+    "clearEnd": "Clear",
+    "spent": "Spent",
+    "inForecast": "In forecast",
+    "forecastHint": "Include in forecast: in the months it covers, the Forecast's everyday spending follows this budget.",
+    "includeInForecastFor": "Include {{name}} in the forecast",
+    "categoryCount_one": "{{count}} category",
+    "categoryCount_other": "{{count}} categories"
   },
   "goals": {
     "title": "Cele",
@@ -1569,7 +1720,69 @@
     "trackingWallet": "Portfel",
     "wallet": "Portfel",
     "selectWallet": "Wybierz portfel",
-    "walletHint": "Śledź ten cel według łącznej wartości wszystkich aktywów w wybranym portfelu."
+    "walletHint": "Śledź ten cel według łącznej wartości wszystkich aktywów w wybranym portfelu.",
+    "savings": {
+      "totalTarget": "Total target (optional)",
+      "totalTargetHint": "Leave empty for an ongoing savings goal, such as a holiday fund.",
+      "contribution": "Regular contribution",
+      "contributionAmount": "Amount",
+      "contributionPeriod": "Every",
+      "periodNone": "No regular target",
+      "contributionHint": "Counts transfers in from your other accounts, minus transfers back out. Interest and fees are left out.",
+      "needsAccount": "Link an account to see what you contribute each period.",
+      "needTarget": "Enter a total target, a regular contribution, or both.",
+      "ongoing": "Ongoing",
+      "balance": "Balance {{amount}}",
+      "periodName": {
+        "weekly": "Week",
+        "biweekly": "Fortnight",
+        "monthly": "Month"
+      },
+      "per": {
+        "weekly": "/ week",
+        "biweekly": "/ fortnight",
+        "monthly": "/ month"
+      },
+      "current": {
+        "weekly": "This week",
+        "biweekly": "This fortnight",
+        "monthly": "This month"
+      },
+      "thisPeriod": "{{label}} {{contributed}} of {{target}}",
+      "streak": "Streak {{count}}",
+      "daysLeft_one": "{{count}} day left",
+      "daysLeft_other": "{{count}} days left",
+      "status": {
+        "met": "Met",
+        "over": "Over",
+        "short": "Short",
+        "pending": "In progress"
+      },
+      "historyTitle": "{{start}} to {{end}}: {{contributed}} of {{target}} ({{status}})",
+      "historyLabel": "Contributions in recent periods",
+      "suggestionRecurring": "Matches the recurring transaction \"{{description}}\": {{amount}} {{period}}",
+      "suggestionHistory": "Matches your regular transfers into this account: {{amount}} {{period}}",
+      "useSuggestion": "Use",
+      "quickSetup": "Set up savings goals",
+      "quickSetupDesc": "Pick the accounts you save into. Each gets its own goal, linked to the account, with a regular target taken from what already pays into it. You can change any of it.",
+      "quickSetupEmpty": "Every open account already has a goal.",
+      "quickSetupCreate": "Create goals",
+      "quickSetupCreated": "Goals created",
+      "quickSetupNoneSelected": "Pick at least one account.",
+      "createFromAccount": "Savings goal",
+      "ofLast": "{{met}} of last {{total}}",
+      "ahead": "{{amount}} ahead",
+      "behind": "{{amount}} behind",
+      "onPlan": "On plan",
+      "aheadSince": "Ahead by {{amount}} since {{date}}",
+      "behindSince": "Behind by {{amount}} since {{date}}",
+      "onPlanSince": "On plan since {{date}}",
+      "scale": {
+        "behind": "behind",
+        "plan": "plan",
+        "ahead": "ahead"
+      }
+    }
   },
   "recurring": {
     "title": "Transakcje cykliczne",
@@ -1615,7 +1828,22 @@
     "autoGenerate": "Automatycznie generuj transakcje",
     "autoGenerateHelp": "Tworzy transakcję za każdym razem, gdy ten rachunek jest wymagalny. Wyłącz, aby poczekać na rzeczywiste obciążenie (np. z synchronizacji bankowej) i do tego czasu pokazywać je tylko jako nadchodzące.",
     "fxEstimate": "Szacunek na podstawie najnowszego kursu wymiany ({{rate}}). Ostateczna kwota może się zmienić.",
-    "confirmDeleteDescription": "Definicja transakcji cyklicznej „{{description}}” zostanie trwale usunięta. Istniejące transakcje pozostaną, ale utracą powiązanie z transakcją cykliczną. Tej operacji nie można cofnąć."
+    "confirmDeleteDescription": "Definicja transakcji cyklicznej „{{description}}” zostanie trwale usunięta. Istniejące transakcje pozostaną, ale utracą powiązanie z transakcją cykliczną. Tej operacji nie można cofnąć.",
+    "transfer": "Transfer between my accounts",
+    "transferTo": "Transfer to",
+    "fromAccount": "From account",
+    "transferRowNote": "Transfer: {{from}} → {{to}}",
+    "transferAutoGenerateHelp": "A transfer between your own accounts is only forecast: no transaction is generated. The bank's transfer is linked to it when it arrives.",
+    "ends": "Ends",
+    "endsNever": "Never",
+    "endsOnDate": "On a date",
+    "endsAfter": "After a number of payments",
+    "endDateLabel": "End date",
+    "endsAfterCount": "Number of payments",
+    "endsLastPayment": "Last payment on {{date}}",
+    "untilDate": "until {{date}}",
+    "leftCount": "{{count}} left",
+    "endedOn": "ended {{date}}"
   },
   "rules": {
     "searchPlaceholder": "Szukaj reguł...",
@@ -2198,7 +2426,22 @@
     "confirmRegenerate": "Zmieniono parametry wzrostu. Wszystkie automatycznie wygenerowane wartości zostaną usunięte i przeliczone ponownie. Wartości ręczne zostaną zachowane.",
     "regenerate": "Przelicz ponownie",
     "linkedLoans": "Powiązane kredyty",
-    "propertyEquity": "Wartość {{value}} · Dług {{debt}} · Kapitał własny {{equity}}"
+    "propertyEquity": "Wartość {{value}} · Dług {{debt}} · Kapitał własny {{equity}}",
+    "inAccountBalance": "Counted in net worth through its account",
+    "chartBasis": "Value or equity",
+    "chartEquity": "Equity",
+    "chartValue": "Value",
+    "chartEquityHelp": "Each asset less what the loans secured on it owed that day",
+    "equity": {
+      "title": "Equity",
+      "value": "Value",
+      "debt": "Debt",
+      "equity": "Equity",
+      "linkedLoans": "Loans secured against this asset",
+      "note": "Equity is shown for reference and is not added to net worth.",
+      "deleteUnlinksLoans_one": "{{count}} loan is secured against this asset. Deleting the asset unlinks it; the loan and its balance stay.",
+      "deleteUnlinksLoans_other": "{{count}} loans are secured against this asset. Deleting the asset unlinks them; the loans and their balances stay."
+    }
   },
   "reports": {
     "section": "Analityka",
@@ -2284,7 +2527,23 @@
     "range30d": "30D",
     "customRange": "Zakres niestandardowy",
     "pickCustomRange": "Wybierz datę początkową i końcową",
-    "loadError": "Nie udało się załadować raportu"
+    "loadError": "Nie udało się załadować raportu",
+    "range5y": "5Y",
+    "range10y": "10Y",
+    "intervalTooFine": "Too fine for this range: daily is up to 1 year, weekly up to 5 years",
+    "trendDetailExpenses": "Spending in this category for each period of the report",
+    "trendDetailIncome": "Income in this category for each period of the report",
+    "trendTotal": "Total",
+    "trendAverage": "Average",
+    "trendHighest": "Highest",
+    "trendLowest": "Lowest",
+    "trendViewTransactions": "View transactions",
+    "trendOpenDetail": "Show the {{name}} trend in detail",
+    "moneyMapSlider": "Move the window back in time",
+    "moneyMapWindow": "{{from}} – {{to}}",
+    "moneyMapNow": "Latest",
+    "moneyMapEarlier": "One month earlier",
+    "moneyMapLater": "One month later"
   },
   "payees": {
     "noPayeeFound": "Nie znaleziono odbiorcy.",
@@ -2346,7 +2605,22 @@
     "deleteMultipleTitle": "Usuń odbiorców",
     "deleteMultipleConfirm": "Czy na pewno chcesz usunąć {{count}} wybranych odbiorców? Usunie to ich również ze wszystkich powiązanych transakcji.",
     "typeUnset": "Nie określono",
-    "website": "Strona internetowa"
+    "website": "Strona internetowa",
+    "needsIcon": "Wymaga ikony",
+    "iconPicked": "Wyświetlana przy transakcjach tego odbiorcy zamiast logo.",
+    "clearIcon": "Użyj logo",
+    "removeIcon": "Usuń ikonę",
+    "logo": "Logo",
+    "logoUrlHelp": "Paste a link to an image, or a website to use its logo.",
+    "logoUrlInvalid": "Enter an http(s) image link or a website.",
+    "logoUseWebsite": "Use website's logo",
+    "logoClear": "Clear",
+    "logoShowing": "This logo is shown on the payee's transactions.",
+    "logoFromWebsite": "Showing the website's icon. Paste a logo link to use a different one.",
+    "logoNone": "No logo yet. Paste an image link or a website, or pick an icon.",
+    "logoLoadError": "Couldn't load that image. Check the link.",
+    "pickIcon": "Or pick an icon",
+    "addLogo": "Add a logo"
   },
   "fiscal": {
     "kind": {
@@ -3014,7 +3288,9 @@
       "severalInvoices": "Znana osoba, kilka faktur naraz",
       "destinationNamed": "Opis wskazuje drugie konto",
       "exactAmountNearby": "Dokładna kwota, bliska data",
-      "closeAmountWiderWindow": "Zbliżona kwota, szersze okno"
+      "closeAmountWiderWindow": "Zbliżona kwota, szersze okno",
+      "onlyCandidateBill": "Same account, exact amount, the only bill that fits",
+      "samePayeeBill": "Same account and payee, up to twice the amount, the only bill that fits"
     },
     "outcome": {
       "link": "Wiąże sama",
@@ -3222,5 +3498,297 @@
       "recurring": "Reguły Cyklicznych",
       "recurringHint": "Jak ustalamy, że obciążenie to rachunek, którego już oczekiwałeś."
     }
+  },
+  "forecast": {
+    "section": "Analysis",
+    "title": "Forecast",
+    "base": "Forecast",
+    "actual": "Actual",
+    "includeSpending": "Include everyday spending",
+    "includeSpendingHelp": "Adds each category's average monthly spending over the last 12 full months (cash and cards, refunds netted, categories with a recurring payment left out) to the forecast.",
+    "loadError": "Could not load the forecast",
+    "endBalance": "End balance",
+    "fromToday": "From {{amount}} today",
+    "lowestBalance": "Lowest balance",
+    "onDate": "On {{date}}",
+    "vsBase": "vs forecast",
+    "lowestOn": "Lowest {{amount}} on {{date}}",
+    "chartTitle": "Cash and cards",
+    "chartHint": "Open circles mark each line's lowest point, filled ones its end balance. Loans and investments are left out.",
+    "recurringLine_one": "{{count}} recurring payment feeds this forecast",
+    "recurringLine_other": "{{count}} recurring payments feed this forecast",
+    "manageRecurring": "Manage",
+    "expectedTitle": "Expected transactions",
+    "expectedHint": "One-off transactions not in the bank yet, the dated payments of your recurring items, and the budgets you put in the forecast. All feed every line; a transaction drops out once its bank row arrives.",
+    "expectedEmpty": "No expected transactions",
+    "addExpected": "Add expected transaction",
+    "editExpected": "Edit expected transaction",
+    "expectedCreated": "Expected transaction added",
+    "expectedUpdated": "Expected transaction updated",
+    "expectedDeleted": "Expected transaction deleted",
+    "confirmDeleteExpected": "Delete expected transaction?",
+    "confirmDeleteExpectedDescription": "\"{{description}}\" will no longer be part of the forecast.",
+    "matchHint": "When a bank row arrives on this account in the same direction, within 5% of the amount and 10 days of the date, the payment is marked as arrived and leaves the forecast.",
+    "date": "Date",
+    "arrived": "Arrived",
+    "expected": "Expected",
+    "moneyOut": "Money out",
+    "moneyIn": "Money in",
+    "noAccount": "No account",
+    "scenariosTitle": "Scenarios",
+    "scenariosHint": "\"What if\" changes on top of the forecast. Each scenario that is switched on gets its own line.",
+    "scenariosEmpty": "No scenarios yet",
+    "addScenario": "Add scenario",
+    "editScenario": "Edit scenario",
+    "scenarioDeleted": "Scenario deleted",
+    "scenarioNamePlaceholder": "e.g. New car",
+    "confirmDeleteScenario": "Delete scenario?",
+    "confirmDeleteScenarioDescription": "\"{{name}}\" and all its changes will be deleted.",
+    "color": "Colour",
+    "noChanges": "No changes yet",
+    "addChange": "Add change",
+    "editChange": "Edit change",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "changeKind": "Change",
+    "kinds": {
+      "one_off": "One-off payment",
+      "repeating": "New repeating payment",
+      "recurring_change": "Change a recurring payment",
+      "income_change": "Change income",
+      "spending_change": "Change everyday spending",
+      "loan_change": "Change a loan"
+    },
+    "changeMode": "How",
+    "modes": {
+      "amount": "New amount",
+      "pause": "Pause",
+      "stop": "Stop",
+      "percentChange": "By a percentage",
+      "amountChange": "By an amount"
+    },
+    "optional": "Optional",
+    "recurringPayment": "Recurring payment",
+    "pickRecurring": "Pick a recurring payment",
+    "allIncome": "All recurring income",
+    "pickCategory": "Pick a category",
+    "noAverage": "No recent spending",
+    "perMonth": "{{amount}} a month",
+    "direction": "Direction",
+    "decrease": "Decrease",
+    "increase": "Increase",
+    "percent": "Percent",
+    "amountPerMonth": "Amount a month",
+    "amountPerPayment": "Amount a payment",
+    "newAmount": "New amount",
+    "spendingEffect": "{{current}} a month becomes {{next}} a month",
+    "summary": {
+      "from": "from {{from}}",
+      "between": "{{from}} to {{to}}",
+      "oneOff": "{{amount}} on {{date}}",
+      "repeating": "{{amount}} {{frequency}}, {{range}}",
+      "stop": "{{name}} stops from {{from}}",
+      "pause": "{{name}} paused {{range}}",
+      "newAmount": "{{name}} becomes {{amount}} from {{from}}",
+      "income": "{{name}} {{change}}, {{range}}",
+      "spending": "{{name}} {{change}}, {{range}}",
+      "loanRateRecalc": "{{name}} rate {{rate}}% from {{from}}, repayment recalculated",
+      "loanRateKeep": "{{name}} rate {{rate}}% from {{from}}, repayment kept",
+      "loanRepayment": "{{name}} repayment {{amount}} from {{from}}",
+      "loanLumpSum": "{{name}} extra repayment of {{amount}} on {{date}}",
+      "loanRateSet": "{{name}} rate {{rate}}% and repayment {{amount}} from {{from}}"
+    },
+    "loans": {
+      "title": "Loans",
+      "hint": "Each loan's balance from today, with its payoff date and the interest still to pay. Scenarios that change a loan get their own line.",
+      "owed": "{{amount}} owed",
+      "rateValue": "{{rate}}% a year",
+      "repaymentValue": "{{amount}} {{frequency}}",
+      "frequencies": {
+        "WEEKLY": "weekly",
+        "FORTNIGHTLY": "fortnightly",
+        "MONTHLY": "monthly",
+        "QUARTERLY": "quarterly",
+        "BIANNUALLY": "every six months",
+        "ANNUALLY": "yearly"
+      },
+      "months_one": "{{count}} month",
+      "months_other": "{{count}} months",
+      "weeks_one": "{{count}} week",
+      "weeks_other": "{{count}} weeks",
+      "earlier": "pays off {{period}} earlier",
+      "later": "pays off {{period}} later",
+      "samePayoff": "pays off at the same time ({{date}})",
+      "never": "Never",
+      "neverPaidOff": "never paid off at this repayment",
+      "saves": "saves {{amount}} interest",
+      "costs": "costs {{amount}} more interest",
+      "newRepayment": "repayment {{amount}}",
+      "payoff": "Paid off",
+      "totalInterest": "Interest to pay",
+      "missingDetails": "Not enough details to project this loan: it needs a table loan's interest rate, repayment amount and frequency.",
+      "addDetails": "Add them on the loan",
+      "balanceChart": "Balance owed",
+      "splitChart": "Repayments",
+      "interest": "Interest",
+      "principal": "Principal",
+      "loan": "Loan",
+      "pickLoan": "Pick a loan",
+      "needsDetails": "{{name}} (needs loan details)",
+      "noLoans": "No open loans",
+      "current": "Now {{rate}}% a year, {{amount}} {{frequency}}",
+      "modes": {
+        "rate": "New interest rate",
+        "amount": "New repayment",
+        "lump_sum": "Extra lump sum"
+      },
+      "newRate": "New rate (% a year)",
+      "extraAmount": "Extra repayment",
+      "newRepaymentAmount": "New repayment amount",
+      "repaymentAfter": "Repayment",
+      "recalculate": "Recalculate repayment",
+      "keep": "Keep repayment",
+      "recalculateHint": "The repayment changes so the loan is still paid off on time, as at a refix.",
+      "keepHint": "The repayment stays the same, so the loan is paid off earlier or later.",
+      "set": "Set repayment",
+      "setHint": "The repayment becomes the amount you enter, from the same date as the new rate.",
+      "previous": "Previous loan",
+      "next": "Next loan",
+      "position": "{{index}} of {{count}}"
+    },
+    "tabs": {
+      "expected": "Expected transactions",
+      "scenarios": "Scenarios"
+    },
+    "recurringBadge": "Recurring",
+    "showAllExpected": "Show all {{count}}",
+    "showFewer": "Show fewer",
+    "carousel": "Charts",
+    "cashAndCards": "Cash & cards",
+    "trend": "Past trend",
+    "accountView": "Accounts",
+    "accountViewHint": "The line, its history and every payment keep to the accounts you pick. A transfer between two of them cancels out.",
+    "allCashAccounts": "All cash accounts",
+    "someAccounts": "{{count}} of {{total}} accounts",
+    "transfer": "Transfer between my accounts",
+    "transferTo": "Transfer to",
+    "fromAccount": "From account",
+    "matchHintTransfer": "When a bank transfer between these two accounts arrives, within 5% of the amount and 10 days of the date, the payment is marked as arrived and leaves the forecast.",
+    "budgetsNeedSpending": "Budgets apply to everyday spending: switch it on to see them in the forecast.",
+    "budgetBadge": "Budget",
+    "budgetRowDetail": "Budget {{amount}}, {{committed}} of it already in recurring and expected transactions",
+    "allAccounts": "All accounts",
+    "repeatingHint": "Repeats? Add it as a recurring transaction, with an end date or a number of payments.",
+    "repeatingLink": "Recurring"
+  },
+  "insights": {
+    "title": "Wnioski",
+    "previousMonth": "Poprzedni miesiąc",
+    "nextMonth": "Następny miesiąc",
+    "loadError": "Nie udało się wczytać wniosków dla tego miesiąca.",
+    "empty": "Za mało historii. Wnioski potrzebują kilku miesięcy transakcji do porównania.",
+    "headline": {
+      "slide": "Twoja stopa oszczędności spada: {{before}}% rok temu, {{rate}}% teraz.",
+      "rise": "Twoja stopa oszczędności rośnie: {{before}}% rok temu, {{rate}}% teraz.",
+      "under": "Wydatki codzienne były o {{pct}}% niższe niż w zwykłym miesiącu.",
+      "over": "Wydatki codzienne były o {{pct}}% wyższe niż w zwykłym miesiącu.",
+      "steady": "Wydatki codzienne były bliskie zwykłemu miesiącowi.",
+      "leave": "Mniej oszczędności przy niższej pensji: {{before}}% dochodu rok temu, {{rate}}% teraz."
+    },
+    "summary": "Wydatki codzienne wyniosły {{spent}} wobec zwykłych {{usual}}. Kategorie poniżej zwykłego miesiąca: {{lower}}, powyżej: {{higher}}.",
+    "everydaySpend": "Wydatki codzienne",
+    "vsUsual": "{{sign}} {{pct}}% wobec {{usual}}",
+    "savedTwelve": "Zaoszczędzone, ostatnie 12 miesięcy",
+    "savedFrom": "z {{before}}% rok temu",
+    "oneOffs": "Zakupy jednorazowe",
+    "oneOffsNone": "Brak",
+    "oneOffsOver": "powyżej {{amount}}",
+    "oneOffsCount_one": "{{count}} zakup, pominięty powyżej",
+    "oneOffsCount_few": "{{count}} zakupy, pominięte powyżej",
+    "oneOffsCount_many": "{{count}} zakupów, pominiętych powyżej",
+    "oneOffsCount_other": "{{count}} zakupu, pominiętego powyżej",
+    "chartTitle": "Każda kategoria wobec swojego zwykłego miesiąca",
+    "chartUsual": "zwykły = mediana sześciu poprzednich miesięcy",
+    "less": "mniej niż zwykle",
+    "more": "więcej niż zwykle",
+    "excluded": "Nie pokazano: {{list}}.",
+    "reasons": {
+      "one_off": "zakupy jednorazowe",
+      "more_payments": "dodatkowa płatność cykliczna",
+      "fewer_payments": "o jedną płatność cykliczną mniej"
+    },
+    "better": "Lepiej",
+    "worse": "Gorzej",
+    "noneBetter": "W tym miesiącu nic nie wyróżniło się na plus.",
+    "noneWorse": "W tym miesiącu nic nie wyróżniło się na minus.",
+    "cards": {
+      "category_month": {
+        "title_better": "{{category}} poniżej zwykłego",
+        "title_worse": "{{category}} powyżej zwykłego",
+        "titleStreak": "{{category}} znów w górę po spokojnych miesiącach ({{count}})",
+        "detail_one": "{{amount}} · zwykle {{usual}} · {{count}} transakcja",
+        "detail_few": "{{amount}} · zwykle {{usual}} · {{count}} transakcje",
+        "detail_many": "{{amount}} · zwykle {{usual}} · {{count}} transakcji",
+        "detail_other": "{{amount}} · zwykle {{usual}} · {{count}} transakcji",
+        "title_seasonal_better": "{{category}} w dół, jak przed rokiem ({{month}})",
+        "title_seasonal_worse": "{{category}} w górę, jak przed rokiem ({{month}})"
+      },
+      "trend_cooling": {
+        "title": "{{category}} słabnie",
+        "detail": "Suma z 12 miesięcy {{total}}, spadek z {{peak}} ({{month}})"
+      },
+      "trend_rising": {
+        "title": "{{category}} rośnie",
+        "detail": "Suma z 12 miesięcy {{total}}, o {{pct}}% więcej niż {{before}} rok wcześniej"
+      },
+      "savings_rate": {
+        "title_worse": "Stopa oszczędności spada",
+        "title_better": "Stopa oszczędności rośnie",
+        "detail": "{{rate}}% dochodu zachowane przez 12 miesięcy, wcześniej {{before}}%.",
+        "title_leave": "Niższa stopa oszczędności podczas urlopu",
+        "income": "Dochód {{change}} ({{movers}}).",
+        "spending": "Wydatki codzienne {{change}} ({{movers}}).",
+        "leave": "Pensja spadła, gdy zaczęły się wpłaty od {{payer}}; to wygląda na urlop.",
+        "short": "{{rate}}% zachowane, wcześniej {{before}}% · dochód {{income}}"
+      },
+      "price_up": {
+        "title": "{{payee}} kosztuje więcej"
+      },
+      "price_down": {
+        "title": "{{payee}} kosztuje mniej"
+      },
+      "price": {
+        "detail": "{{before}} → {{after}} za płatność od {{since}}",
+        "yearly": "roczna zmiana"
+      },
+      "payee_new": {
+        "title": "Nowy koszt: {{payee}}",
+        "detail": "{{amount}} w tym miesiącu w {{category}}"
+      },
+      "payee_stopped": {
+        "title": "{{payee}} ustało",
+        "detail": "{{amount}} za płatność w {{category}}, ostatnio {{last}}"
+      },
+      "small_burst": {
+        "title": "Seria drobnych obciążeń: {{payee}}",
+        "detail": "Obciążenia: {{count}}, {{amount}} · zwykle {{usual}} miesięcznie"
+      },
+      "income_change": {
+        "title_better": "{{payee}} płaci więcej",
+        "title_worse": "{{payee}} płaci mniej",
+        "detail": "{{before}} → {{after}} za płatność ({{pct}}%)"
+      },
+      "payee_switch": {
+        "title": "{{from}} → {{to}}",
+        "detail": "{{category}}: {{before}} → {{after}} miesięcznie razem ({{pct}}%), od {{since}}"
+      },
+      "habit_ended": {
+        "title": "{{payee}} się skończyło",
+        "detail": "Około {{monthly}} miesięcznie w {{category}}; ostatnio {{last}}"
+      }
+    },
+    "usualSince": "zwykły od {{month}}",
+    "mostly": "głównie {{list}}",
+    "lastYear": "{{month}}: {{amount}}"
   }
 }
