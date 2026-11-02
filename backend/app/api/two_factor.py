@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import current_active_user, get_jwt_strategy
+from app.core.auth import current_active_user, get_jwt_strategy, require_recent_login
 from app.core.auth_policy import require_local_auth_enabled
 from app.core.database import get_async_session
 from app.core.rate_limit import login_rate_limit
@@ -43,12 +43,17 @@ def _parse_temp_token_payload(raw: str | bytes) -> dict[str, object] | None:
 @router.post(
     "/2fa/setup",
     response_model=TwoFactorSetupResponse,
-    dependencies=[Depends(require_local_auth_enabled)],
+    dependencies=[Depends(require_local_auth_enabled), Depends(require_recent_login)],
 )
 async def setup_2fa(
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ):
+    # Replacing the secret would swap the second factor without the old one.
+    # Turning it off first asks for the password and a code.
+    if user.is_2fa_enabled:
+        raise HTTPException(status_code=400, detail="2FA is already enabled")
+
     secret = pyotp.random_base32()
     user.totp_secret = secret
     session.add(user)

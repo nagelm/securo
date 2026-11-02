@@ -112,10 +112,8 @@ async def preview_import(
     except Exception as e:
         logger.error(
             "Failed to parse import file: filename=%s, size=%d bytes, "
-            "content_type=%s, first_100_bytes=%r, error=%s",
-            filename, len(content), file.content_type,
-            content[:100], e,
-            exc_info=True,
+            "content_type=%s, error_type=%s",
+            filename, len(content), file.content_type, type(e).__name__,
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

@@ -1,14 +1,22 @@
 """Pure rule evaluation engine — no DB access."""
-import re
+import logging
 import unicodedata
 import uuid
 from collections.abc import Collection
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+import regex
 
 if TYPE_CHECKING:
     from app.models.transaction import Transaction
+
+logger = logging.getLogger(__name__)
+
+# A user's pattern can backtrack for ever on the wrong text, and the stdlib's
+# `re` cannot be interrupted. This cap gives up on one row, not the whole sync.
+REGEX_TIMEOUT_SECONDS = 0.25
 
 
 def _strip_accents(text: str) -> str:
@@ -17,12 +25,12 @@ def _strip_accents(text: str) -> str:
     return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
-def compile_rule_regex(pattern: str) -> re.Pattern[str]:
+def compile_rule_regex(pattern: str) -> Any:
     """Compile a regex using Securo's runtime normalization and safety policy."""
     effective_pattern = _strip_accents(pattern)
     try:
-        compiled = re.compile(effective_pattern, re.IGNORECASE)
-    except re.error as exc:
+        compiled = regex.compile(effective_pattern, regex.IGNORECASE)
+    except regex.error as exc:
         raise ValueError("Invalid regular expression") from exc
     if compiled.search("") is not None:
         raise ValueError("Regular expression must not match an empty string")
@@ -34,11 +42,13 @@ def _normalize(text: str) -> str:
     return _strip_accents(text.upper())
 
 
-def _to_decimal(val) -> Decimal:
+def _to_decimal(val) -> Decimal | None:
+    """The number, or None when it is not one: nothing compares true against that."""
     try:
-        return Decimal(str(val))
+        number = Decimal(str(val))
     except InvalidOperation:
-        return Decimal("0")
+        return None
+    return number if number.is_finite() else None
 
 
 def _signed_amount(tx: "Transaction", raw) -> Decimal:
@@ -127,8 +137,11 @@ def _match_condition(condition: dict, tx: "Transaction") -> bool:
                 # inverts escape classes (\s -> \S, \b -> \B, \d -> \D) and
                 # breaks inline flags. Case is already handled by IGNORECASE.
                 compiled = compile_rule_regex(str(value or ""))
-                return compiled.search(tx_str) is not None
+                return compiled.search(tx_str, timeout=REGEX_TIMEOUT_SECONDS) is not None
             except ValueError:
+                return False
+            except TimeoutError:
+                logger.warning("A rule's regular expression timed out; treated as no match")
                 return False
 
     # Numeric operators
@@ -152,6 +165,8 @@ def _match_condition(condition: dict, tx: "Transaction") -> bool:
         # `amount < 0` expenses.
         tx_num = _signed_amount(tx, tx_val) if field == "amount" else _to_decimal(tx_val)
         val_num = _to_decimal(value)
+        if tx_num is None or val_num is None:
+            return False
         if op == "gt":
             return tx_num > val_num
         if op == "gte":

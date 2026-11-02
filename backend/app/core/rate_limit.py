@@ -1,4 +1,5 @@
 import time
+from math import ceil
 
 from fastapi import HTTPException, Request
 
@@ -42,19 +43,28 @@ class RateLimiter:
         pipe = r.pipeline()
         pipe.zremrangebyscore(key, 0, window_start)
         pipe.zcard(key)
-        pipe.zadd(key, {str(now): now})
-        pipe.expire(key, self.window_seconds)
+        pipe.zrange(key, 0, 0, withscores=True)
         results = await pipe.execute()
 
         request_count = results[1]
 
         if request_count >= self.max_requests:
+            # A refused attempt is not recorded, so retrying while locked out
+            # doesn't push the wait back; the wait ends when the oldest one ages out.
+            oldest = results[2]
             retry_after = self.window_seconds
+            if isinstance(oldest, list) and oldest:
+                retry_after = max(1, ceil(oldest[0][1] + self.window_seconds - now))
             raise HTTPException(
                 status_code=429,
                 detail="Too many requests",
                 headers={"Retry-After": str(retry_after)},
             )
+
+        record = r.pipeline()
+        record.zadd(key, {str(now): now})
+        record.expire(key, self.window_seconds)
+        await record.execute()
 
 
 login_rate_limit = RateLimiter(max_requests=5, window_seconds=60)
