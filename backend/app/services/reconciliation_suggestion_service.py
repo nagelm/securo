@@ -405,6 +405,46 @@ async def expire_stale(
     return len(stale)
 
 
+async def expire_transfer_questions(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    leg_ids: set[uuid.UUID],
+    *,
+    keep: frozenset[uuid.UUID] = frozenset(),
+) -> set[uuid.UUID]:
+    """Retire open transfer questions that name a row now spoken for.
+
+    Once a transaction is half of a transfer, every other question offering
+    it can only fail ("already part of a transfer"), so they expire rather
+    than wait for someone to dismiss them. ``keep`` spares the question
+    being answered right now.
+
+    Returns the *other* rows those questions offered: the ones that just
+    lost a candidate and deserve a fresh look.
+    """
+    if not leg_ids:
+        return set()
+    result = await session.execute(
+        select(ReconciliationSuggestion).where(
+            ReconciliationSuggestion.workspace_id == workspace_id,
+            ReconciliationSuggestion.status == "pending",
+            ReconciliationSuggestion.expectation_kind == "transaction",
+            (ReconciliationSuggestion.transaction_id.in_(leg_ids))
+            | (ReconciliationSuggestion.expectation_id.in_(leg_ids)),
+        )
+    )
+    rows = [row for row in result.unique().scalars().all() if row.id not in keep]
+    freed: set[uuid.UUID] = set()
+    for row in rows:
+        _resolve(row, "expired", None)
+        freed.update({row.transaction_id, row.expectation_id})
+    for group in _by_question(rows):
+        await answered(session, group, "expired", None)
+    if rows:
+        await session.flush()
+    return freed - set(leg_ids)
+
+
 async def drop_for_expectation(
     session: AsyncSession, workspace_id: uuid.UUID, expectation_id: uuid.UUID
 ) -> None:

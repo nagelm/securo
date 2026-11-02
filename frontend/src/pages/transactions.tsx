@@ -51,7 +51,6 @@ import { AlertTriangle, ArrowLeftRight, ArrowUp, ArrowDown, Check, Clock, HelpCi
 import type { Transaction, Rule, InstallmentSeriesInput, TransactionApplyScope, TransactionEditPayload, ReconciliationSuggestion } from '@/types'
 import { RuleDialog, type RuleDialogInitialData } from '@/components/rule-dialog'
 import { PageHeader } from '@/components/page-header'
-import { calculateRangeSelection } from '@/lib/selection-utils'
 import { isManualInstallmentSeriesRow } from '@/lib/installment-series'
 import { TransactionCategoryIcon, TransactionCategoryLabel } from '@/components/category-lines-display'
 import { PayeeIcon } from '@/components/payee-icon'
@@ -77,6 +76,16 @@ import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useCreateTransaction } from '@/hooks/use-create-transaction'
 import { MobileTransactionRow } from '@/components/mobile-transaction-row'
+import { TransferAccountsPill } from '@/components/transfer-accounts-pill'
+import { resolveTransferAccounts } from '@/lib/transfer-accounts'
+import { TransferPairAmounts } from '@/components/transfer-pair-amounts'
+import {
+  groupTransferPairs,
+  primaryTransaction,
+  rowTransactions,
+  toggleDisplayRowSelection,
+  type TransactionDisplayRow,
+} from '@/lib/transfer-pair-rows'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { useCollectionFilter } from '@/contexts/collection-filter-context'
@@ -92,6 +101,8 @@ type TransactionUpdatePayload = TransactionEditPayload & {
   apply_to?: TransactionApplyScope
 }
 
+type TransferPairRow = Extract<TransactionDisplayRow<Transaction>, { kind: 'pair' }>
+
 type PendingTransferCategoryUpdate = {
   id: string
   data: TransactionUpdatePayload
@@ -104,6 +115,16 @@ function parseHashtags(notes: string | null): string[] {
 }
 
 const HIDE_IGNORED_STORAGE_KEY = 'securo.transactions.hideIgnored'
+
+// URL parameters that already narrow the list to something specific.
+const CONTEXT_FILTER_PARAMS = [
+  'account_id', 'category_id', 'uncategorized', 'q', 'payee_id', 'group_id',
+  'type', 'status', 'min_amount', 'max_amount', 'tags', 'highlight',
+] as const
+
+function hasContextFilters(params: URLSearchParams): boolean {
+  return CONTEXT_FILTER_PARAMS.some((key) => !!params.get(key))
+}
 
 export default function TransactionsPage() {
   const { t, i18n } = useTranslation()
@@ -145,6 +166,9 @@ export default function TransactionsPage() {
     const f = searchParams.get('from')
     const t = searchParams.get('to')
     if (f || t) return { from: f ?? '', to: t ?? '' }
+    // Fork (owner 2026-10-15): a link that already narrows the list (a category,
+    // payee, account, search...) opens without a date range unless it brings one.
+    if (hasContextFilters(searchParams)) return { from: '', to: '' }
     return loadRange('transactions') ?? monthRange(currentMonth())
   })
   const [filterFrom, setFilterFrom] = useState<string>(initialRange.from)
@@ -789,9 +813,12 @@ export default function TransactionsPage() {
     setCreateRuleOpen(true)
   }
 
+  // Selection works on display rows: a transfer drawn as one row selects
+  // both of its legs, so bulk actions act on the whole movement.
   const toggleSelect = (id: string, isShiftKey: boolean = false) => {
     setSelectedIds(prev =>
-      calculateRangeSelection(prev, lastSelectedId, id, filteredItems, isShiftKey, tx => !tx.is_shared)
+      toggleDisplayRowSelection(prev, lastSelectedId, id, displayRows, isShiftKey,
+        row => rowTransactions(row).every(tx => !tx.is_shared))
     )
     setLastSelectedId(id)
   }
@@ -800,12 +827,17 @@ export default function TransactionsPage() {
   // page count both reflect the same filtered total — issue #88.
   const filteredItems = useMemo(() => data?.items ?? [], [data?.items])
   const selectableItems = filteredItems.filter(tx => !tx.is_shared)
+  // Both legs of a linked transfer on this page draw as one row, where the
+  // outgoing leg sat. Display only: counts, totals and selection stay per
+  // transaction.
+  const displayRows = useMemo(() => groupTransferPairs(filteredItems), [filteredItems])
 
-  // Group transactions by date for the mobile card view
+  // Group rows by date for the mobile card view (a transfer by its outgoing date)
   const groupedByDate = useMemo(() => {
-    const groups: { date: string; label: string; items: Transaction[] }[] = []
-    let current: { date: string; label: string; items: Transaction[] } | null = null
-    for (const tx of filteredItems) {
+    const groups: { date: string; label: string; rows: TransactionDisplayRow<Transaction>[] }[] = []
+    let current: { date: string; label: string; rows: TransactionDisplayRow<Transaction>[] } | null = null
+    for (const row of displayRows) {
+      const tx = primaryTransaction(row)
       const reportingDate = listDate(tx)
       if (!current || current.date !== reportingDate) {
         current = {
@@ -816,14 +848,14 @@ export default function TransactionsPage() {
             month: 'short',
             year: 'numeric',
           }),
-          items: [],
+          rows: [],
         }
         groups.push(current)
       }
-      current.items.push(tx)
+      current.rows.push(row)
     }
     return groups
-  }, [filteredItems, dateLocale])
+  }, [displayRows, dateLocale])
 
   // Pre-resolve accounts into a Map for O(1) lookup in the mobile card view
   const accountById = useMemo(() => {
@@ -1125,12 +1157,24 @@ export default function TransactionsPage() {
     )
   }
 
-  const renderDescriptionCell = (tx: Transaction) => {
+  const renderDescriptionCell = (tx: Transaction, inLeg?: Transaction) => {
     const showInlineDate = !grid.isVisible('date')
     const showInlineNotes = !grid.isVisible('notes')
     const showInlineTags = !grid.isVisible('tags')
     const noteText = tx.notes ? stripHashtags(tx.notes) : ''
     const noteTags = tx.notes ? parseHashtags(tx.notes) : []
+    const transferAccounts = resolveTransferAccounts(tx, accountById)
+    // A transfer drawn as one row (`inLeg` set) keeps both legs' markers.
+    const legs = inLeg ? [tx, inLeg] : [tx]
+    const pillDescription = inLeg && inLeg.description !== tx.description
+      ? `${tx.description}\n${inLeg.description}`
+      : tx.description
+    const hasSuggestion = legs.some(leg => suggestionsByTransaction.has(leg.id))
+    const invoiceLinks = legs
+      .flatMap(leg => leg.invoice_links ?? [])
+      .filter((link, i, all) => all.findIndex(l => l.invoice_id === link.invoice_id) === i)
+    const showPending = legs.some(leg => shouldShowPendingBadge(leg))
+    const hasAttachments = legs.some(leg => (leg.attachment_count ?? 0) > 0)
     // A long group or author name truncates inside its badge, so the label
     // doubles as its own tooltip and stays readable on hover.
     const groupBadgeLabel = tx.group_id
@@ -1167,7 +1211,15 @@ export default function TransactionsPage() {
               the column can be dragged down to 41px, narrower than a single
               badge, and there the badges clip at the cell edge instead. */}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden">
-            <p className="max-w-full text-sm font-semibold text-foreground truncate">{tx.description}</p>
+            {transferAccounts ? (
+              <TransferAccountsPill
+                from={transferAccounts.from}
+                to={transferAccounts.to}
+                description={pillDescription}
+              />
+            ) : (
+              <p className="max-w-full text-sm font-semibold text-foreground truncate">{tx.description}</p>
+            )}
             {tx.group_id && (
               <span
                 className="inline-flex max-w-full items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-violet-700 bg-violet-50 border border-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-900 px-1.5 py-0.5 rounded-full"
@@ -1188,7 +1240,7 @@ export default function TransactionsPage() {
                 is not a fact yet. It lived only in a tab on the rules
                 page, which meant you found out a question existed by
                 going somewhere you had no reason to go. */}
-            {suggestionsByTransaction.get(tx.id) && (
+            {hasSuggestion && (
               <Link
                 to="/rules?tab=queue"
                 onClick={(e) => e.stopPropagation()}
@@ -1199,7 +1251,7 @@ export default function TransactionsPage() {
                 <span className="truncate">{t('transactions.suggestionBadge')}</span>
               </Link>
             )}
-            {(tx.invoice_links ?? []).map((link) => (
+            {invoiceLinks.map((link) => (
               <Link
                 key={link.invoice_id}
                 to={`/invoices/${link.invoice_id}`}
@@ -1222,7 +1274,7 @@ export default function TransactionsPage() {
                 not the word that says what the badge is. Past the point
                 where even that no longer fits, the badge clips at the
                 cell edge rather than carrying on into the next column. */}
-            {isTransferTransaction(tx) && (
+            {isTransferTransaction(tx) && !transferAccounts && (
               <span className="inline-flex max-w-full items-center gap-1 overflow-hidden text-[10px] font-semibold uppercase tracking-wide text-blue-600 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">
                 <ArrowLeftRight className="h-3 w-3 shrink-0" />
                 <span className="shrink-0">{t('transactions.transfer')}</span>
@@ -1276,7 +1328,7 @@ export default function TransactionsPage() {
                 {tx.installment_number}/{tx.total_installments}
               </span>
             )}
-            {shouldShowPendingBadge(tx) && (
+            {showPending && (
               <span
                 title={t('transactions.pending')}
                 className="shrink-0 inline-flex items-center justify-center rounded-full border border-amber-200 bg-amber-50 p-0.5 dark:border-amber-500/30 dark:bg-amber-500/10"
@@ -1291,11 +1343,15 @@ export default function TransactionsPage() {
               canWrite={canWrite}
               onPostToday={(id) => postTodayMutation.mutate(id)}
             />
-            {(tx.attachment_count ?? 0) > 0 && (
+            {hasAttachments && (
               <Paperclip size={12} className="text-muted-foreground shrink-0" />
             )}
           </div>
           <ReportingDateBadge tx={tx} locale={dateLocale} />
+          {/* The pill took the description's place; keep the bank's text. */}
+          {transferAccounts && (
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">{tx.description}</p>
+          )}
           {showInlineDate && (
             <p className="text-xs text-muted-foreground mt-0.5">{new Date(listDate(tx) + 'T00:00:00').toLocaleDateString(dateLocale)}</p>
           )}
@@ -1324,6 +1380,91 @@ export default function TransactionsPage() {
     )
   }
 
+  const renderAccountName = (accountId: string | null) => {
+    const acc = accountId ? accountById.get(accountId) : undefined
+    return acc ? (
+      <span className="flex items-center gap-2 min-w-0">
+        <AccountIcon account={acc} size="sm" />
+        <span className="truncate">{getAccountName(acc)}</span>
+      </span>
+    ) : (
+      <span className="text-muted-foreground">—</span>
+    )
+  }
+
+  // Cells of a transfer drawn as one row. Columns that differ per leg show
+  // both (account, amount); the rest read off the outgoing leg, whose date
+  // the row sorts and groups by.
+  const renderPairBodyCell = (col: ColumnDef, row: TransferPairRow) => {
+    const { out, in: inLeg } = row
+    const widthStyle = { width: grid.widthOf(col.id), minWidth: grid.widthOf(col.id) }
+    const alignClass = col.align === 'right' ? 'text-right' : ''
+    const baseClass = `py-2.5 ${alignClass}`
+    switch (col.id) {
+      case 'date': {
+        const inDate = inLeg.date !== out.date
+          ? t('transactions.transferLegInDate', { date: new Date(inLeg.date + 'T00:00:00').toLocaleDateString(dateLocale) })
+          : undefined
+        return (
+          <TableCell key={col.id} style={widthStyle} title={inDate} className={`${baseClass} text-sm text-muted-foreground tabular-nums`}>
+            {new Date(out.date + 'T00:00:00').toLocaleDateString(dateLocale)}
+          </TableCell>
+        )
+      }
+      case 'description':
+        return (
+          <TableCell key={col.id} style={widthStyle} className={`${baseClass} pl-2 max-w-0`}>
+            {renderDescriptionCell(out, inLeg)}
+          </TableCell>
+        )
+      case 'account':
+        return (
+          <TableCell key={col.id} style={widthStyle} className={`${baseClass} text-sm text-muted-foreground`}>
+            <div className="space-y-1">
+              {renderAccountName(out.account_id)}
+              {renderAccountName(inLeg.account_id)}
+            </div>
+          </TableCell>
+        )
+      case 'amount': {
+        const accounts = resolveTransferAccounts(out, accountById)
+        return (
+          <TableCell key={col.id} style={widthStyle} className={`${baseClass} pr-5`}>
+            <TransferPairAmounts
+              out={out}
+              in={inLeg}
+              fromName={accounts ? getAccountName(accounts.from) : undefined}
+              toName={accounts ? getAccountName(accounts.to) : undefined}
+              locale={locale}
+              dateLocale={dateLocale}
+              className="text-xs md:text-sm"
+            />
+          </TableCell>
+        )
+      }
+      case 'attachments': {
+        const count = (out.attachment_count ?? 0) + (inLeg.attachment_count ?? 0)
+        return (
+          <TableCell key={col.id} style={widthStyle} className={`${baseClass} pr-5 text-sm text-muted-foreground tabular-nums`}>
+            {count > 0 ? (
+              <span className="inline-flex items-center gap-1 justify-end w-full">
+                <Paperclip size={12} />{count}
+              </span>
+            ) : <span>—</span>}
+          </TableCell>
+        )
+      }
+      case 'type':
+        return (
+          <TableCell key={col.id} style={widthStyle} className={`${baseClass} text-sm`}>
+            <span className="text-blue-600 dark:text-blue-400">{t('transactions.transfer')}</span>
+          </TableCell>
+        )
+      default:
+        return renderBodyCell(col, out)
+    }
+  }
+
   const renderBodyCell = (col: ColumnDef, tx: Transaction) => {
     const widthStyle = { width: grid.widthOf(col.id), minWidth: grid.widthOf(col.id) }
     const alignClass = col.align === 'right' ? 'text-end' : ''
@@ -1347,21 +1488,12 @@ export default function TransactionsPage() {
             <TransactionCategoryLabel tx={tx} />
           </TableCell>
         )
-      case 'account': {
-        const acc = accountsList?.find((a) => a.id === tx.account_id)
+      case 'account':
         return (
           <TableCell key={col.id} style={widthStyle} className={`${baseClass} text-sm text-muted-foreground`}>
-            {acc ? (
-              <span className="flex items-center gap-2 min-w-0">
-                <AccountIcon account={acc} size="sm" />
-                <span className="truncate">{getAccountName(acc)}</span>
-              </span>
-            ) : (
-              <span className="text-muted-foreground">—</span>
-            )}
+            {renderAccountName(tx.account_id)}
           </TableCell>
         )
-      }
       case 'amount':
         return (
           <TableCell key={col.id} style={widthStyle} className={`${baseClass} pe-5`}>
@@ -1633,19 +1765,24 @@ export default function TransactionsPage() {
                     {group.label}
                   </span>
                 </div>
-                {group.items.map((tx) => (
+                {group.rows.map((row) => {
+                  const tx = primaryTransaction(row)
+                  const highlighted = !!highlightId && row.ids.includes(highlightId)
+                  return (
                   <MobileTransactionRow
-                    key={tx.id}
+                    key={row.key}
                     tx={tx}
                     account={tx.account_id ? accountById.get(tx.account_id) : undefined}
+                    transferAccounts={resolveTransferAccounts(tx, accountById)}
+                    transferPairIn={row.kind === 'pair' ? row.in : null}
+                    dateLocale={dateLocale}
                     groupName={tx.group_id ? groupNameById.get(tx.group_id) : undefined}
-                    selected={selectedIds.has(tx.id)}
+                    selected={row.ids.every(id => selectedIds.has(id))}
                     selectable={canWrite && !tx.is_shared}
                     canWrite={canWrite}
-                    highlighted={tx.id === highlightId}
-                    highlightedRowRef={tx.id === highlightId ? highlightedRowRef : undefined}
+                    highlighted={highlighted}
+                    highlightedRowRef={highlighted ? highlightedRowRef : undefined}
                     locale={locale}
-                    dateLocale={dateLocale}
                     userCurrency={userCurrency}
                     onSelect={toggleSelect}
                     onClick={(t) => {
@@ -1657,7 +1794,8 @@ export default function TransactionsPage() {
                       setDialogOpen(true)
                     }}
                   />
-                ))}
+                  )
+                })}
               </div>
             ))}
             {filteredItems.length === 0 && (
@@ -1687,19 +1825,23 @@ export default function TransactionsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredItems.map((tx) => (
-                <ContextMenu key={`${tx.id}:${menuEpoch}`}>
+              {displayRows.map((row) => {
+                const tx = primaryTransaction(row)
+                const rowSelected = row.ids.every(id => selectedIds.has(id))
+                return (
+                <ContextMenu key={`${row.key}:${menuEpoch}`}>
                   <ContextMenuTrigger asChild disabled={!canWrite || tx.is_shared}>
                     <TableRow
-                      ref={tx.id === highlightId ? highlightedRowRef : undefined}
+                      key={row.key}
+                      ref={highlightId && row.ids.includes(highlightId) ? highlightedRowRef : undefined}
                       onContextMenu={() => {
-                        if (canWrite && !tx.is_shared && !selectedIds.has(tx.id)) {
-                          setSelectedIds(new Set([tx.id]))
+                        if (canWrite && !tx.is_shared && !rowSelected) {
+                          setSelectedIds(new Set(row.ids))
                           setLastSelectedId(tx.id)
                         }
                       }}
                       className={`hover:bg-muted border-b border-border last:border-0 ${
-                        selectedIds.has(tx.id) ? 'bg-primary/5' : ''
+                        rowSelected ? 'bg-primary/5' : ''
                       } ${tx.is_shared || !canWrite ? 'cursor-default' : 'cursor-pointer'}`}
                       onClick={() => {
                         if (tx.is_shared) {
@@ -1719,17 +1861,20 @@ export default function TransactionsPage() {
                         {canWrite && !tx.is_shared && (
                           <input
                             type="checkbox"
-                            checked={selectedIds.has(tx.id)}
+                            checked={rowSelected}
                             onChange={() => {}}
                             onClick={(e) => {
                               e.stopPropagation()
                               toggleSelect(tx.id, e.shiftKey)
                             }}
+                            aria-label={row.kind === 'pair' ? t('transactions.selectTransferPair') : undefined}
                             className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
                           />
                         )}
                       </TableCell>
-                      {grid.visibleColumns.map(col => renderBodyCell(col, tx))}
+                      {grid.visibleColumns.map(col => (
+                        row.kind === 'pair' ? renderPairBodyCell(col, row) : renderBodyCell(col, tx)
+                      ))}
                     </TableRow>
                   </ContextMenuTrigger>
                   <ContextMenuPortal>
@@ -1809,7 +1954,8 @@ export default function TransactionsPage() {
                     </ContextMenuContent>
                   </ContextMenuPortal>
                 </ContextMenu>
-              ))}
+                )
+              })}
               {filteredItems.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={grid.visibleColumns.length + 1} className="text-center py-16 text-muted-foreground">

@@ -305,16 +305,19 @@ async def test_unlinked_legs_count_in_pnl_until_given_a_transfer_category(
     await session.refresh(debit)
     await session.refresh(credit)
 
-    # Nothing but the link changes: same categories, same amounts.
-    assert debit.category_id is None
+    # Nothing but the link changes: same categories, same amounts. Fork: the
+    # pairing filed the uncategorised leg under the transfer category too
+    # (carry/10-transfers), so both legs stay out after the unlink.
+    assert debit.category_id == transfers.id
     assert credit.category_id == transfers.id
     assert debit.amount == credit.amount == Decimal("1374.96")
-    assert (await pnl_ids()) == {debit.id}
+    assert (await pnl_ids()) == set()
 
-    debit.category_id = transfers.id
+    # A leg with no category counts once the link is gone.
+    debit.category_id = None
     await session.commit()
 
-    assert (await pnl_ids()) == set()
+    assert (await pnl_ids()) == {debit.id}
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,8 @@ import { ArrowLeftRight, CalendarDays, ChartNoAxesColumn, CircleDot, Clock, EyeC
 import type { Account, TransactionCalendarDay, TransactionCalendarItem, TransactionCalendarResponse } from '@/types'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AccountIcon } from '@/components/account-icon'
+import { TransferAccountsPill, type TransferPillAccount } from '@/components/transfer-accounts-pill'
+import { resolveTransferAccounts } from '@/lib/transfer-accounts'
 import { CategoryIcon } from '@/components/category-icon'
 import { SplitCategoryIcon } from '@/components/category-lines-display'
 import { PayeeIcon } from '@/components/payee-icon'
@@ -1205,6 +1207,7 @@ function SelectedDayPanel({
               key={`${item.kind}-${item.id ?? item.recurring_id}-${item.date}`}
               item={item}
               account={item.account_id ? accountById.get(item.account_id) : undefined}
+              transferAccounts={resolveTransferAccounts(item, accountById)}
               locale={locale}
               userCurrency={userCurrency}
               mask={mask}
@@ -1241,6 +1244,7 @@ function DayPanelRow({ label, value, amount }: { label: string; value: string; a
 function CalendarItemRow({
   item,
   account,
+  transferAccounts,
   locale,
   userCurrency,
   mask,
@@ -1248,6 +1252,7 @@ function CalendarItemRow({
 }: {
   item: TransactionCalendarItem
   account: Account | undefined
+  transferAccounts: { from: TransferPillAccount; to: TransferPillAccount } | null
   locale: string
   userCurrency: string
   mask: (value: string) => string
@@ -1287,7 +1292,15 @@ function CalendarItemRow({
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <p className="text-sm font-semibold text-foreground truncate leading-tight">{item.description}</p>
+          {transferAccounts ? (
+            <TransferAccountsPill
+              from={transferAccounts.from}
+              to={transferAccounts.to}
+              description={item.description}
+            />
+          ) : (
+            <p className="text-sm font-semibold text-foreground truncate leading-tight">{item.description}</p>
+          )}
           {item.has_category_lines && (
             <span className="inline-flex items-center text-[9px] font-semibold uppercase tracking-wide text-violet-700 bg-violet-50 border border-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-900 px-1 py-0.5 rounded-full shrink-0">
               {t('categoryLines.badgeShort')}
@@ -1296,7 +1309,7 @@ function CalendarItemRow({
           {item.kind === 'projected' && item.source === 'recurring' && item.status !== 'pending' && (
             <ProjectedTransactionBadge />
           )}
-          {item.is_transfer && (
+          {item.is_transfer && !transferAccounts && (
             <ArrowLeftRight className="h-3 w-3 text-blue-600 shrink-0" />
           )}
           {item.is_ignored && (
@@ -1317,7 +1330,9 @@ function CalendarItemRow({
             </span>
           )}
         </div>
-        {(account || item.account_name) && (
+        {transferAccounts ? (
+          <p className="text-xs text-muted-foreground mt-0.5 truncate">{item.description}</p>
+        ) : (account || item.account_name) && (
           <div className="flex items-center gap-1.5 mt-0.5">
             {account && <AccountIcon account={account} size="xs" />}
             <span className="text-xs text-muted-foreground truncate">

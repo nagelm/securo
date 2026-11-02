@@ -126,6 +126,7 @@ async def get_transaction_calendar(
         requested_account_ids,
         activity_date_col,
     )
+    await attach_transfer_counterpart_accounts(session, actual_rows)
     balance_deltas = await _daily_balance_deltas_by_date(
         session,
         workspace_id,
@@ -182,6 +183,7 @@ async def get_transaction_calendar(
         range_date_col=activity_date_col,
         future_date_col=Transaction.date,
     )
+    await attach_transfer_counterpart_accounts(session, forecast_rows)
     forecast_deltas: dict[date, float] = {}
     for tx in forecast_rows:
         activity_date = _activity_date(tx, date_basis, accounting_mode)
@@ -486,6 +488,9 @@ def _actual_item(
         status=tx.status,
         source=tx.source,
         transfer_pair_id=tx.transfer_pair_id,
+        transfer_counterpart_account_id=tx.transfer_counterpart_account_id,
+        transfer_account=tx.transfer_account,
+        transfer_counterpart_account=tx.transfer_counterpart_account,
         is_transfer=is_transfer,
         is_ignored=ignored,
         has_category_lines=bool(tx.has_category_lines),
@@ -522,6 +527,9 @@ def _forecast_item(
         status=tx.status,
         source=tx.source,
         transfer_pair_id=tx.transfer_pair_id,
+        transfer_counterpart_account_id=tx.transfer_counterpart_account_id,
+        transfer_account=tx.transfer_account,
+        transfer_counterpart_account=tx.transfer_counterpart_account,
         is_transfer=is_transfer,
         is_ignored=ignored,
         has_category_lines=bool(tx.has_category_lines),
