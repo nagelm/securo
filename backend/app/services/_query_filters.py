@@ -17,6 +17,24 @@ from app.models.category import Category
 from app.models.transaction import Transaction
 
 
+
+def foreign_row_account_amount():
+    """SQL: what a row in another currency adds to its account's balance.
+
+    `amount_primary` remains only for rows with no rate for their account's
+    currency yet; it is a fallback, as the raw amount is after it.
+    """
+    return func.coalesce(
+        Transaction.amount_account, Transaction.amount_primary, Transaction.amount
+    )
+
+
+def row_account_amount(tx: Transaction, account_currency: str):
+    """The Python twin of the case every balance query uses."""
+    if tx.currency == account_currency:
+        return tx.amount
+    return tx.amount_account or tx.amount_primary or tx.amount
+
 def is_confirmed():
     """SQL filter: the charge is settled rather than merely authorized.
 

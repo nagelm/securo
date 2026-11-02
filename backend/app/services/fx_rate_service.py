@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.app_clock import app_today
 from app.core.config import get_settings
+from app.models.account import Account
 from app.models.fx_rate import FxRate
 from app.models.user import User
 from app.providers.openexchangerates import OpenExchangeRatesProvider
@@ -366,6 +367,36 @@ class PreloadedRates:
         return converted.quantize(Decimal("0.01")), rate
 
 
+async def _stamp_account_amount(
+    session: AsyncSession,
+    obj,
+    amount_field: str,
+    currency_field: str,
+    date_field: str,
+    allow_fetch: bool,
+) -> None:
+    """Set a transaction's amount in its account's currency, when it is in another.
+
+    As with the primary amount, no rate means the field stays as it is: never a fake 1:1.
+    """
+    account_id = getattr(obj, "account_id", None)
+    if not hasattr(obj, "amount_account") or account_id is None:
+        return
+    account = await session.get(Account, account_id)
+    amount = getattr(obj, amount_field, None)
+    currency = getattr(obj, currency_field, None)
+    if account is None or amount is None:
+        return
+    if currency == account.currency:
+        obj.amount_account = None
+        return
+    rate = await _resolve_rate(
+        session, currency, account.currency, getattr(obj, date_field, None), allow_fetch=allow_fetch
+    )
+    if rate is not None:
+        obj.amount_account = (Decimal(str(amount)) * rate).quantize(Decimal("0.01"))
+
+
 async def stamp_primary_amount(
     session: AsyncSession,
     user_id: uuid.UUID,
@@ -391,6 +422,8 @@ async def stamp_primary_amount(
     rate for its date lands. Pass ``allow_fetch=False`` to avoid the on-demand
     provider call (used by the healer to stay frugal).
     """
+    await _stamp_account_amount(session, obj, amount_field, currency_field, date_field, allow_fetch)
+
     user = await session.get(User, user_id)
     if not user:
         return

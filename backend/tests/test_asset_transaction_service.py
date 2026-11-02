@@ -197,6 +197,22 @@ async def test_delete_transaction_recomputes(session, test_workspace, market_ass
 
 
 @pytest.mark.asyncio
+async def test_deleting_a_buy_that_a_sale_relies_on_is_rejected(session, test_workspace, market_asset):
+    from fastapi import HTTPException
+
+    for kind, qty, when in (("buy", "10", date(2026, 1, 1)), ("sell", "8", date(2026, 2, 1))):
+        await asset_transaction_service.add_transaction(
+            session, market_asset.id, test_workspace.id,
+            AssetTransactionCreate(kind=kind, quantity=Decimal(qty), price=Decimal("20"), date=when),
+        )
+    txs = await asset_transaction_service.list_asset_transactions(session, market_asset.id, test_workspace.id)
+    buy = next(t for t in txs if t.kind == "buy")
+    with pytest.raises(HTTPException) as exc:
+        await asset_transaction_service.delete_transaction(session, buy.id, test_workspace.id)
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_update_transaction_recomputes(session, test_workspace, market_asset):
     await asset_transaction_service.add_transaction(
         session, market_asset.id, test_workspace.id,

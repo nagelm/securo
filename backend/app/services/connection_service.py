@@ -1645,6 +1645,11 @@ async def handle_oauth_callback(
                 transaction.fx_rate_used = txn_data.amount_in_account_currency / txn_data.amount
             else:
                 await stamp_primary_amount(session, user_id, transaction)
+            if (
+                txn_data.amount_in_account_currency is not None
+                and txn_data.currency != acct_currency
+            ):
+                transaction.amount_account = txn_data.amount_in_account_currency
 
         # After importing the initial batch, reconcile the opening balance so
         # that SUM(all transactions) matches the provider-reported balance. Any
@@ -2881,6 +2886,11 @@ async def sync_connection(
                     transaction.fx_rate_used = txn_data.amount_in_account_currency / txn_data.amount
                 else:
                     await stamp_primary_amount(session, user_id, transaction)
+                if (
+                    txn_data.amount_in_account_currency is not None
+                    and txn_data.currency != acct_currency
+                ):
+                    transaction.amount_account = txn_data.amount_in_account_currency
 
             # Pending rows the provider no longer lists have settled or been
             # dropped: the settled row takes over the user's edits.

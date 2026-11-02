@@ -96,7 +96,15 @@ async def find_unique_transaction_match(
         }
     ]
     if exact_matches:
-        # Indistinguishable exact candidates form a multiset. Consume one
-        # deterministically; the caller's exclusions prevent reusing it.
-        return min(exact_matches, key=lambda candidate: str(candidate.id))
+        # Indistinguishable exact candidates form a multiset. Consume the one
+        # closest in date, then the oldest; the caller's exclusions prevent
+        # reusing it. Id settles only a full tie, so the choice is repeatable.
+        return min(
+            exact_matches,
+            key=lambda candidate: (
+                abs((candidate.date - txn_data.date).days),
+                candidate.date,
+                str(candidate.id),
+            ),
+        )
     return None

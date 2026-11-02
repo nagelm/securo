@@ -278,6 +278,8 @@ async def apply_provider_edit(
                 changed.append("amount_primary")
     elif amount_changed or currency_changed or date_changed:
         await stamp_primary_amount(session, user_id, tx)
+    if txn_data.amount_in_account_currency is not None and txn_data.currency != account_currency:
+        tx.amount_account = txn_data.amount_in_account_currency
 
     if date_changed:
         # A row whose bill isn't known any more keeps its stored cycle date.

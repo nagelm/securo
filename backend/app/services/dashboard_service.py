@@ -18,6 +18,8 @@ from app.models.category import Category
 from app.models.recurring_transaction import RecurringTransaction
 from app.schemas.dashboard import DashboardSummary, SpendingByCategory, MonthlyTrend, ProjectedTransaction, DailyBalance, BalanceHistory
 from app.services._query_filters import (
+    foreign_row_account_amount,
+    row_account_amount,
     counts_as_user_pnl,
     owner_split_offset_by_category,
     owner_split_offset_pnl,
@@ -417,11 +419,7 @@ async def get_summary(
             ):
                 continue
             account_currency = tx.account.currency if tx.account else tx.currency
-            amount = (
-                tx.amount
-                if tx.currency == account_currency
-                else (tx.amount_primary or tx.amount)
-            )
+            amount = row_account_amount(tx, account_currency)
             signed = amount if tx.type == "credit" else -amount
             projected_balance[account_currency] = (
                 projected_balance.get(account_currency, 0.0) + float(signed)
@@ -603,8 +601,8 @@ async def get_summary(
     # Same posted-only rule as the native-currency totals above.
     primary_result = await session.execute(
         select(
-            func.sum(case((Transaction.type == "credit", Transaction.amount_primary), else_=0)),
-            func.sum(case((Transaction.type == "debit", Transaction.amount_primary), else_=0)),
+            func.sum(case((Transaction.type == "credit", _primary_amount_expr()), else_=0)),
+            func.sum(case((Transaction.type == "debit", _primary_amount_expr()), else_=0)),
         )
         .join(Account, Transaction.account_id == Account.id)
         .where(
@@ -616,7 +614,6 @@ async def get_summary(
             Transaction.source != "opening_balance",
             Transaction.status == "posted",
             counts_as_user_pnl(),
-            Transaction.amount_primary.isnot(None),
             *acct_filter,
         )
     )
@@ -1322,7 +1319,7 @@ def _signed_balance_expr(account_currency: str = ""):
     if account_currency:
         effective = case(
             (Transaction.currency == account_currency, Transaction.amount),
-            else_=func.coalesce(Transaction.amount_primary, Transaction.amount),
+            else_=foreign_row_account_amount(),
         )
     else:
         effective = Transaction.amount
@@ -1335,11 +1332,7 @@ def _signed_balance_expr(account_currency: str = ""):
 def _signed_transaction_amount(tx: Transaction) -> float:
     """Return a loaded transaction's signed amount in its account currency."""
     account_currency = tx.account.currency if tx.account else tx.currency
-    amount = (
-        tx.amount
-        if tx.currency == account_currency
-        else (tx.amount_primary or tx.amount)
-    )
+    amount = row_account_amount(tx, account_currency)
     signed = amount if tx.type == "credit" else -amount
     return float(signed)
 
@@ -1530,7 +1523,7 @@ async def _account_balances_at(
             # _signed_balance_expr with an empty account currency uses the amount.
             (Account.currency == "", Transaction.amount),
             (Transaction.currency == Account.currency, Transaction.amount),
-            else_=func.coalesce(Transaction.amount_primary, Transaction.amount),
+            else_=foreign_row_account_amount(),
         )
         signed = case((Transaction.type == "credit", effective), else_=-effective)
         rows = await session.execute(
@@ -1619,7 +1612,7 @@ async def _total_balance_by_currency(
     # the number of accounts.
     effective = case(
         (Transaction.currency == Account.currency, Transaction.amount),
-        else_=func.coalesce(Transaction.amount_primary, Transaction.amount),
+        else_=foreign_row_account_amount(),
     )
     signed = case(
         (Transaction.type == "credit", effective),
@@ -1751,7 +1744,7 @@ async def _daily_balance_deltas_by_date(
     """
     effective = case(
         (Transaction.currency == Account.currency, Transaction.amount),
-        else_=func.coalesce(Transaction.amount_primary, Transaction.amount),
+        else_=foreign_row_account_amount(),
     )
     signed = case(
         (Transaction.type == "credit", effective),

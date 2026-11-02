@@ -16,6 +16,7 @@ from app.models.transaction import Transaction
 from app.schemas.account import AccountCreate, AccountUpdate
 from app.services.account_order import ACCOUNT_LIST_ORDER, next_account_position
 from app.services._query_filters import (
+    foreign_row_account_amount,
     counts_as_pnl,
     counts_in_current_balance,
     counts_on_bill,
@@ -137,7 +138,7 @@ async def get_accounts(session: AsyncSession, workspace_id: uuid.UUID, include_c
     # (converts foreign txs to account's reporting currency)
     effective_amount = case(
         (Transaction.currency == Account.currency, Transaction.amount),
-        else_=func.coalesce(Transaction.amount_primary, Transaction.amount),
+        else_=foreign_row_account_amount(),
     )
     signed_amount = case(
         (Transaction.type == "credit", effective_amount),
@@ -627,7 +628,7 @@ async def sync_opening_balance_for_connected_account(
 
     effective_amount = case(
         (Transaction.currency == account.currency, Transaction.amount),
-        else_=func.coalesce(Transaction.amount_primary, Transaction.amount),
+        else_=foreign_row_account_amount(),
     )
     signed_amount = case(
         (Transaction.type == "credit", effective_amount),
@@ -854,7 +855,7 @@ async def get_account_summary(
     # Use amount_primary only when tx currency differs from account currency
     effective_amount = case(
         (Transaction.currency == account.currency, Transaction.amount),
-        else_=func.coalesce(Transaction.amount_primary, Transaction.amount),
+        else_=foreign_row_account_amount(),
     )
 
     # For bank-connected accounts, use the stored balance from the provider
@@ -1015,6 +1016,7 @@ async def get_account_summary(
             _scope(select(func.coalesce(func.sum(func.abs(effective_amount)), 0)).where(
                 Transaction.account_id == account_id,
                 Transaction.type == "debit",
+                Transaction.source != "opening_balance",
                 bucket_date <= today,
                 Transaction.status == "posted",
                 summary_filter,
@@ -1056,6 +1058,7 @@ async def get_account_summary(
             _scope(select(func.coalesce(func.sum(func.abs(effective_amount)), 0)).where(
                 Transaction.account_id == account_id,
                 Transaction.type == "debit",
+                Transaction.source != "opening_balance",
                 forecast_condition,
                 summary_filter,
             ))
@@ -1162,7 +1165,7 @@ def _signed_amount_expr(account_currency: str):
     Uses amount_primary only when tx currency differs from account currency."""
     effective = case(
         (Transaction.currency == account_currency, Transaction.amount),
-        else_=func.coalesce(Transaction.amount_primary, Transaction.amount),
+        else_=foreign_row_account_amount(),
     )
     return case(
         (Transaction.type == "credit", effective),

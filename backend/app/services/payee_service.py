@@ -471,48 +471,43 @@ async def get_payee_summary(
     if not payee:
         raise ValueError("Payee not found")
 
-    base = select(Transaction).where(
+    scope = [
         Transaction.payee_id == payee_id,
         Transaction.workspace_id == workspace_id,
-    )
+        Transaction.is_ignored == False,  # noqa: E712
+    ]
     if start_date:
-        base = base.where(Transaction.date >= start_date)
+        scope.append(Transaction.date >= start_date)
     if end_date:
-        base = base.where(Transaction.date <= end_date)
+        scope.append(Transaction.date <= end_date)
+    amount = func.coalesce(Transaction.amount_primary, Transaction.amount)
 
     # Totals
     totals = await session.execute(
         select(
             func.coalesce(func.sum(
                 case(
-                    (Transaction.type == "debit", Transaction.amount),
+                    (Transaction.type == "debit", amount),
                     else_=Decimal("0"),
                 )
             ), Decimal("0")).label("total_spent"),
             func.coalesce(func.sum(
                 case(
-                    (Transaction.type == "credit", Transaction.amount),
+                    (Transaction.type == "credit", amount),
                     else_=Decimal("0"),
                 )
             ), Decimal("0")).label("total_received"),
             func.count(Transaction.id).label("tx_count"),
             func.max(Transaction.date).label("last_date"),
         )
-        .where(
-            Transaction.payee_id == payee_id,
-            Transaction.workspace_id == workspace_id,
-        )
+        .where(*scope)
     )
     row = totals.one()
 
     # Most common category
     cat_result = await session.execute(
         select(Transaction.category_id, func.count(Transaction.id).label("cnt"))
-        .where(
-            Transaction.payee_id == payee_id,
-            Transaction.workspace_id == workspace_id,
-            Transaction.category_id.isnot(None),
-        )
+        .where(*scope, Transaction.category_id.isnot(None))
         .group_by(Transaction.category_id)
         .order_by(func.count(Transaction.id).desc())
         .limit(1)
