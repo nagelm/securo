@@ -31,7 +31,8 @@ vi.mock('@/contexts/auth-context', () => ({
   useAuth: () => ({ user: { preferences: { currency_display: 'BRL' } } }),
 }))
 vi.mock('@/contexts/workspace-context', () => ({
-  useWorkspace: () => ({ canWrite: true }),
+  // hasModule: the fork's savings-goal button asks for the goals module.
+  useWorkspace: () => ({ canWrite: true, hasModule: () => true }),
 }))
 
 interface ReservedAccountFixture {

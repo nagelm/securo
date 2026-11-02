@@ -51,7 +51,7 @@ vi.mock('@/contexts/auth-context', () => ({
 }))
 
 vi.mock('@/contexts/workspace-context', () => ({
-  useWorkspace: () => ({ canWrite: true }),
+  useWorkspace: () => ({ canWrite: true, hasModule: () => true }),
 }))
 
 // Closes on the 30th, bills due on the 10th. The newest bill is due
