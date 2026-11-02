@@ -43,8 +43,9 @@ describe('nav catalog', () => {
     expect([...covered].sort()).toEqual([...MODULE_IDS].sort())
   })
 
-  it('gives every link a distinct module', () => {
-    const covered = navItems.filter((i) => i.type === 'link').map((i) => i.module)
+  it("gives every link a distinct module, except Forecast sharing Recurring's and Insights sharing Reports'", () => {
+    const links = navItems.filter((i) => i.type === 'link')
+    const covered = links.filter((i) => i.key !== 'forecast' && i.key !== 'insights').map((i) => i.module)
     expect(new Set(covered).size).toBe(covered.length)
   })
 })
