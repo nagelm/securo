@@ -1573,7 +1573,7 @@ async def _apply_update_to_row(
             continue
         setattr(tx, key, value)
 
-    restamp_fields = {"amount", "currency", "date"}
+    restamp_fields = {"amount", "currency", "date", "account_id"}
     needs_restamp = bool(restamp_fields & update_data.keys())
 
     if has_fx_override:

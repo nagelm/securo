@@ -19,6 +19,7 @@ from app.schemas.transaction_calendar import (
     TransactionCalendarItem,
     TransactionCalendarResponse,
 )
+from app.services._query_filters import row_account_amount
 from app.services.dashboard_service import (
     _balance_at,
     _daily_balance_deltas_by_date,
@@ -332,12 +333,7 @@ async def _signed_balance_delta_primary(
     primary_currency: str,
 ) -> float:
     account_currency = tx.account.currency if tx.account else tx.currency
-    effective = (
-        tx.amount
-        if tx.currency == account_currency
-        else Decimal(str(tx.amount_primary or tx.amount))
-    )
-    amount = abs(Decimal(str(effective)))
+    amount = abs(Decimal(str(row_account_amount(tx, account_currency))))
     if account_currency != primary_currency:
         amount, _ = await fx_convert(session, amount, account_currency, primary_currency)
     signed = amount if tx.type == "credit" else -amount

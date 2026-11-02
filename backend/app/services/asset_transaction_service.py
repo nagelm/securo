@@ -338,6 +338,8 @@ async def delete_transaction(
     asset = await _load_asset(session, tx.asset_id, workspace_id)
     if asset is None:
         return None
+    remaining = [t for t in await _load_txs(session, asset.id) if t.id != tx.id]
+    _raise_if_oversell(remaining)
     await session.delete(tx)
     await session.flush()
     await recompute_and_cache(session, asset)

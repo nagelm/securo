@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.app_clock import app_today
 from app.core.config import get_settings
+from app.models.account import Account
 from app.models.fx_rate import FxRate
 from app.models.user import User
 from app.providers.openexchangerates import OpenExchangeRatesProvider
@@ -94,7 +95,10 @@ async def _resolve_rate(
     usd_to_target = await _get_exact_date_rate(session, to_currency, target)
 
     # Step 2: If missing, fetch from provider for exact date
-    if allow_fetch and (usd_to_source is None or usd_to_target is None):
+    fetch_allowed = allow_fetch and (
+        target == app_today() or get_settings().fx_fetch_history_on_demand
+    )
+    if fetch_allowed and (usd_to_source is None or usd_to_target is None):
         try:
             synced = await sync_rates(session, target)
             if synced > 0:
@@ -303,6 +307,8 @@ async def stamp_primary_amount(
     rate for its date lands. Pass ``allow_fetch=False`` to avoid the on-demand
     provider call (used by the healer to stay frugal).
     """
+    await _stamp_account_amount(session, obj, amount_field, currency_field, date_field, allow_fetch)
+
     user = await session.get(User, user_id)
     if not user:
         return

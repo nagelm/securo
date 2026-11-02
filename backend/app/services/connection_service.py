@@ -1516,6 +1516,11 @@ async def handle_oauth_callback(
                 transaction,
                 _bank_converted_amount(txn_data, acct_currency, user_currency),
             )
+            if (
+                txn_data.amount_in_account_currency is not None
+                and txn_data.currency != acct_currency
+            ):
+                transaction.amount_account = txn_data.amount_in_account_currency
 
         # After importing the initial batch, reconcile the opening balance so
         # that SUM(all transactions) matches the provider-reported balance. Any

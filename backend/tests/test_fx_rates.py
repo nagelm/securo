@@ -183,6 +183,21 @@ class TestResolveRate:
     """Tests for fx_rate_service._resolve_rate() (returns None, no fake 1:1)."""
 
     @pytest.mark.asyncio
+    async def test_no_provider_call_for_past_dates_when_history_fetch_is_off(
+        self, session: AsyncSession, historical_fx_rates, monkeypatch
+    ):
+        """Fork: with fx_fetch_history_on_demand off, a past date uses the
+        closest stored rate and never calls the provider for that day."""
+        from app.core.config import get_settings
+        from app.services.fx_rate_service import _resolve_rate
+
+        monkeypatch.setattr(get_settings(), "fx_fetch_history_on_demand", False)
+        with patch("app.services.fx_rate_service.sync_rates", new_callable=AsyncMock) as sync:
+            rate = await _resolve_rate(session, "USD", "BRL", date(2025, 6, 20))
+        sync.assert_not_called()
+        assert rate == Decimal("4.8000000000")
+
+    @pytest.mark.asyncio
     async def test_returns_none_when_no_rate(self, session: AsyncSession):
         from app.services.fx_rate_service import _resolve_rate
 
