@@ -45,6 +45,14 @@ KNOWN_PROVIDERS = [
         "requires_institution_select": False,
         "supports_asset_sync": True,
     },
+    {
+        "name": "akahu",
+        "display_name": "Akahu",
+        "description": "New Zealand banks, cards and KiwiSaver via an Akahu Personal App",
+        "flow_type": "token",
+        "requires_institution_select": False,
+        "supports_asset_sync": True,
+    },
 ]
 
 
@@ -86,6 +94,12 @@ def _available_providers(settings: Settings | None = None) -> dict[str, type[Ban
     for name, (module, class_name) in _CREDENTIALED_PROVIDERS.items():
         if is_configured(name, settings):
             providers[name] = getattr(import_module(module), class_name)
+    # Akahu takes each person's tokens on their connection, so the instance
+    # only switches it on.
+    if settings.akahu_enabled:
+        from app.providers.akahu import AkahuProvider
+
+        providers["akahu"] = AkahuProvider
     return providers
 
 

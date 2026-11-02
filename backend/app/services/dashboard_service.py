@@ -521,6 +521,7 @@ async def get_summary(
         session, workspace_id, as_of_date=cutoff, primary_currency=primary_currency,
         by_workspace=True,
         group_ids=(asset_group_ids or []) if filtered else None,
+        for_net_worth=True,
     )
 
     # Cash vs investment *accounts* (issue #959). Same cutoff / account filter
@@ -1407,6 +1408,12 @@ async def _account_balance_at(
         # including whatever pending entries the provider happens to include.
         if cutoff >= today:
             return current_bal
+
+        # An account whose balance is its holdings' value has no transactions
+        # to walk back with; its past is the holdings' value history.
+        held = await linked_holdings_values(session, account, [cutoff])
+        if held is not None:
+            return float(held[cutoff])
 
         status_filter = [] if include_pending else [Transaction.status == "posted"]
         # Subtract activity after cutoff to get the balance AT cutoff

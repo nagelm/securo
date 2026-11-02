@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     simplefin_enabled: bool = False
     simplefin_api_url: str = "https://beta-bridge.simplefin.org"
 
+    # Akahu (New Zealand banks via an Akahu Personal App, token flow). Off by
+    # default. Each connection supplies its own App ID and User Access tokens.
+    akahu_enabled: bool = False
+
     # Frontend
     frontend_url: str = "http://localhost:5173"
     # Absolute path to a built frontend (Vite's `dist`), served in-process by
