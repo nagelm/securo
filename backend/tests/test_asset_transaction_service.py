@@ -206,6 +206,7 @@ async def test_deleting_a_buy_that_a_sale_relies_on_is_rejected(session, test_wo
             AssetTransactionCreate(kind=kind, quantity=Decimal(qty), price=Decimal("20"), date=when),
         )
     txs = await asset_transaction_service.list_asset_transactions(session, market_asset.id, test_workspace.id)
+    assert txs is not None
     buy = next(t for t in txs if t.kind == "buy")
     with pytest.raises(HTTPException) as exc:
         await asset_transaction_service.delete_transaction(session, buy.id, test_workspace.id)

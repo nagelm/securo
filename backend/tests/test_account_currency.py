@@ -174,6 +174,7 @@ async def test_opening_row_is_not_an_expense_in_the_account_summary(
     summary = await account_service.get_account_summary(
         session, loan.id, test_workspace.id, date_to=today + timedelta(days=60)
     )
+    assert summary is not None
     assert summary["monthly_expenses"] == 0
     assert summary["projected_expenses"] == 0
 
@@ -220,4 +221,4 @@ async def test_a_match_among_identical_rows_takes_the_closest_date(session, test
         description="INVENTED WEEKLY PAYMENT", payee=None, payee_raw=None,
     )
     match = await find_unique_transaction_match(session, test_account.id, incoming, ["manual"])
-    assert match.id == near.id
+    assert match is not None and match.id == near.id

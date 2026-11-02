@@ -4,9 +4,11 @@ import time
 import uuid
 from dataclasses import dataclass
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi import HTTPException
 from fastapi_users.jwt import generate_jwt
 from httpx import AsyncClient
 from sqlalchemy import text
@@ -114,8 +116,12 @@ async def test_an_attachment_is_reached_only_through_its_own_transaction(
         assert (await client.delete(url, headers=auth_headers)).status_code == 404
 
 
+def _fake_tx(**fields) -> Any:
+    return cast(Any, SimpleNamespace(**fields))
+
+
 def test_a_catastrophic_regex_gives_up_instead_of_hanging():
-    tx = SimpleNamespace(description="A" * 64 + "!")
+    tx = _fake_tx(description="A" * 64 + "!")
     condition = {"field": "description", "op": "regex", "value": "(A+)+$"}
     started = time.monotonic()
     assert _match_condition(condition, tx) is False
@@ -123,19 +129,19 @@ def test_a_catastrophic_regex_gives_up_instead_of_hanging():
 
 
 def test_ordinary_regex_rules_keep_matching():
-    tx = SimpleNamespace(description="Café Example 123")
+    tx = _fake_tx(description="Café Example 123")
     assert _match_condition({"field": "description", "op": "regex", "value": r"cafe\s+\w+"}, tx)
     assert not _match_condition({"field": "description", "op": "regex", "value": r"^example"}, tx)
 
 
 @pytest.mark.parametrize("op", ["gt", "gte", "lt", "lte"])
 def test_an_unreadable_number_in_a_rule_matches_nothing(op):
-    tx = SimpleNamespace(amount="10.00")
+    tx = _fake_tx(amount="10.00")
     assert _match_condition({"field": "amount", "op": op, "value": "abc"}, tx) is False
 
 
 def test_numeric_rule_conditions_still_compare():
-    tx = SimpleNamespace(amount="10.00")
+    tx = _fake_tx(amount="10.00")
     assert _match_condition({"field": "amount", "op": "gt", "value": "5"}, tx) is True
     assert _match_condition({"field": "amount", "op": "lt", "value": "5"}, tx) is False
 
@@ -275,15 +281,15 @@ async def test_a_rejected_attempt_does_not_extend_the_lockout():
     redis, pipe = _limiter_redis(5, now - 50)
     added = []
     pipe.zadd = lambda *a: added.append(a) or pipe
-    request = SimpleNamespace(
+    request: Any = SimpleNamespace(
         url=SimpleNamespace(path="/x"), headers={}, client=SimpleNamespace(host="192.0.2.1")
     )
     with patch("app.core.rate_limit.get_redis", AsyncMock(return_value=redis)):
-        with pytest.raises(Exception) as caught:
+        with pytest.raises(HTTPException) as caught:
             await limiter(request)
     assert caught.value.status_code == 429
     assert added == []
-    assert 1 <= int(caught.value.headers["Retry-After"]) <= 11
+    assert 1 <= int((caught.value.headers or {})["Retry-After"]) <= 11
 
 
 @pytest.mark.asyncio
