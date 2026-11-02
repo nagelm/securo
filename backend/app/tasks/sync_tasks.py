@@ -22,7 +22,9 @@ from app.services.connection_service import SyncOutcome
 
 logger = logging.getLogger(__name__)
 
-PROVIDER_REFRESH_THRESHOLD = timedelta(hours=20)
+def _provider_refresh_threshold() -> timedelta:
+    """How often a sync may ask the provider to re-read the bank."""
+    return timedelta(minutes=get_settings().provider_refresh_minutes)
 
 # Scheduled-sync backoff for connections whose last scheduled sync failed.
 # A failed sync does not advance last_sync_at, so without this the hourly
@@ -165,7 +167,7 @@ def _should_trigger_provider_refresh(settings: dict | None, now: datetime) -> bo
         return True
     if last_refresh.tzinfo is None:
         return True
-    return now - last_refresh >= PROVIDER_REFRESH_THRESHOLD
+    return now - last_refresh >= _provider_refresh_threshold()
 
 
 def _make_session_maker():
