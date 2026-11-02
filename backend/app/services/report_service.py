@@ -23,7 +23,8 @@ from app.services._query_filters import (
 )
 from app.services.admin_service import get_credit_card_accounting_mode
 from app.services.account_service import get_account_name
-from app.services.fx_rate_service import convert
+from app.services.asset_service import counted_in_net_worth
+from app.services.fx_rate_service import PreloadedRates, convert
 from app.schemas.report import (
     CategoryTrendItem,
     ReportBreakdown,

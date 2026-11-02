@@ -30,6 +30,7 @@ from app.services.text_similarity import token_overlap
 from app.services.connection_service import (
     _find_existing_connected_account,
     _merge_sync_metadata,
+    _match_category_hint,
     _match_pluggy_category,
     create_connect_token,
     delete_connection,
@@ -233,6 +234,63 @@ async def test_match_pluggy_user_has_no_category(session: AsyncSession, test_wor
     # "Eating out" maps to "Alimentação" but we don't create it
     cat_id = await _match_pluggy_category(session, test_workspace.id, "Eating out")
     assert cat_id is None
+
+
+# ---------------------------------------------------------------------------
+# _match_category_hint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["Groceries", "Mercado", "Lebensmittel"])
+async def test_match_category_hint_any_language(
+    session: AsyncSession, test_user, test_workspace, name
+):
+    """A default-category key matches the seeded name in whatever language."""
+    category = await _make_category(session, test_user.id, name)
+    assert await _match_category_hint(session, test_workspace.id, "groceries") == category.id
+
+
+@pytest.mark.asyncio
+async def test_match_category_hint_travel_prefers_own_category_then_leisure(
+    session: AsyncSession, test_user, test_workspace
+):
+    """`travel` has no default category: it finds a user's Travel, else Leisure."""
+    leisure = await _make_category(session, test_user.id, "Leisure")
+    assert await _match_category_hint(session, test_workspace.id, "travel") == leisure.id
+    travel = await _make_category(session, test_user.id, "Travel")
+    assert await _match_category_hint(session, test_workspace.id, "travel") == travel.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("hint,own,default", [
+    ("takeaways", "Takeaways", "Food & Dining"),
+    ("public_transport", "Public transport & parking", "Transport"),
+    ("childcare", "Childcare", "Education"),
+    ("games", "Games", "Leisure"),
+    ("haircuts", "Personal Care", "Health"),
+    ("interest", "Interest", "Investments"),
+])
+async def test_match_category_hint_split_prefers_own_category_then_default(
+    session: AsyncSession, test_user, test_workspace, hint, own, default
+):
+    """A finer Akahu code finds the user's own split category, else the default."""
+    fallback = await _make_category(session, test_user.id, default)
+    assert await _match_category_hint(session, test_workspace.id, hint) == fallback.id
+    split = await _make_category(session, test_user.id, own)
+    assert await _match_category_hint(session, test_workspace.id, hint) == split.id
+
+
+@pytest.mark.asyncio
+async def test_match_category_hint_misses(session: AsyncSession, test_user, test_workspace):
+    await _make_category(session, test_user.id, "Groceries")
+    assert await _match_category_hint(session, test_workspace.id, "unknown-key") is None
+    assert await _match_category_hint(session, test_workspace.id, None) is None
+    assert await _match_category_hint(session, test_workspace.id, "food") is None
+    assert (
+        await _match_category_hint(session, test_workspace.id, "groceries", enabled=False)
+        is None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2300,6 +2358,120 @@ async def test_sync_connection_with_category_mapping(session: AsyncSession, test
         result_conn, _, _ = await sync_connection(session, conn.id, test_workspace.id, test_user.id)
 
     assert result_conn.status == "active"
+
+
+@pytest.mark.asyncio
+async def test_sync_connection_resolves_category_hint(
+    session: AsyncSession, test_user, test_workspace
+):
+    conn = await _make_connection(session, test_user.id, "Hint Bank")
+    groceries = await _make_category(session, test_user.id, "Groceries")
+
+    mock_provider = AsyncMock()
+    mock_provider.refresh_credentials = AsyncMock(return_value={"token": "t"})
+    mock_provider.get_accounts = AsyncMock(return_value=[
+        AccountData(
+            external_id="hint-acc-1", name="Everyday",
+            type="checking", balance=Decimal("100"), currency="NZD",
+        ),
+    ])
+    mock_provider.get_transactions = AsyncMock(return_value=[
+        TransactionData(
+            external_id="hint-tx-1", description="Countdown",
+            amount=Decimal("42.50"), date=date.today(), type="debit",
+            currency="NZD", category_hint="groceries",
+        ),
+    ])
+
+    with patch("app.services.connection_service.get_provider", return_value=mock_provider),          patch("app.services.connection_service.detect_transfer_pairs", new_callable=AsyncMock),          patch("app.services.connection_service.stamp_primary_amount", new_callable=AsyncMock):
+        await sync_connection(session, conn.id, test_workspace.id, test_user.id)
+
+    tx = (
+        await session.execute(
+            select(Transaction).where(Transaction.external_id == "hint-tx-1")
+        )
+    ).scalar_one()
+    assert tx.category_id == groceries.id
+
+
+@pytest.mark.asyncio
+async def test_sync_connection_writes_provider_notes_and_payee_website(
+    session: AsyncSession, test_user, test_workspace
+):
+    from app.models.payee import Payee
+
+    conn = await _make_connection(session, test_user.id, "Notes Bank")
+    mock_provider = AsyncMock()
+    mock_provider.refresh_credentials = AsyncMock(return_value={"token": "t"})
+    mock_provider.get_accounts = AsyncMock(return_value=[
+        AccountData(
+            external_id="notes-acc-1", name="Everyday",
+            type="checking", balance=Decimal("100"), currency="NZD",
+        ),
+    ])
+    mock_provider.get_transactions = AsyncMock(return_value=[
+        TransactionData(
+            external_id="notes-tx-1", description="Example Cafe",
+            amount=Decimal("8.50"), date=date.today(), type="debit", currency="NZD",
+            payee="Example Cafe", payee_website="https://cafe.example/",
+            payee_logo_url="https://logo.example/cafe.png",
+            notes="Particulars: LUNCH · Reference: TEAM",
+        ),
+    ])
+
+    with patch("app.services.connection_service.get_provider", return_value=mock_provider), \
+         patch("app.services.connection_service.detect_transfer_pairs", new_callable=AsyncMock), \
+         patch("app.services.connection_service.stamp_primary_amount", new_callable=AsyncMock):
+        await sync_connection(session, conn.id, test_workspace.id, test_user.id)
+
+    tx = (
+        await session.execute(select(Transaction).where(Transaction.external_id == "notes-tx-1"))
+    ).scalar_one()
+    assert tx.notes == "Particulars: LUNCH · Reference: TEAM"
+    payee = (await session.execute(select(Payee).where(Payee.id == tx.payee_id))).scalar_one()
+    assert payee.website == "https://cafe.example/"
+    assert payee.logo_url == "https://logo.example/cafe.png"
+
+
+@pytest.mark.asyncio
+async def test_sync_keeps_a_logo_the_user_set(session: AsyncSession, test_user, test_workspace):
+    from app.models.payee import Payee
+
+    own = Payee(
+        user_id=test_user.id, workspace_id=test_workspace.id, name="Example Cafe",
+        website="https://own.example/", logo_url="https://img.example/own-logo.png",
+    )
+    session.add(own)
+    await session.commit()
+
+    conn = await _make_connection(session, test_user.id, "Logo Bank")
+    mock_provider = AsyncMock()
+    mock_provider.refresh_credentials = AsyncMock(return_value={"token": "t"})
+    mock_provider.get_accounts = AsyncMock(return_value=[
+        AccountData(
+            external_id="logo-acc-1", name="Everyday",
+            type="checking", balance=Decimal("100"), currency="NZD",
+        ),
+    ])
+    mock_provider.get_transactions = AsyncMock(return_value=[
+        TransactionData(
+            external_id="logo-tx-1", description="Example Cafe",
+            amount=Decimal("8.50"), date=date.today(), type="debit", currency="NZD",
+            payee="Example Cafe", payee_website="https://cafe.example/",
+            payee_logo_url="https://logo.example/cafe.png",
+        ),
+    ])
+
+    with patch("app.services.connection_service.get_provider", return_value=mock_provider),          patch("app.services.connection_service.detect_transfer_pairs", new_callable=AsyncMock),          patch("app.services.connection_service.stamp_primary_amount", new_callable=AsyncMock):
+        await sync_connection(session, conn.id, test_workspace.id, test_user.id)
+
+    tx = (
+        await session.execute(select(Transaction).where(Transaction.external_id == "logo-tx-1"))
+    ).scalar_one()
+    assert tx.payee_id == own.id
+    await session.refresh(own)
+    assert own.logo_url == "https://img.example/own-logo.png"
+    assert own.website == "https://own.example/"
 
 
 @pytest.mark.asyncio
@@ -5020,6 +5192,40 @@ def _institution_provider(institution_name: str) -> AsyncMock:
     mock.get_holdings = AsyncMock(return_value=[])
     mock.get_bills = AsyncMock(return_value=[])
     return mock
+
+
+@pytest.mark.asyncio
+async def test_sync_keeps_account_names_for_providers_that_send_nicknames(
+    session: AsyncSession, test_user, test_workspace,
+):
+    """A provider that passes the user's own account names (Akahu) never gets
+    the institution copied into display_name, on create or on backfill."""
+    conn = await _make_connection(session, test_user.id, "Nickname Bank")
+    existing = Account(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        connection_id=conn.id, external_id="acc-1", name="House Fund",
+        type="savings", balance=Decimal("0"), currency="NZD",
+    )
+    session.add(existing)
+    await session.commit()
+
+    mock = _institution_provider("Kiwibank")
+    mock.names_accounts_by_institution = False
+    mock.get_accounts.return_value.append(AccountData(
+        external_id="acc-2", name="Car Fund", type="savings",
+        balance=Decimal("0"), currency="NZD",
+        institution_external_id="CON-1", institution_name="Kiwibank",
+    ))
+    with patch("app.services.connection_service.get_provider", return_value=mock), \
+         patch("app.services.connection_service.detect_transfer_pairs", new_callable=AsyncMock), \
+         patch("app.services.connection_service.stamp_primary_amount", new_callable=AsyncMock):
+        await sync_connection(session, conn.id, test_workspace.id, test_user.id)
+
+    rows = (
+        await session.execute(select(Account).where(Account.connection_id == conn.id))
+    ).scalars().all()
+    assert {a.external_id: a.display_name for a in rows} == {"acc-1": None, "acc-2": None}
+    assert all(a.institution_id is not None for a in rows)
 
 
 @pytest.mark.asyncio

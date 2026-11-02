@@ -724,7 +724,7 @@ async def _recompute_effective_dates(session: AsyncSession, account: Account) ->
 
 
 async def sync_opening_balance_for_connected_account(
-    session: AsyncSession, account: Account
+    session: AsyncSession, account: Account, include_pending: Optional[bool] = True
 ) -> None:
     """Reconcile the opening_balance transaction so SUM(all txs) = account.balance.
 
@@ -736,6 +736,12 @@ async def sync_opening_balance_for_connected_account(
 
     Call after adding new transactions in a sync (initial or incremental).
     Does not commit; the caller is responsible for the transaction boundary.
+
+    Fork: ``include_pending`` says whether the provider's balance already
+    counts the account's pending rows. ``None`` means it depends on the bank
+    (Akahu: card balances leave pending out, some cheque accounts take
+    them in): the reading that leaves the stored opening row where it is wins,
+    because a pending row appearing is not missing history.
     """
     if account.connection_id is None:
         return
@@ -763,8 +769,12 @@ async def sync_opening_balance_for_connected_account(
         else_=-effective_amount,
     )
 
+    pending_amount = case((Transaction.status == "pending", signed_amount), else_=0)
     sum_result = await session.execute(
-        select(func.coalesce(func.sum(signed_amount), 0)).where(
+        select(
+            func.coalesce(func.sum(signed_amount), 0),
+            func.coalesce(func.sum(pending_amount), 0),
+        ).where(
             Transaction.account_id == account.id,
             Transaction.source != "opening_balance",
             Transaction.date <= balance_cutoff,
@@ -777,9 +787,9 @@ async def sync_opening_balance_for_connected_account(
             ),
         )
     )
-    tx_sum = Decimal(str(sum_result.scalar() or 0))
-
-    offset = Decimal(str(target)) - tx_sum
+    all_sum, pending_sum = sum_result.one()
+    tx_sum = Decimal(str(all_sum or 0))
+    pending_sum = Decimal(str(pending_sum or 0))
 
     existing = await session.execute(
         select(Transaction).where(
@@ -788,6 +798,17 @@ async def sync_opening_balance_for_connected_account(
         )
     )
     existing_tx = existing.scalar_one_or_none()
+
+    with_pending = Decimal(str(target)) - tx_sum
+    without_pending = with_pending + pending_sum
+    if include_pending is None:
+        current = Decimal("0")
+        if existing_tx is not None:
+            current = existing_tx.amount if existing_tx.type == "credit" else -existing_tx.amount
+        keeps_with = abs(with_pending - current) < Decimal("0.01")
+        keeps_without = abs(without_pending - current) < Decimal("0.01")
+        include_pending = keeps_with and not keeps_without
+    offset = with_pending if include_pending else without_pending
 
     # Offsets below one cent are rounding noise; drop any stale opening tx.
     if abs(offset) < Decimal("0.01"):
@@ -1516,6 +1537,17 @@ async def get_account_balance_history(
     if sign != 1.0:
         for point in series:
             point["balance"] = round(point["balance"] * sign, 2)
+
+    # An account whose balance is its holdings' value (no transactions to walk
+    # back with) shows the holdings' value history for past days.
+    from app.services.asset_service import linked_holdings_values
+
+    past = [_Date.fromisoformat(p["date"]) for p in series]
+    held = await linked_holdings_values(session, account, [d for d in past if d < today])
+    if held:
+        for point, day in zip(series, past):
+            if day in held:
+                point["balance"] = round(float(held[day]), 2)
 
     return series
 

@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -27,6 +28,23 @@ interface TokenConnectDialogProps {
 
 const PROVIDER_BRIDGE_URLS: Record<string, string> = {
   simplefin: 'https://bridge.simplefin.org/simplefin/create',
+  akahu: 'https://my.akahu.nz/developers',
+}
+
+// Where a provider's user fixes a connection the provider itself lost (e.g.
+// a bank Akahu can no longer reach); offered only when reconnecting.
+const PROVIDER_RECONNECT_URLS: Record<string, string> = {
+  akahu: 'https://my.akahu.nz/connections',
+}
+
+// Providers whose credentials are several separate tokens rather than one
+// setup token. Each field is a single-line input; the values are joined with a
+// space for the provider, which picks them apart by their prefixes.
+const PROVIDER_TOKEN_FIELDS: Record<string, { key: string; placeholder: string }[]> = {
+  akahu: [
+    { key: 'userToken', placeholder: 'user_token_…' },
+    { key: 'appToken', placeholder: 'app_token_…' },
+  ],
 }
 
 export function TokenConnectDialog({
@@ -40,23 +58,33 @@ export function TokenConnectDialog({
   const { user } = useAuth()
   const queryClient = useQueryClient()
   const [token, setToken] = useState('')
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [syncAssets, setSyncAssets] = useState(true)
 
   useEffect(() => {
     if (!open) {
       setToken('')
+      setFieldValues({})
       setSubmitting(false)
       setSyncAssets(true)
     }
   }, [open])
 
   const bridgeUrl = PROVIDER_BRIDGE_URLS[provider]
+  const reconnectUrl = PROVIDER_RECONNECT_URLS[provider]
   const i18nKey = `accounts.tokenConnect.${provider}`
   const isReconnect = Boolean(reconnectConnectionId)
+  const tokenFields = PROVIDER_TOKEN_FIELDS[provider]
+  const code = tokenFields
+    ? tokenFields.map((f) => (fieldValues[f.key] ?? '').trim()).join(' ')
+    : token.trim()
+  const complete = tokenFields
+    ? tokenFields.every((f) => (fieldValues[f.key] ?? '').trim())
+    : Boolean(token.trim())
 
   const handleSubmit = async () => {
-    if (!token.trim()) return
+    if (!complete) return
     setSubmitting(true)
     const onConnected = () => {
       invalidateFinancialQueries(queryClient)
@@ -75,7 +103,7 @@ export function TokenConnectDialog({
         )
     try {
       await connections.handleCallback(
-        token.trim(),
+        code,
         provider,
         undefined,
         supportsAssetSync && !isReconnect ? { sync_assets: syncAssets } : undefined,
@@ -115,10 +143,19 @@ export function TokenConnectDialog({
           </p>
         </DialogHeader>
 
+        {isReconnect && reconnectUrl && (
+          <Button asChild variant="outline" className="w-full justify-between">
+            <a href={reconnectUrl} target="_blank" rel="noreferrer">
+              <span>{t(`${i18nKey}.openConnections`)}</span>
+              <ExternalLink size={14} />
+            </a>
+          </Button>
+        )}
+
         {bridgeUrl && (
           <Button asChild variant="outline" className="w-full justify-between">
             <a href={bridgeUrl} target="_blank" rel="noreferrer">
-              <span>{t('accounts.tokenConnect.openBridge')}</span>
+              <span>{t(`${i18nKey}.openBridge`, t('accounts.tokenConnect.openBridge'))}</span>
               <ExternalLink size={14} />
             </a>
           </Button>
@@ -143,9 +180,34 @@ export function TokenConnectDialog({
           </div>
         )}
 
+        {tokenFields ? (
+          <div className="space-y-3">
+            {tokenFields.map((field) => (
+              <div key={field.key} className="space-y-1.5">
+                <label className="text-sm font-medium" htmlFor={`securo-token-${field.key}`}>
+                  {t(`${i18nKey}.${field.key}Label`)}
+                </label>
+                <Input
+                  id={`securo-token-${field.key}`}
+                  type="password"
+                  className="font-mono"
+                  placeholder={field.placeholder}
+                  value={fieldValues[field.key] ?? ''}
+                  onChange={(e) => setFieldValues((v) => ({ ...v, [field.key]: e.target.value }))}
+                  spellCheck={false}
+                  autoComplete="off"
+                  disabled={submitting}
+                />
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground">
+              {t(`${i18nKey}.tokenHelp`, t('accounts.tokenConnect.tokenHelp'))}
+            </p>
+          </div>
+        ) : (
         <div className="space-y-1.5">
           <label className="text-sm font-medium" htmlFor="securo-token-input">
-            {t('accounts.tokenConnect.tokenLabel')}
+            {t(`${i18nKey}.tokenLabel`, t('accounts.tokenConnect.tokenLabel'))}
           </label>
           <textarea
             id="securo-token-input"
@@ -160,15 +222,16 @@ export function TokenConnectDialog({
           <p className="text-xs text-muted-foreground">
             {submitting && !isReconnect
               ? t('accounts.oauthCallback.linking')
-              : t('accounts.tokenConnect.tokenHelp')}
+              : t(`${i18nKey}.tokenHelp`, t('accounts.tokenConnect.tokenHelp'))}
           </p>
         </div>
+        )}
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={submitting}>
             {t('common.cancel')}
           </Button>
-          <Button onClick={handleSubmit} disabled={!token.trim() || submitting}>
+          <Button onClick={handleSubmit} disabled={!complete || submitting}>
             {submitting
               ? t('accounts.tokenConnect.connecting')
               : t(isReconnect ? 'accounts.tokenConnect.reconnect' : 'accounts.tokenConnect.connect')}

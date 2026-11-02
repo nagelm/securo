@@ -62,10 +62,14 @@ class AccountData:
     # duplicate instead of recognising the account it already imported.
     external_id: str
     name: str
-    type: str  # checking, savings, credit_card
+    type: str  # checking, savings, credit_card, loan
     balance: Decimal
     currency: str
     credit_limit: Optional[Decimal] = None
+    # True when `credit_limit` is the provider's estimate (e.g. available +
+    # owed) rather than a limit the institution sent. Sync uses a derived
+    # limit only to fill an empty one, never to replace a stored limit.
+    credit_limit_derived: bool = False
     statement_close_day: Optional[int] = None
     payment_due_day: Optional[int] = None
     minimum_payment: Optional[Decimal] = None
@@ -89,6 +93,13 @@ class AccountData:
     institution_external_id: Optional[str] = None
     institution_name: Optional[str] = None
     institution_logo_url: Optional[str] = None
+    # Loans only (type="loan"). Provider loan facts (rate, term, maturity,
+    # repayment), JSON-safe and display only: the sync layer stores them on
+    # the account, and nothing that totals money reads them. `loan_kind`
+    # is a suggestion (schemas.account.LoanKind), used only while the
+    # account has none.
+    loan_details: Optional[dict] = None
+    loan_kind: Optional[str] = None
     # Part of `balance` that the bank has auto-applied to an investment which
     # the provider also reports as a holding (Pluggy
     # `bankData.automaticallyInvestedBalance`, issue #843). Zero when unknown.
@@ -120,6 +131,21 @@ class TransactionData:
     # Provider-side identifier of the bill this transaction belongs to.
     # Resolved to a credit_card_bills.id FK at sync time (issue #92).
     bill_external_id: Optional[str] = None
+    # A default-category key (category_service.DEFAULT_CATEGORIES_I18N, e.g.
+    # "groceries") for providers that classify transactions. The sync layer
+    # resolves it to the workspace's category of that name, in any language.
+    category_hint: Optional[str] = None
+    # Text the bank attaches to a payment (particulars, code, reference) for
+    # providers that expose it. Written to the new row's notes, so Rules and
+    # search can use it; never overwrites notes on an existing row.
+    notes: Optional[str] = None
+    # The merchant's website, when the provider enriches transactions. Fills
+    # Payee.website on a payee that doesn't have one yet.
+    payee_website: Optional[str] = None
+    # The merchant's logo URL, when the provider matched the row to a
+    # merchant and has a real logo for it (not a placeholder). Fills
+    # Payee.logo_url on a payee that doesn't have one yet.
+    payee_logo_url: Optional[str] = None
 
 
 @dataclass
@@ -290,6 +316,75 @@ class BankProvider(ABC):
     def flow_type(self) -> str:
         """Connection flow type: 'oauth' for redirect-based, 'widget' for embedded widget."""
         return "oauth"
+
+    @property
+    def names_accounts_by_institution(self) -> bool:
+        """Whether a synced account is displayed under its institution's name.
+
+        True suits providers whose account names are generic product labels
+        (issue #724). Providers that pass the user's own account nicknames
+        return False, so the nickname is what the user sees.
+        """
+        return True
+
+    @property
+    def holdings_in_account_balance(self) -> bool:
+        """Whether a holding's value is already in its account's balance.
+
+        True for providers that report an investment account (with the
+        holdings' total as its balance) and its holdings, each holding naming
+        its account (``HoldingData.account_external_id``). The sync layer
+        then links the holding to that account, and net worth counts the
+        account, not the holding as well.
+        """
+        return False
+
+    @property
+    def edits_transactions_in_place(self) -> bool:
+        """Whether the provider keeps a transaction's id when the bank edits it.
+
+        True for providers that update their copy of a transaction in place
+        (same external id) when the bank later changes its date, description
+        or amount. The sync layer then applies those bank-owned fields to the
+        stored row, never the fields the user owns (category, payee, notes,
+        links). False keeps the historical behavior: a stored row is never
+        rewritten by a later sync.
+        """
+        return False
+
+    @property
+    def reports_removed_transactions(self) -> bool:
+        """Whether a transaction missing from a complete fetch was removed.
+
+        True for providers that delete their copy when the bank removes a
+        transaction, so a row absent from a complete read of a window is gone
+        at the bank too. Such a provider records each complete read with
+        ``record_complete_transaction_window``; the sync layer removes (or,
+        when that would lose user data, flags) stored rows the read no longer
+        returns. False means absence proves nothing, and nothing is removed.
+        """
+        return False
+
+    def record_complete_transaction_window(
+        self, account_external_id: str, first_day: date, last_day: date
+    ) -> None:
+        """Note that ``get_transactions`` read every page of an account's
+        transactions dated ``first_day`` to ``last_day``, both inclusive.
+
+        Call it only once the whole window was read without error; a read
+        that stopped early, or an account whose data the provider can't
+        vouch for (inactive connection), must not record one.
+        """
+        windows = self.__dict__.setdefault("_complete_transaction_windows", {})
+        windows[account_external_id] = (first_day, last_day)
+
+    def take_complete_transaction_window(
+        self, account_external_id: str
+    ) -> Optional[tuple[date, date]]:
+        """The window the last ``get_transactions`` call for this account
+        read completely, or None; forgets it, so one read backs one check."""
+        windows = self.__dict__.get("_complete_transaction_windows") or {}
+        return windows.pop(account_external_id, None)
 
     @property
     def redirect_uri(self) -> str:

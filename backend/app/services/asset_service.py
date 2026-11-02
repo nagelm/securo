@@ -164,6 +164,7 @@ def _asset_to_read(
         source=asset.source,
         external_id=asset.external_id,
         connection_id=asset.connection_id,
+        account_external_id=asset.account_external_id,
         isin=asset.isin,
         maturity_date=asset.maturity_date,
         group_id=asset.group_id,
@@ -653,6 +654,10 @@ async def update_asset(
     update_data = data.model_dump(exclude_unset=True)
     if "group_id" in update_data:
         await ensure_group_in_workspace(session, update_data["group_id"], workspace_id)
+        # Fork: a synced holding the user files in another wallet stays there;
+        # holdings sync would otherwise move it back on every run.
+        if asset.source != "manual" and update_data["group_id"] != asset.group_id:
+            asset.external_metadata = {**(asset.external_metadata or {}), USER_GROUP_METADATA_KEY: True}
     # Prevent changing valuation_method on existing assets
     update_data.pop("valuation_method", None)
 
@@ -1013,8 +1018,12 @@ async def get_asset_values_at(
     *,
     by_workspace: bool = False,
     group_ids: Optional[list[uuid.UUID]] = None,
+    for_net_worth: bool = False,
 ) -> tuple[dict[str, float], float]:
     """Return (per_currency_totals, primary_total) for all active assets.
+
+    ``for_net_worth`` leaves out holdings an account's balance already
+    carries (``counted_in_net_worth``); a wallet's own total keeps them.
 
     `scope_id` is a workspace_id when `by_workspace=True` (preferred for
     multi-tenant code paths), otherwise treated as a legacy user_id
@@ -1040,6 +1049,8 @@ async def get_asset_values_at(
     )
     if group_ids:
         stmt = stmt.where(Asset.group_id.in_(group_ids))
+    if for_net_worth:
+        stmt = stmt.where(counted_in_net_worth())
     result = await session.execute(stmt)
     assets = list(result.scalars().all())
 
