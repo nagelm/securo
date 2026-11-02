@@ -44,6 +44,7 @@ from app.services.credit_card_service import (
     get_cycle_dates,
 )
 from app.services.fx_rate_service import _resolve_rate, stamp_primary_amount
+from app.services.loan_details import _MAX_AMOUNT, is_revolving, normalize_user_loan_details
 from app.models.category import Category
 
 # Loan accounts only: contract terms the payment schedule is computed from.
@@ -85,6 +86,56 @@ def _opening_balance_values(account_type: str, balance: Decimal) -> tuple[Decima
     # A loan is entered as the amount owed, like a card, and is debt in the ledger.
     is_credit = (balance > 0) == (account_type not in {"credit_card", "loan"})
     return amount, "credit" if is_credit else "debit"
+
+
+async def _validate_loan_fields(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    account_type: str,
+    secured_asset_id: Optional[uuid.UUID],
+    loan_details: Optional[dict] = None,
+) -> None:
+    """Check the loan fields a request sets, before anything is written.
+
+    Only a `loan` account carries them; a null value is always allowed (it
+    is how a field is cleared). Loan details are checked separately by
+    `normalize_user_loan_details`.
+    """
+    if account_type != "loan":
+        if secured_asset_id is not None or loan_details is not None:
+            raise ValueError("Loan fields can only be set on loan accounts")
+        return
+
+
+def carries_credit_limit(account_type: str, loan_details: Optional[dict]) -> bool:
+    """Whether an account of this type keeps a credit limit.
+
+    A credit card does, and so does a revolving loan (``loan_details.type``
+    is ``REVOLVING``): its limit is how much may be drawn. The limit is
+    display only: nothing that totals money reads it.
+    """
+    return account_type == "credit_card" or (account_type == "loan" and is_revolving(loan_details))
+
+
+def _validate_loan_credit_limit(
+    account_type: str, loan_details: Optional[dict], credit_limit: Optional[Decimal]
+) -> None:
+    """A loan takes a credit limit only while it is revolving; null clears it."""
+    if account_type != "loan" or credit_limit is None:
+        return
+    if not is_revolving(loan_details):
+        raise ValueError(
+            "Credit card fields can only be set on credit card accounts; "
+            "a loan takes a credit limit only when its loan type is revolving"
+        )
+    if not Decimal(0) <= credit_limit <= _MAX_AMOUNT:
+        raise ValueError(f"credit_limit must be between 0 and {_MAX_AMOUNT}")
+
+
+def _clear_loan_fields_unless_loan(account: Account) -> None:
+    if account.type != "loan":
+        for field in (*_LOAN_FIELDS, *LOAN_TERM_FIELDS):
+            setattr(account, field, None)
 
 
 def _balance_subqueries(today: _Date):
@@ -383,6 +434,17 @@ def serialize_account(
         cycle = get_cycle_dates(acc.statement_close_day, acc.payment_due_day)
         payload["next_close_date"] = cycle["next_close_date"]
         payload["next_due_date"] = cycle["next_due_date"]
+    elif acc.type == "loan":
+        if carries_credit_limit(acc.type, acc.loan_details):
+            # A revolving loan reads like a card: owed = -balance (a credit
+            # balance owes nothing), available = limit - owed, never below 0.
+            available = compute_available_credit(acc.credit_limit, Decimal(str(resolved_balance)))
+            if available is not None:
+                payload["available_credit"] = float(max(available, Decimal(0)))
+        else:
+            # A limit left over from when the loan was revolving (sync may
+            # change the type) is kept but not shown.
+            payload["credit_limit"] = None
 
     return payload
 
@@ -447,7 +509,7 @@ async def create_account(
         balance=data.balance,
         currency=data.currency,
         secured_asset_id=data.secured_asset_id,
-        credit_limit=data.credit_limit if is_cc else None,
+        credit_limit=data.credit_limit if carries_credit_limit(data.type, loan_details) else None,
         statement_close_day=data.statement_close_day if is_cc else None,
         payment_due_day=data.payment_due_day if is_cc else None,
         minimum_payment=data.minimum_payment if is_cc else None,
@@ -560,6 +622,9 @@ async def update_account(
         new_type = update_data.get("type", account.type)
         cc_fields = editable_fields - {"display_name", "type", "secured_asset_id", *LOAN_TERM_FIELDS}
         cc_update = {k: v for k, v in update_data.items() if k in cc_fields}
+        if new_type == "loan":
+            # A loan's credit limit was checked above (revolving only).
+            cc_update.pop("credit_limit", None)
         if cc_update and new_type != "credit_card":
             raise ValueError("Credit card fields can only be set on credit card accounts")
         loan_update = {k: v for k, v in update_data.items() if k in LOAN_TERM_FIELDS}
@@ -590,9 +655,11 @@ async def update_account(
         if new_type == "loan":
             account.balance = _provider_to_internal_balance("", "loan", account.balance)
         # If the override moves the account away from credit_card, drop any
-        # stale card metadata so it isn't left half credit-card.
+        # stale card metadata so it isn't left half credit-card. A revolving
+        # loan keeps its credit limit.
         if new_type != "credit_card":
-            account.credit_limit = None
+            if not carries_credit_limit(new_type, new_loan_details):
+                account.credit_limit = None
             account.statement_close_day = None
             account.payment_due_day = None
             account.minimum_payment = None
@@ -610,7 +677,8 @@ async def update_account(
         setattr(account, key, value)
 
     if account.type != "credit_card":
-        account.credit_limit = None
+        if not carries_credit_limit(account.type, account.loan_details):
+            account.credit_limit = None
         account.statement_close_day = None
         account.payment_due_day = None
         account.minimum_payment = None

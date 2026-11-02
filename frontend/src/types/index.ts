@@ -735,6 +735,9 @@ export interface TransactionCalendarItem {
   category_name: string | null
   category_icon: string | null
   category_color: string | null
+  /** The payee's badge, drawn before the category icon. */
+  payee_logo_url?: string | null
+  payee_icon?: string | null
   status: string | null
   source: string | null
   transfer_pair_id: string | null
@@ -915,6 +918,9 @@ export interface Asset {
   value_count: number
   source: string
   connection_id: string | null
+  // The synced account whose balance already carries this holding; net
+  // worth counts the account, not the holding.
+  account_external_id?: string | null
   isin: string | null
   maturity_date: string | null
   group_id: string | null
@@ -930,6 +936,47 @@ export interface Asset {
   total_invested: number | null
   realized_gain: number | null
   transaction_count: number
+  // Equity against linked loans (liabilities phase 3). All in the asset's
+  // currency; the _primary copies are set only when that differs from the
+  // user's currency. Display only: never added to any total.
+  linked_loan_ids: string[]
+  linked_loans: AssetLinkedLoan[]
+  linked_debt: number | null
+  linked_debt_primary: number | null
+  equity: number | null
+  equity_primary: number | null
+}
+
+/** A loan account secured against an asset. */
+export interface AssetLinkedLoan {
+  id: string
+  name: string
+  currency: string
+  /** The loan's balance in its own currency (negative = owed). */
+  balance: number
+  /** Amount owed, converted to the asset's currency. */
+  debt: number
+}
+
+/** One month of `GET /api/accounts/{id}/loan-summary`, read from the ledger. */
+export interface LoanSummaryMonth {
+  /** YYYY-MM */
+  month: string
+  /** Credits on the loan: repayments. */
+  paid: number
+  /** Debits on the loan that count in P&L (interest and fees). */
+  interest: number
+  /** How much the amount owed fell. */
+  principal_reduction: number
+}
+
+export interface LoanSummary {
+  account_id: string
+  currency: string
+  months: LoanSummaryMonth[]
+  total_paid: number
+  total_interest: number
+  total_principal_reduction: number
 }
 
 /** One order read from a broker CSV, before it reaches a holding. */

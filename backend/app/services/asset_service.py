@@ -5,15 +5,17 @@ from decimal import Decimal
 from typing import Any, Optional, cast
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, func, desc, update as sa_update
+from sqlalchemy import exists, or_, select, func, desc, update, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.app_clock import app_today
 from app.models.account import Account
-from app.models.asset import ASSET_PRICE_DECIMALS, LOAN_COLLATERAL_TYPES, Asset
+from app.models.asset import ASSET_PRICE_DECIMALS, LOAN_COLLATERAL_TYPES, USER_GROUP_METADATA_KEY, Asset
 from app.models.asset_transaction import AssetTransaction
 from app.models.asset_value import AssetValue
+from app.models.category import Category
+from app.models.transaction import Transaction
 from app.models.user import User
 from app.core.config import get_settings
 from app.providers.market_price import (
@@ -21,7 +23,15 @@ from app.providers.market_price import (
     MarketPriceRateLimitedError,
     get_market_price_provider,
 )
-from app.schemas.asset import AssetCreate, AssetUpdate, AssetValueCreate, AssetRead, AssetValueRead
+from app.schemas.asset import (
+    AssetCreate,
+    AssetRead,
+    AssetUpdate,
+    AssetValueCreate,
+    AssetValueRead,
+    LinkedLoanRead,
+)
+from app.services.account_order import ACCOUNT_LIST_ORDER
 from app.services.asset_group_service import ensure_group_in_workspace
 from app.services.fx_rate_service import convert, has_rate, stamp_primary_amount
 
@@ -379,6 +389,66 @@ async def _get_transaction_counts(
     return {row[0]: row[1] for row in result.all()}
 
 
+async def _attach_equity(session: AsyncSession, reads: list[AssetRead]) -> None:
+    """Fill the linked-loan and equity fields of each AssetRead in place.
+
+    Loans are open accounts of type "loan" whose secured_asset_id points at
+    the asset, loaded in one query. Each loan's balance comes from
+    dashboard_service._account_balance_at, the function net worth uses, so
+    the debt shown here agrees with the liability net worth counts. Debt is
+    max(0, -balance) converted to the asset's currency; equity is the asset's
+    current value minus that debt. Equity is display only and never summed
+    into any total (the loan is already a liability in net worth).
+    """
+    if not reads:
+        return
+    # dashboard_service imports this module, so import it here.
+    from app.services.dashboard_service import _account_balance_at
+
+    by_id = {r.id: r for r in reads}
+    result = await session.execute(
+        select(Account)
+        .where(
+            Account.secured_asset_id.in_(list(by_id)),
+            Account.type == "loan",
+            Account.is_closed == False,
+        )
+        .order_by(*ACCOUNT_LIST_ORDER)
+    )
+    loans = list(result.scalars().all())
+    if not loans:
+        return
+
+    today = app_today()
+    debt_by_asset: dict[uuid.UUID, Decimal] = {}
+    for loan in loans:
+        read = by_id[cast(uuid.UUID, loan.secured_asset_id)]
+        balance = Decimal(str(await _account_balance_at(session, loan, today)))
+        owed = max(Decimal("0"), -balance)
+        debt, _ = await convert(session, owed, loan.currency, read.currency)
+        read.linked_loan_ids.append(loan.id)
+        read.linked_loans.append(
+            LinkedLoanRead(
+                id=loan.id,
+                name=loan.display_name or loan.name,
+                currency=loan.currency,
+                balance=float(balance),
+                debt=float(debt),
+            )
+        )
+        debt_by_asset[read.id] = debt_by_asset.get(read.id, Decimal("0")) + debt
+
+    for asset_id, debt in debt_by_asset.items():
+        read = by_id[asset_id]
+        read.linked_debt = float(debt)
+        if (
+            read.current_value is not None
+            and not read.is_archived
+            and read.sell_date is None
+        ):
+            read.equity = float(Decimal(str(read.current_value)) - debt)
+
+
 async def get_assets(
     session: AsyncSession, workspace_id: uuid.UUID, include_archived: bool = False
 ) -> list[AssetRead]:
@@ -397,6 +467,7 @@ async def get_assets(
         latest = await _get_latest_value(session, asset.id)
         count = await _get_value_count(session, asset.id)
         reads.append(_asset_to_read(asset, latest, count, tx_counts.get(asset.id, 0)))
+    await _attach_equity(session, reads)
     return reads
 
 
@@ -417,7 +488,9 @@ async def get_asset(
         .select_from(AssetTransaction)
         .where(AssetTransaction.asset_id == asset.id)
     )
-    return _asset_to_read(asset, latest, count, tx_count or 0)
+    read = _asset_to_read(asset, latest, count, tx_count or 0)
+    await _attach_equity(session, [read])
+    return read
 
 
 async def create_asset(
@@ -743,7 +816,9 @@ async def update_asset(
     await session.refresh(asset)
     latest = await _get_latest_value(session, asset.id)
     count = await _get_value_count(session, asset.id)
-    return _asset_to_read(asset, latest, count, tx_count)
+    read = _asset_to_read(asset, latest, count, tx_count)
+    await _attach_equity(session, [read])
+    return read
 
 
 async def delete_asset(
@@ -1007,7 +1082,180 @@ async def get_portfolio_trend(
     # per-display-date conversion so no second conversion is needed.
     total: float = cast(float, trend[-1]["_total"]) if trend else 0.0
 
-    return {"assets": asset_meta, "trend": trend, "total": round(total, 2)}
+    # Fork: what the loans secured on each asset owed on each trend date, so
+    # the chart can show equity (value minus that debt). Per row the keys are
+    # "debt:<asset id>" and "_debt_total", in the primary currency.
+    debt_total = await _attach_secured_debt(session, workspace_id, trend, primary_currency)
+
+    return {
+        "assets": asset_meta,
+        "trend": trend,
+        "total": round(total, 2),
+        "debt_total": round(debt_total, 2),
+    }
+
+
+async def _attach_secured_debt(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    trend: list[dict[str, object]],
+    primary_currency: str,
+) -> float:
+    """Add each secured asset's loan debt per trend date; return the latest total.
+
+    A loan's balance on a past date walks back from its current balance the
+    way ``dashboard_service._account_balance_at`` does (posted, non-ignored
+    rows after the date are undone), computed once per loan rather than per
+    date. Debt is max(0, -balance), as on the asset rows.
+    """
+    for row in trend:
+        row["_debt_total"] = 0.0
+    if not trend:
+        return 0.0
+    from app.services.dashboard_service import _account_balance_at, _signed_balance_expr
+
+    loans = list(
+        (
+            await session.execute(
+                select(Account).where(
+                    Account.workspace_id == workspace_id,
+                    Account.type == "loan",
+                    Account.is_closed == False,  # noqa: E712
+                    Account.secured_asset_id.is_not(None),
+                )
+            )
+        ).scalars().all()
+    )
+    today = app_today()
+    for loan in loans:
+        aid = str(loan.secured_asset_id)
+        if aid not in trend[0]:
+            continue  # the asset isn't charted (archived)
+        current = Decimal(str(await _account_balance_at(session, loan, today)))
+        rows = (
+            await session.execute(
+                select(Transaction.date, func.sum(_signed_balance_expr(loan.currency)))
+                .outerjoin(Category, Transaction.category_id == Category.id)
+                .where(
+                    Transaction.account_id == loan.id,
+                    Transaction.date <= today,
+                    Transaction.is_ignored == False,  # noqa: E712
+                    Transaction.status == "posted",
+                    or_(Transaction.category_id.is_(None), Category.is_ignored == False),  # noqa: E712
+                )
+                .group_by(Transaction.date)
+                .order_by(Transaction.date)
+            )
+        ).all()
+        by_date = [(d, Decimal(str(v or 0))) for d, v in rows]
+        if loan.connection_id:
+            # Walk back from the provider balance: undo everything after d.
+            after = sum((v for _, v in by_date), Decimal("0"))
+            idx = 0
+            for row in trend:
+                d = date.fromisoformat(cast(str, row["date"]))
+                while idx < len(by_date) and by_date[idx][0] <= d:
+                    after -= by_date[idx][1]
+                    idx += 1
+                balance = current if d >= today else current - after
+                await _add_debt(session, row, aid, balance, loan.currency, primary_currency, d)
+        else:
+            running = Decimal("0")
+            idx = 0
+            for row in trend:
+                d = date.fromisoformat(cast(str, row["date"]))
+                while idx < len(by_date) and by_date[idx][0] <= d:
+                    running += by_date[idx][1]
+                    idx += 1
+                await _add_debt(session, row, aid, running, loan.currency, primary_currency, d)
+    for row in trend:
+        row["_debt_total"] = round(cast(float, row["_debt_total"]), 2)
+    return cast(float, trend[-1]["_debt_total"])
+
+
+async def _add_debt(
+    session: AsyncSession,
+    row: dict[str, object],
+    aid: str,
+    balance: Decimal,
+    currency: str,
+    primary_currency: str,
+    on: date,
+) -> None:
+    owed = max(Decimal("0"), -balance)
+    if owed and currency != primary_currency:
+        owed, _ = await convert(session, owed, currency, primary_currency, on)
+    key = f"debt:{aid}"
+    row[key] = round(cast(float, row.get(key, 0.0)) + float(owed), 2)
+    row["_debt_total"] = cast(float, row["_debt_total"]) + float(owed)
+
+
+def counted_in_net_worth():
+    """Filter on ``Asset``: the assets net worth adds up.
+
+    A synced holding whose value an open account's balance already carries
+    (``Asset.account_external_id``, set by sync) is detail of that account;
+    adding it as well would count it twice. Once the account is closed or
+    gone, the holding counts again.
+    """
+    return ~exists().where(
+        Account.connection_id == Asset.connection_id,
+        Account.external_id == Asset.account_external_id,
+        Account.is_closed == False,  # noqa: E712
+    )
+
+
+async def linked_holdings_values(
+    session: AsyncSession, account: Account, dates: list[date],
+    *, convert_fn: Optional[Callable[..., Awaitable[tuple[Decimal, Decimal]]]] = None,
+) -> Optional[dict[date, Decimal]]:
+    """What the holdings an account's balance carries were worth on each date.
+
+    In the account's currency. None when no holding is linked to the account
+    (``Asset.account_external_id``). Such an account has no transactions to
+    walk its balance back with, so its past balance is its holdings' value
+    history; the holdings use the same filters and fill-forward as
+    ``get_asset_values_at``, so a past net worth is what it was while the
+    holdings were counted themselves.
+
+    ``convert_fn(amount, from, to, date)`` stands in for ``convert`` (e.g. a
+    request's ``PreloadedRates.convert``) and must return what it would.
+    """
+    if account.connection_id is None or not account.external_id or not dates:
+        return None
+    assets = list(
+        (
+            await session.execute(
+                select(Asset).where(
+                    Asset.connection_id == account.connection_id,
+                    Asset.account_external_id == account.external_id,
+                    Asset.is_archived == False,  # noqa: E712
+                    Asset.sell_date.is_(None),
+                )
+            )
+        ).scalars().all()
+    )
+    if not assets:
+        return None
+    values_map = await _load_asset_native_values(session, assets, up_to_date=max(dates))
+    result: dict[date, Decimal] = {}
+    for day in dates:
+        total = Decimal("0")
+        for asset in assets:
+            native = _fill_forward_at(asset, values_map[str(asset.id)], day)
+            if not native:
+                continue
+            amount = Decimal(str(native))
+            if asset.currency != account.currency:
+                if convert_fn is not None:
+                    amount, _ = await convert_fn(amount, asset.currency, account.currency, day)
+                else:
+                    amount, _ = await convert(
+                        session, amount, asset.currency, account.currency, day
+                    )
+            total += amount
+        result[day] = total
+    return result
 
 
 async def get_asset_values_at(

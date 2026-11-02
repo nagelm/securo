@@ -6,6 +6,7 @@ import type { Account, TransactionCalendarDay, TransactionCalendarItem, Transact
 import { Skeleton } from '@/components/ui/skeleton'
 import { AccountIcon } from '@/components/account-icon'
 import { CategoryIcon } from '@/components/category-icon'
+import { PayeeIcon } from '@/components/payee-icon'
 import { ProjectedTransactionBadge } from '@/components/projected-transaction-badge'
 import { getAccountName } from '@/lib/account-utils'
 import { activityChartData, dayActivity, isCalendarItemInteractive } from '@/lib/calendar-activity'
@@ -1195,7 +1196,7 @@ function DayPanelRow({ label, value, amount }: { label: string; value: string; a
 }
 
 // Mirrors MobileTransactionRow so a transaction reads the same in the list and
-// in the calendar: category icon, description with inline badges, account row,
+// in the calendar: payee badge, description with inline badges, account row,
 // colour-coded signed amount with the primary-currency conversion underneath.
 function CalendarItemRow({
   item,
@@ -1232,7 +1233,13 @@ function CalendarItemRow({
       )}
     >
       <div className="shrink-0">
-        <CategoryIcon icon={item.category_icon ?? undefined} color={item.category_color ?? undefined} size="md" />
+        <PayeeIcon
+          icon={item.payee_icon}
+          logoUrl={item.payee_logo_url}
+          fallbackIcon={item.category_icon}
+          fallbackColor={item.category_color}
+          size="md"
+        />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">

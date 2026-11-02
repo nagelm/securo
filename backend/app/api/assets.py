@@ -39,7 +39,7 @@ from app.schemas.asset import (
     MarketSymbolQuote,
 )
 from app.services import asset_import_service, asset_service, asset_transaction_service
-from app.services.fx_rate_service import convert_or_none
+from app.services.fx_rate_service import convert, convert_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +176,27 @@ async def refresh_asset_price(
                 )
                 if gl_converted is not None:
                     refreshed.gain_loss_primary = float(gl_converted)
+    await _stamp_equity_primary(session, refreshed, primary_currency)
     return refreshed
+
+
+async def _stamp_equity_primary(
+    session: AsyncSession, asset: AssetRead, primary_currency: str
+) -> None:
+    """Primary-currency copies of linked_debt and equity, stamped like
+    current_value_primary: only when the asset is in another currency."""
+    if asset.currency == primary_currency:
+        return
+    if asset.linked_debt is not None:
+        debt, _ = await convert(
+            session, Decimal(str(asset.linked_debt)), asset.currency, primary_currency,
+        )
+        asset.linked_debt_primary = float(debt)
+    if asset.equity is not None:
+        equity, _ = await convert(
+            session, Decimal(str(asset.equity)), asset.currency, primary_currency,
+        )
+        asset.equity_primary = float(equity)
 
 
 @router.get("", response_model=list[AssetRead])
@@ -206,6 +226,7 @@ async def list_assets(
                     )
                     if gl_converted is not None:
                         asset.gain_loss_primary = float(gl_converted)
+        await _stamp_equity_primary(session, asset, primary_currency)
     return assets
 
 

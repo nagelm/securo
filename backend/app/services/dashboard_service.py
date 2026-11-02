@@ -195,6 +195,7 @@ async def _get_forecast_transactions(
         .options(
             selectinload(Transaction.account),
             selectinload(Transaction.category),
+            selectinload(Transaction.payee_entity),
         )
         .order_by(Transaction.date.asc(), Transaction.created_at.asc())
     )
@@ -1758,6 +1759,21 @@ async def get_balance_history(
         month = app_today().replace(day=1)
 
     month_start, month_end = _month_range(month)
+    # Fork: without an explicit account choice the chart shows cash and cards.
+    # Investment accounts move with market returns and contributions that never
+    # appear as transactions, and loans are the other half of an asset (the
+    # house) that isn't an account, so either would skew the picture.
+    if account_ids is None:
+        account_ids = list(
+            (
+                await session.execute(
+                    select(Account.id).where(
+                        Account.workspace_id == workspace_id,
+                        Account.type.not_in(("investment", "loan")),
+                    )
+                )
+            ).scalars()
+        )
     selected_comparison_months = _normalize_comparison_months(
         comparison_months, month_start
     )

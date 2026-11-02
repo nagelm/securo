@@ -193,6 +193,23 @@ async def get_account_bills(
     return bills
 
 
+@router.get("/{account_id}/loan-summary", response_model=LoanSummary)
+async def get_loan_summary(
+    account_id: uuid.UUID,
+    months: int = Query(12, ge=1, le=120),
+    ctx: WorkspaceContext = Depends(current_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Paid, interest and principal reduction per month for a loan, read
+    from the ledger (synced and manual loans alike). Never writes."""
+    try:
+        return await loan_summary.get_loan_summary(session, ctx.workspace.id, account_id, months)
+    except loan_summary.LoanNotFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
 @router.get("/{account_id}/loan-schedule", response_model=LoanScheduleRead)
 async def get_loan_schedule(
     account_id: uuid.UUID,

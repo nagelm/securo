@@ -26,6 +26,8 @@ from app.services.dashboard_service import (
     _get_forecast_transactions,
 )
 from app.services.fx_rate_service import convert as fx_convert
+from app.services.payee_display import payee_logo_url
+from app.services.transfer_counterpart import attach_transfer_counterpart_accounts
 from app.services.recurring_transaction_service import (
     adjust_weekend_date,
     get_occurrences_in_range,
@@ -360,6 +362,8 @@ def _actual_item(
         category_name=category.name if category else None,
         category_icon=category.icon if category else None,
         category_color=category.color if category else None,
+        payee_logo_url=payee_logo_url(tx.payee_entity),
+        payee_icon=tx.payee_entity.icon if tx.payee_entity else None,
         status=tx.status,
         source=tx.source,
         transfer_pair_id=tx.transfer_pair_id,
@@ -389,6 +393,8 @@ def _forecast_item(
         category_name=category.name if category else None,
         category_icon=category.icon if category else None,
         category_color=category.color if category else None,
+        payee_logo_url=payee_logo_url(tx.payee_entity),
+        payee_icon=tx.payee_entity.icon if tx.payee_entity else None,
         status=tx.status,
         source=tx.source,
         transfer_pair_id=tx.transfer_pair_id,

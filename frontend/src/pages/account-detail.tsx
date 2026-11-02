@@ -12,6 +12,12 @@ import { invalidateFinancialQueries } from '@/lib/invalidate-queries'
 import { shouldShowPendingBadge } from '@/lib/transaction-status'
 import { isTransferTransaction } from '@/lib/transaction-transfer'
 import { closeDateForBill, isOpenCycleWindow } from '@/lib/credit-card-cycle'
+import {
+  isLongRangeAccount,
+  longRangeDefault,
+  monthlyPoints,
+  yearTicks,
+} from '@/lib/account-long-range'
 import { toast } from 'sonner'
 import type { CreditCardBill, ProjectedTransaction, Transaction } from '@/types'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -20,10 +26,12 @@ import { ArrowLeft, ArrowLeftRight, CalendarClock, ChevronLeft, ChevronRight, Cl
 import { MobileTransactionRow } from '@/components/mobile-transaction-row'
 import { transactionDescription } from '@/lib/transaction-description'
 import { CategoryIcon } from '@/components/category-icon'
+import { PayeeIcon } from '@/components/payee-icon'
 import { ProjectedTransactionBadge } from '@/components/projected-transaction-badge'
 import { TransactionDialog, type TransactionSavePayload } from '@/components/transaction-dialog'
 import { extractApiError } from '@/lib/api-errors'
 import { TransferDialog } from '@/components/transfer-dialog'
+import { LoanSummaryCard } from '@/components/loan-summary-card'
 import { DatePickerInput } from '@/components/ui/date-picker-input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -373,6 +381,11 @@ export default function AccountDetailPage() {
         : billsAsc.length > 0 && account.statement_close_day
           ? creditCardCycleBoundaries(account.statement_close_day, new Date())
           : defaultCycleForCreditCard(account.statement_close_day, account.payment_due_day, new Date())
+      setFilterFrom(range.start)
+      setFilterTo(range.end)
+    } else if (isLongRangeAccount(account?.type) && !filterTouched) {
+      // Loans and investments move over years: open on the last five.
+      const range = longRangeDefault()
       setFilterFrom(range.start)
       setFilterTo(range.end)
     }
@@ -829,12 +842,26 @@ export default function AccountDetailPage() {
       projectedByDay.set(tx.date, applyTransactionToBalance(previous, tx, usePrimary, displayCurrency))
     }
     let projected = 0
-    return runningBalanceSeries.map((point) => {
+    const series = runningBalanceSeries.map((point) => {
       projected += projectedByDay.get(point.date) ?? 0
       const balance = usePrimary ? (point.balance_primary ?? point.balance) : point.balance
       return { label: formatDateStr(point.date, dateLocale), date: point.date, balance: balance + projected }
     })
-  }, [isCreditCard, cycleTxData, runningBalanceSeries, projectedRows, filterFrom, filterTo, dateLocale, usePrimary, displayCurrency, activeBill])
+    if (!isLongRange) return series
+    // Years of a loan or investment: one point per month, labelled by month.
+    return monthlyPoints(series).map((p) => ({
+      ...p,
+      label: new Date(p.date + 'T00:00:00').toLocaleDateString(dateLocale, { month: 'short', year: 'numeric' }),
+    }))
+  }, [isCreditCard, isLongRange, cycleTxData, runningBalanceSeries, projectedRows, filterFrom, filterTo, dateLocale, usePrimary, displayCurrency, activeBill])
+
+  // Year ticks for the monthly chart, each shown as its year.
+  const chartYearTicks = useMemo(() => {
+    if (!isLongRange) return null
+    const ticks = yearTicks(chartData)
+    const yearByLabel = new Map(chartData.map((p) => [p.label, p.date.slice(0, 4)]))
+    return { ticks, format: (label: string) => yearByLabel.get(label) ?? label }
+  }, [isLongRange, chartData])
 
   const ccRunningTotal = useMemo((): TxWithBalance[] => {
     if (!isCreditCard || !cycleTxData?.items) return []
@@ -880,7 +907,9 @@ export default function AccountDetailPage() {
 
   const resolvedDefaultRange = account?.type === 'credit_card'
     ? defaultCycleForCreditCard(account.statement_close_day, account.payment_due_day, new Date())
-    : { start: defaultFrom(), end: defaultTo() }
+    : isLongRange
+      ? longRangeDefault()
+      : { start: defaultFrom(), end: defaultTo() }
   const hasFilters = filterFrom !== resolvedDefaultRange.start || filterTo !== resolvedDefaultRange.end
 
   // The mobile transaction view is intentionally grouped by day so the date
@@ -1088,6 +1117,10 @@ export default function AccountDetailPage() {
                   )
                   setFilterFrom(start)
                   setFilterTo(end)
+                } else if (isLongRange) {
+                  const { start, end } = longRangeDefault()
+                  setFilterFrom(start)
+                  setFilterTo(end)
                 } else {
                   setFilterFrom(defaultFrom())
                   setFilterTo(defaultTo())
@@ -1133,6 +1166,17 @@ export default function AccountDetailPage() {
             </Button>
           )}
         </div>
+      )}
+
+      {/* Loans: subtype, secured asset and equity, 12-month paid / interest /
+          principal, and (manual loans only) recorded payments. */}
+      {account.type === 'loan' && (
+        <LoanSummaryCard
+          account={account}
+          locale={locale}
+          canWrite={canWrite}
+          mask={mask}
+        />
       )}
 
       {/* Bill timeline (last 6 cycles) — only for CC with cycle metadata */}
@@ -1541,8 +1585,9 @@ export default function AccountDetailPage() {
                   tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
                   axisLine={false}
                   tickLine={false}
-                  interval="preserveStartEnd"
-                  minTickGap={40}
+                  {...(chartYearTicks
+                    ? { ticks: chartYearTicks.ticks, tickFormatter: chartYearTicks.format, interval: 0 }
+                    : { interval: 'preserveStartEnd' as const, minTickGap: 40 })}
                 />
                 <YAxis
                   tickFormatter={(v) => {
@@ -1683,6 +1728,16 @@ export default function AccountDetailPage() {
                           {formatDateStr(tx.date, dateLocale)}
                         </td>
                         <td className="px-3 sm:px-4 py-3 w-full max-w-0">
+                          <div className="flex items-center gap-2 md:gap-3 min-w-0">
+                          {/* Payee icon or logo, else the category icon: as on the transactions page. */}
+                          <PayeeIcon
+                            icon={tx.payee_icon}
+                            logoUrl={tx.payee_logo_url}
+                            fallbackIcon={tx.category?.icon}
+                            fallbackColor={tx.category?.color}
+                            size="lg"
+                          />
+                          <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <span className="font-semibold text-foreground text-sm truncate">{transactionDescription(tx.description, tx.source, t)}</span>
                             <div className="flex items-center gap-1 shrink-0">
@@ -1746,6 +1801,8 @@ export default function AccountDetailPage() {
                           {(tx.payee_name || tx.payee) && (tx.payee_name || tx.payee) !== tx.description && (
                             <p className="text-xs text-muted-foreground mt-0.5 truncate">{tx.payee_name || tx.payee}</p>
                           )}
+                          </div>
+                          </div>
                         </td>
                         <td className="px-4 py-3 hidden md:table-cell">
                           {tx.category ? (

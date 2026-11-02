@@ -16,6 +16,9 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Fork: f002 adds the same column on databases that ran it.
+    if "secured_asset_id" in {c["name"] for c in sa.inspect(op.get_bind()).get_columns("accounts")}:
+        return
     op.add_column(
         "accounts",
         sa.Column("secured_asset_id", postgresql.UUID(as_uuid=True), nullable=True),

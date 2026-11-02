@@ -18,6 +18,7 @@ import type {
   SyncResult,
   Account,
   AccountSummary,
+  LoanSummary,
   AccountRunningBalancePoint,
   Collection,
   CreditCardBill,
@@ -552,8 +553,15 @@ export const accounts = {
     const { data } = await api.post(`/accounts/${id}/reopen`)
     return data
   },
+  /** Paid / interest / principal per month for a loan, from the ledger. */
+  loanSummary: async (id: string, months = 12): Promise<LoanSummary> => {
+    const { data } = await api.get(`/accounts/${id}/loan-summary`, { params: { months } })
+    return data
+  },
 }
 
+// Loan payments (manual loans). The API sends the derived amounts as decimal
+// strings; turn them into numbers once, here.
 export interface MortgagePaymentAllocation {
   loan_account_id: string
   loan_name: string
@@ -1496,7 +1504,7 @@ export const assets = {
   deleteValue: async (valueId: string): Promise<void> => {
     await api.delete(`/assets/values/${valueId}`)
   },
-  portfolioTrend: async (): Promise<{ assets: { id: string; name: string; type: string; group_id: string | null }[]; trend: Record<string, unknown>[]; total: number }> => {
+  portfolioTrend: async (): Promise<{ assets: { id: string; name: string; type: string; group_id: string | null }[]; trend: Record<string, unknown>[]; total: number; debt_total?: number }> => {
     const { data } = await api.get('/assets/portfolio-trend')
     return data
   },
@@ -1596,6 +1604,10 @@ export const assetGroups = {
   },
   delete: async (id: string): Promise<void> => {
     await api.delete(`/asset-groups/${id}`)
+  },
+  /** Fork: put these wallets in this order, in the places they already hold. */
+  reorder: async (groupIds: string[]): Promise<void> => {
+    await api.put('/asset-groups/order', { group_ids: groupIds })
   },
 }
 
