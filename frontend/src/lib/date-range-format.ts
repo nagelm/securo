@@ -24,6 +24,15 @@ export function formatDateRange(
 }
 
 /**
+ * The range a custom pick applies. Fork: one picked end leaves the other open
+ * (from a date onwards, or up to a date) instead of narrowing to that one day;
+ * two ends picked in reverse are swapped.
+ */
+export function normalizeCustomRange(from: string, to: string): [string, string] {
+  return from && to && from > to ? [to, from] : [from, to]
+}
+
+/**
  * One ISO date (`YYYY-MM-DD`) in the same shape `formatDateRange` uses for
  * each bound, for places that show a single day. Parsed as local midnight so
  * the day does not shift with the viewer's timezone.

@@ -130,8 +130,7 @@ describe('transfer rows in the transactions list', () => {
 
     const outLink = await screen.findByRole('link', { name: 'Savings' })
     expect(outLink).toHaveAttribute('href', '/accounts/acc-2')
-    const inLink = await screen.findByRole('link', { name: 'Checking' })
-    expect(inLink).toHaveAttribute('href', '/accounts/acc-1')
+    // Fork: the pair's two legs draw as one row, so only the first leg's link shows.
     // The name sits inside the existing "Transfer" badge, which keeps its
     // label and its explanation tooltip.
     const outBadge = outLink.parentElement!

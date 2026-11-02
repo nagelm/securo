@@ -589,3 +589,40 @@ async def test_accepting_a_question_about_rows_that_changed_is_refused(
 
     await session.refresh(arriving)
     assert arriving.transfer_pair_id is None
+
+
+@pytest.mark.asyncio
+async def test_a_pair_made_in_the_same_pass_settles_the_row_it_was_competing_with(
+    session: AsyncSession, test_user, ws
+):
+    """Fork: two transfers of one amount on one day, one of which a stronger
+    rule pairs. The other leg is left with a single candidate, so it links
+    in the same sync instead of becoming a question."""
+    await rule_service.upsert_override(
+        session, ws.id, test_user.id, NODE,
+        "destination_named_in_description", {"enabled": True},
+    )
+    await session.commit()
+    joint = await _account(session, test_user.id, ws.id, "Joint")
+    car = await _account(session, test_user.id, ws.id, "Car Fund")
+    kid = await _account(session, test_user.id, ws.id, "Kid savings")
+    to_car = await _txn(session, test_user.id, ws.id, joint, amount="20.00", kind="debit", when=TODAY,
+                        description="AP#1 To Car Fund")
+    to_kid = await _txn(session, test_user.id, ws.id, joint, amount="20.00", kind="debit", when=TODAY,
+                        description="AP#2 To household")
+    car_in = await _txn(session, test_user.id, ws.id, car, amount="20.00", kind="credit", when=TODAY,
+                        description="Automatic Payment")
+    kid_in = await _txn(session, test_user.id, ws.id, kid, amount="20.00", kind="credit", when=TODAY,
+                        description="Automatic Payment")
+
+    created = await detect_transfer_pairs(
+        session, ws.id, candidate_ids=[to_car.id, to_kid.id, car_in.id, kid_in.id]
+    )
+    await session.commit()
+    for row in (to_car, to_kid, car_in, kid_in):
+        await session.refresh(row)
+
+    assert created == 2
+    assert to_car.transfer_pair_id is not None and to_car.transfer_pair_id == car_in.transfer_pair_id
+    assert to_kid.transfer_pair_id is not None and to_kid.transfer_pair_id == kid_in.transfer_pair_id
+    assert await _pending(session, ws.id) == []

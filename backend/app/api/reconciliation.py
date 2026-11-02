@@ -65,6 +65,7 @@ from app.services import (
     reconciliation_rule_service as rules,
     reconciliation_suggestion_service as suggestions,
 )
+from app.services.transfer_pair_category import categorise_pair_legs
 from app.services.module_service import resolve_modules
 
 router = APIRouter(prefix="/api/reconciliation", tags=["reconciliation"])
@@ -461,6 +462,15 @@ async def accept_suggestion(
         await suggestions.mark_accepted(session, member, ctx.user_id)
     # One event for the whole question, written where the whole act is known.
     await suggestions.answered(session, members, "accepted", ctx.user_id)
+    if row.expectation_kind == "transaction":
+        from app.services.transfer_detection_service import recheck_after_link
+
+        await recheck_after_link(
+            session,
+            ctx.workspace.id,
+            {m.transaction_id for m in members} | {m.expectation_id for m in members},
+            keep=frozenset(m.id for m in members),
+        )
     await session.commit()
     return await _with_label(session, row)
 
@@ -559,6 +569,7 @@ async def _settle(
         pair_id = uuid.uuid4()
         for leg in legs:
             leg.transfer_pair_id = pair_id
+        await categorise_pair_legs(session, ctx.workspace.id, legs)
         return
 
     if row.expectation_kind == "invoice":

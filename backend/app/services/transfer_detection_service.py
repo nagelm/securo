@@ -63,6 +63,7 @@ from app.models.transaction import Transaction
 from app.services import reconciliation_policy
 from app.services import reconciliation_rule_service as rule_service
 from app.services import reconciliation_suggestion_service as suggestions
+from app.services.transfer_pair_category import categorise_pair_legs
 from app.services.reconciliation_engine import (
     Decision,
     Expectation,
@@ -196,6 +197,9 @@ async def _pool(
     query = select(Transaction).where(
         Transaction.workspace_id == workspace_id,
         Transaction.transfer_pair_id.is_(None),
+        # An ignored row is out of every total, so it is nobody's other half:
+        # a duplicate copy left in the pool would make its real twin ambiguous.
+        Transaction.is_ignored.is_(False),
         # A mortgage payment with a saved breakdown already moves its
         # principal to the loan, and the principal entry is that movement.
         # Pairing either as a transfer would move the money a second time.
@@ -347,8 +351,12 @@ async def detect_transfer_pairs(
         pair_id = uuid.uuid4()
         tx.transfer_pair_id = pair_id
         other_tx.transfer_pair_id = pair_id
+        await categorise_pair_legs(session, workspace_id, (tx, other_tx))
         paired.update({tx_id, other_id})
         pairs_created += 1
+
+    # Questions already open about rows that just paired can only fail now.
+    await suggestions.expire_transfer_questions(session, workspace_id, paired)
 
     # Pass two: everything that looked like a transfer and was not certain.
     # Keyed on the unordered pair, because the same two rows reach here
@@ -375,7 +383,41 @@ async def detect_transfer_pairs(
             session, workspace_id, tx_id, decision, movement, NODE
         )
 
+    # Fork: pairs made in this pass can settle a row that was ambiguous only
+    # because of them (two identical payments on one day, one of which just
+    # paired on a stronger rule). Look at those rows again, as
+    # recheck_after_link does after a link made by hand; a new pair also
+    # retires the question just asked about it.
+    if paired:
+        freed = [
+            tx_id
+            for tx_id, (_decision, _movement, tx) in decisions.items()
+            if tx_id not in paired
+            and tx.transfer_pair_id is None
+            and (new_ids is None or tx_id in new_ids)
+            and any(other.id in paired for other in neighbours(tx))
+        ]
+        if freed:
+            pairs_created += await detect_transfer_pairs(session, workspace_id, candidate_ids=freed)
+
     return pairs_created
+
+
+async def recheck_after_link(
+    session: AsyncSession, workspace_id: uuid.UUID, leg_ids: set[uuid.UUID], *, keep: frozenset[uuid.UUID] = frozenset()
+) -> int:
+    """After two rows become a transfer: retire the questions that offered
+    either of them, and look again at the rows those questions offered.
+
+    A row that just lost a competing claim may now have a single best
+    answer (two identical payments on one day, one of them linked by hand,
+    leave the other with exactly one candidate), so it links or becomes a
+    fresh question. Returns the number of new pairs.
+    """
+    freed = await suggestions.expire_transfer_questions(session, workspace_id, leg_ids, keep=keep)
+    if not freed:
+        return 0
+    return await detect_transfer_pairs(session, workspace_id, candidate_ids=list(freed))
 
 
 async def unlink_transfer_pair(

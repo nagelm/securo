@@ -295,7 +295,7 @@ async def export_transactions(
     output = io.StringIO()
     output.write("﻿")  # UTF-8 BOM for Excel
     writer = csv.writer(output)
-    writer.writerow(["date", "description", "amount", "type", "currency", "category", "account", "payee", "payee_name", "notes", "status", "source", "amount_primary", "fx_rate_used"])
+    writer.writerow(["date", "description", "amount", "type", "currency", "category", "account", "payee", "payee_name", "notes", "status", "source", "amount_primary", "fx_rate_used", "is_transfer"])
     for tx in transactions:
         writer.writerow([
             tx.date.isoformat(),
@@ -312,6 +312,10 @@ async def export_transactions(
             tx.source,
             str(tx.amount_primary) if tx.amount_primary is not None else "",
             str(tx.fx_rate_used) if tx.fx_rate_used is not None else "",
+            # Last column, so existing positions are unchanged. A paired
+            # leg (a transfer, or the principal of a loan payment) is not
+            # spending even when it carries a category.
+            "true" if tx.transfer_pair_id is not None else "false",
         ])
 
     output.seek(0)
@@ -419,6 +423,10 @@ async def link_transfer(
         debit_tx, credit_tx = await transaction_service.link_existing_as_transfer(
             session, ctx.workspace.id, data.transaction_ids
         )
+        from app.services.transfer_detection_service import recheck_after_link
+
+        await recheck_after_link(session, ctx.workspace.id, {debit_tx.id, credit_tx.id})
+        await session.commit()
         debit_full = await transaction_service.get_transaction(session, debit_tx.id, ctx.workspace.id)
         credit_full = await transaction_service.get_transaction(session, credit_tx.id, ctx.workspace.id)
         primary_currency = ctx.user.primary_currency

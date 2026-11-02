@@ -155,6 +155,16 @@ export interface ConnectionSettings {
   sync_assets?: boolean
 }
 
+/** Enough of an account to draw it in a transfer pill (may be closed). */
+export interface TransferAccountRef {
+  id: string
+  name: string
+  display_name: string | null
+  type: string
+  institution_logo_url: string | null
+  is_closed: boolean
+}
+
 // Response of POST /connections/{id}/sync: the connection plus what the run
 // actually did. "rate_limited" means the provider throttled the request
 // (429): nothing was pulled and last_sync_at was left untouched (issue #736).
@@ -304,6 +314,11 @@ export interface Transaction {
   payee_icon?: string | null
   notes: string | null
   transfer_pair_id: string | null
+  /** The account the other leg of a linked transfer sits in. */
+  transfer_counterpart_account_id?: string | null
+  /** Drawable summaries of both transfer accounts, closed ones included. */
+  transfer_account?: TransferAccountRef | null
+  transfer_counterpart_account?: TransferAccountRef | null
   /**
    * The other leg of the transfer this row belongs to, when it is one.
    * The paginated list fills it so the badge can name the account the
@@ -741,6 +756,11 @@ export interface TransactionCalendarItem {
   status: string | null
   source: string | null
   transfer_pair_id: string | null
+  /** The account the other leg of a linked transfer sits in. */
+  transfer_counterpart_account_id?: string | null
+  /** Drawable summaries of both transfer accounts, closed ones included. */
+  transfer_account?: TransferAccountRef | null
+  transfer_counterpart_account?: TransferAccountRef | null
   is_transfer: boolean
   is_ignored: boolean
   exclude_from_pnl: boolean

@@ -1,6 +1,8 @@
 import { getAccountName } from '@/lib/account-utils'
 import { AccountIcon } from '@/components/account-icon'
-import { CategoryIcon } from '@/components/category-icon'
+import { PayeeIcon } from '@/components/payee-icon'
+import { TransferAccountsPill, type TransferPillAccount } from '@/components/transfer-accounts-pill'
+import { TransferPairAmounts } from '@/components/transfer-pair-amounts'
 import type { Transaction, Account } from '@/types'
 import { AlertTriangle, ArrowLeftRight, CalendarClock, ChartNoAxesColumn, Clock, EyeClosed, Paperclip } from 'lucide-react'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
@@ -30,6 +32,15 @@ interface MobileTransactionRowProps {
   onClick: (tx: Transaction) => void
   /** Show the payee instead of the account name in an account-scoped view. */
   showPayee?: boolean
+  /** Both accounts of a linked transfer; drawn in place of the description. */
+  transferAccounts?: { from: TransferPillAccount; to: TransferPillAccount } | null
+  /**
+   * The credit leg when this row draws a whole transfer (`tx` is then the
+   * debit leg): the amount slot shows both legs and the checkbox selects both.
+   */
+  transferPairIn?: Transaction | null
+  /** Locale for the incoming leg's date in a paired row's tooltip. */
+  dateLocale?: string
   /** Localize synthetic opening-balance descriptions only in account detail. */
   localizeOpeningBalance?: boolean
 }
@@ -48,6 +59,9 @@ export function MobileTransactionRow({
   onSelect,
   onClick,
   showPayee = false,
+  transferAccounts = null,
+  transferPairIn = null,
+  dateLocale,
   localizeOpeningBalance = false,
 }: MobileTransactionRowProps) {
   const { mask } = usePrivacyMode()
@@ -96,6 +110,7 @@ export function MobileTransactionRow({
               e.stopPropagation()
               onSelect(tx.id, e.shiftKey)
             }}
+            aria-label={transferPairIn ? t('transactions.selectTransferPair') : undefined}
             className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
           />
         </div>
@@ -116,15 +131,23 @@ export function MobileTransactionRow({
       <div className="min-w-0 flex-1">
         {/* Description row */}
         <div className="flex items-center gap-1.5">
-          <p className={`text-sm font-semibold text-foreground leading-tight min-w-0 ${hasWordBreaks(description) ? 'break-words whitespace-normal' : 'truncate'}`}>
-            {description}
-          </p>
+          {transferAccounts ? (
+            <TransferAccountsPill
+              from={transferAccounts.from}
+              to={transferAccounts.to}
+              description={description}
+            />
+          ) : (
+            <p className={`text-sm font-semibold text-foreground leading-tight min-w-0 ${hasWordBreaks(description) ? 'break-words whitespace-normal' : 'truncate'}`}>
+              {description}
+            </p>
+          )}
           {tx.group_id && (
             <span className="inline-flex items-center text-[9px] font-semibold uppercase tracking-wide text-violet-700 bg-violet-50 border border-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-900 px-1 py-0.5 rounded-full shrink-0">
               {tx.is_shared && tx.parent_owner_name ? tx.parent_owner_name : t('splitGroups.ownerRowBadge', { group: groupName ?? '' })}
             </span>
           )}
-          {isTransferTransaction(tx) && (
+          {isTransferTransaction(tx) && !transferAccounts && (
             <ArrowLeftRight
               className="h-3 w-3 text-blue-600 shrink-0"
               aria-label={t('transactions.transfer')}
@@ -165,8 +188,11 @@ export function MobileTransactionRow({
           )}
         </div>
 
-        {/* Account row or payee row */}
-        {showPayee ? (
+        {/* Account row or payee row. A transfer pill already names both
+            accounts, so its row shows the bank's own description instead. */}
+        {transferAccounts ? (
+          <p className="text-xs text-muted-foreground mt-0.5 truncate">{tx.description}</p>
+        ) : showPayee ? (
           (tx.payee_name || tx.payee) && (tx.payee_name || tx.payee) !== tx.description ? (
             <p className="text-xs text-muted-foreground mt-0.5 truncate">
               {tx.payee_name || tx.payee}
@@ -192,7 +218,18 @@ export function MobileTransactionRow({
         )}
       </div>
 
-      {/* Amount */}
+      {/* Amount: a whole transfer shows both legs, out over in. */}
+      {transferPairIn ? (
+        <TransferPairAmounts
+          out={tx}
+          in={transferPairIn}
+          fromName={transferAccounts ? getAccountName(transferAccounts.from) : undefined}
+          toName={transferAccounts ? getAccountName(transferAccounts.to) : undefined}
+          locale={locale}
+          dateLocale={dateLocale ?? locale}
+          className="shrink-0 text-sm"
+        />
+      ) : (
       <div className="shrink-0 text-right">
         <span className={`text-sm font-bold tabular-nums ${amountColor}`}>
           {mask(
@@ -214,6 +251,7 @@ export function MobileTransactionRow({
           </div>
         )}
       </div>
+      )}
     </div>
   )
 }

@@ -29,7 +29,12 @@ from app.schemas.bank_connection import (
     ReconnectTokenResponse,
 )
 from app.services import connection_service
-from app.services.transfer_detection_service import detect_transfer_pairs, unlink_transfer_pair
+from app.services.transfer_detection_service import (
+    detect_transfer_pairs,
+    unlink_transfer_pair,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/connections", tags=["connections"])
 

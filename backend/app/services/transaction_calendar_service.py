@@ -107,6 +107,7 @@ async def get_transaction_calendar(
     actual_rows = await _load_actual_transactions(
         session, workspace_id, grid_start, grid_end, requested_account_ids
     )
+    await attach_transfer_counterpart_accounts(session, actual_rows)
     balance_deltas = await _daily_balance_deltas_by_date(
         session,
         workspace_id,
@@ -149,6 +150,7 @@ async def get_transaction_calendar(
     forecast_rows = await _get_forecast_transactions(
         session, workspace_id, grid_start, grid_end, requested_account_ids
     )
+    await attach_transfer_counterpart_accounts(session, forecast_rows)
     forecast_deltas: dict[date, float] = {}
     for tx in forecast_rows:
         if tx.date not in days:
@@ -367,6 +369,9 @@ def _actual_item(
         status=tx.status,
         source=tx.source,
         transfer_pair_id=tx.transfer_pair_id,
+        transfer_counterpart_account_id=tx.transfer_counterpart_account_id,
+        transfer_account=tx.transfer_account,
+        transfer_counterpart_account=tx.transfer_counterpart_account,
         is_transfer=is_transfer,
         is_ignored=ignored,
         exclude_from_pnl=bool(tx.exclude_from_pnl),
@@ -398,6 +403,9 @@ def _forecast_item(
         status=tx.status,
         source=tx.source,
         transfer_pair_id=tx.transfer_pair_id,
+        transfer_counterpart_account_id=tx.transfer_counterpart_account_id,
+        transfer_account=tx.transfer_account,
+        transfer_counterpart_account=tx.transfer_counterpart_account,
         is_transfer=is_transfer,
         is_ignored=ignored,
         exclude_from_pnl=bool(tx.exclude_from_pnl),

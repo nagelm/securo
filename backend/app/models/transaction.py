@@ -141,6 +141,15 @@ class Transaction(Base):
     parent_owner_name = cast(Optional[str], None)
     attachment_count: int = 0
     payee_name = cast(Optional[str], None)
+    # Set with payee_name by app.services.payee_display.apply_payee_display.
+    payee_logo_url = cast(Optional[str], None)
+    payee_icon = cast(Optional[str], None)
+    # The account of the other leg of a linked transfer. Set by
+    # app.services.transfer_counterpart.attach_transfer_counterpart_accounts.
+    transfer_counterpart_account_id = cast(Optional[uuid.UUID], None)
+    # Name/thumbnail summaries of this leg's account and the other leg's.
+    transfer_account = cast(Optional[dict], None)
+    transfer_counterpart_account = cast(Optional[dict], None)
     running_balance = cast(Optional[float], None)
     running_balance_primary = cast(Optional[float], None)
 
