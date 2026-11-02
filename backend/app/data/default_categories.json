@@ -20,7 +20,9 @@
         "hi": "आवास",
         "ja": "住居"
       },
-      "aliases": ["Alojamiento"],
+      "aliases": [
+        "Alojamiento"
+      ],
       "icon": "house",
       "color": "#8B5CF6",
       "position": 0
@@ -45,7 +47,9 @@
         "hi": "भोजन और रेस्तरां",
         "ja": "食費・外食"
       },
-      "aliases": ["Comida y Cena"],
+      "aliases": [
+        "Comida y Cena"
+      ],
       "icon": "utensils-crossed",
       "color": "#F59E0B",
       "position": 1
@@ -365,6 +369,31 @@
       "color": "#64748B",
       "treat_as_transfer": true
     },
+    "loan_repayments": {
+      "names": {
+        "en": "Loan repayments",
+        "pt-BR": "Pagamentos de empréstimos",
+        "pt-PT": "Amortizações de empréstimos",
+        "de": "Kredittilgungen",
+        "fr": "Remboursements de prêts",
+        "nl": "Aflossingen",
+        "sk": "Splátky úverov",
+        "es": "Pagos de préstamos",
+        "it": "Rimborsi di prestiti",
+        "pl": "Spłaty kredytów",
+        "ru": "Погашение кредитов",
+        "uk": "Погашення кредитів",
+        "hu": "Hitel-törlesztések",
+        "cs": "Splátky úvěrů",
+        "el": "Αποπληρωμές δανείων",
+        "hi": "ऋण चुकौती",
+        "ja": "ローン返済"
+      },
+      "group": "housing",
+      "icon": "trending-down",
+      "color": "#64748B",
+      "treat_as_transfer": true
+    },
     "investments": {
       "names": {
         "en": "Investments",
@@ -485,6 +514,30 @@
       "group": "lifestyle",
       "icon": "scissors",
       "color": "#F472B6"
+    },
+    "insurance": {
+      "names": {
+        "en": "Insurance",
+        "pt-BR": "Seguros",
+        "pt-PT": "Seguros",
+        "de": "Versicherungen",
+        "fr": "Assurances",
+        "nl": "Verzekeringen",
+        "sk": "Poistenie",
+        "es": "Seguros",
+        "it": "Assicurazioni",
+        "pl": "Ubezpieczenia",
+        "ru": "Страхование",
+        "uk": "Страхування",
+        "hu": "Biztosítások",
+        "cs": "Pojištění",
+        "el": "Ασφάλειες",
+        "hi": "बीमा",
+        "ja": "保険"
+      },
+      "group": "other",
+      "icon": "umbrella",
+      "color": "#0D9488"
     },
     "taxes": {
       "names": {

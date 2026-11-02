@@ -35,6 +35,50 @@ class CategoryTransferError(ValueError):
     """Raised when the destination given for a deletion cannot take the references."""
 
 
+def default_category_names(key: str) -> list[str]:
+    """Every translated name of the default category ``key`` (empty if unknown).
+
+    Defaults are seeded under the workspace language's name, so a key matches
+    the workspace category carrying any of these names.
+    """
+    return list((DEFAULT_CATEGORIES.get(key) or {"names": {}})["names"].values())
+
+
+async def find_default_category(
+    session: AsyncSession, workspace_id: uuid.UUID, key: str
+) -> Optional[uuid.UUID]:
+    """The workspace category for the default key ``key``, or None.
+
+    The category seeded from ``key`` carries it in ``default_key``, so it is
+    found under any name the user gives it. A workspace with no category
+    carrying the key (a deleted default, or rows the key was never recorded
+    on) falls back to the first unkeyed category with one of the key's
+    translated names.
+    """
+    names = default_category_names(key)
+    if not names:
+        return None
+    keyed = await session.execute(
+        select(Category.id)
+        .where(Category.workspace_id == workspace_id, Category.default_key == key)
+        .limit(1)
+    )
+    found = keyed.scalars().first()
+    if found is not None:
+        return found
+    result = await session.execute(
+        select(Category.id)
+        .where(
+            Category.workspace_id == workspace_id,
+            Category.default_key.is_(None),
+            Category.name.in_(names),
+        )
+        .order_by(Category.id)
+        .limit(1)
+    )
+    return result.scalars().first()
+
+
 async def create_default_categories(
     session: AsyncSession,
     user_id: uuid.UUID,
@@ -85,6 +129,7 @@ async def create_default_categories(
             is_system=True,
             group_id=group.id if group else None,
             treat_as_transfer=data.get("treat_as_transfer", False),
+            default_key=key,
         )
         session.add(category)
         categories.append(category)
@@ -222,9 +267,6 @@ async def update_category(
         return None
 
     changes = data.model_dump(exclude_unset=True)
-    if changes.get("is_hidden") is True and not category.is_system:
-        raise CategoryVisibilityError("Only system categories can be hidden")
-
     for key, value in changes.items():
         setattr(category, key, value)
 

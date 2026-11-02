@@ -559,6 +559,201 @@ RULE_PACKS: dict[str, dict[str, Any]] = {
             ], "actions": [{"op": "set_category", "value": "housing"}], "priority": 10},
         ],
     },
+    "NZ": {
+        "name": "New Zealand",
+        "flag": "\U0001F1F3\U0001F1FF",
+        # NZ bank text puts the merchant anywhere in the line ("POS W/D",
+        # "Direct Debit -", "Windcave", card suffixes), so these match words,
+        # not prefixes. Power, phone and broadband go to Housing, as Akahu's
+        # NZFCC groups do. Brand names come from the Electricity Authority's
+        # Powerswitch list, Canstar NZ, the Commerce Commission's fuel and
+        # grocery studies, RBNZ's bank list and the providers' own sites;
+        # closed or renamed brands (Countdown, Trustpower, Vodafone, Menulog,
+        # Frank Energy, Wellington Water) stay so older rows still match.
+        # Each line should hit one rule only, so ambiguous words carry a
+        # suffix (STATE INS, CONTACT ENERGY) or a word boundary.
+        "rules": [
+            {"name": "NZ supermarkets", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"WOOLWORTHS|COUNTDOWN|NEW WORLD|PAK ?'?N ?'?SAVE(?! ?FUEL)|FOUR SQUARE|FRESH ?CHOICE|"
+                          r"SUPERVALUE|\bCOSTCO\b(?! ?FUEL)|\bFARRO\b|RAEWARD|MOORE WILSON|COMMONSENSE ORGANICS|\bBIN INN\b|"
+                          r"NIGHT ?'?N'? ?DAY|ON THE SPOT|HUCKLEBERRY|\bSUPIE\b"},
+            ], "actions": [{"op": "set_category", "value": "groceries"}], "priority": 10},
+
+            {"name": "NZ liquor stores", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"LIQUORLAND|SUPER LIQUOR|LIQUOR KING|THIRSTY LIQUOR|GLENGARRY|BOTTLE[- ]?O\b"},
+            ], "actions": [{"op": "set_category", "value": "groceries"}], "priority": 10},
+
+            {"name": "NZ food delivery", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"UBER ?EATS|DOORDASH|MENULOG|DELIVEREASY"},
+            ], "actions": [{"op": "set_category", "value": "food"}], "priority": 10},
+
+            {"name": "NZ takeaway and cafe chains", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"MCDONALD|\bKFC\b|BURGER KING|BURGER ?FUEL|\bSUBWAY\b|DOMINO|PIZZA HUT|HELL PIZZA|STARBUCKS|"
+                          r"MUFFIN BREAK|COFFEE CULTURE|\bMOJO\b|CARL'?S JR|WENDY'?S|TACO BELL|NANDO'?S|LONE STAR|"
+                          r"PITA PIT|ST PIERRE|COLUMBUS COFFEE|ROBERT HARRIS|ESQUIRES"},
+            ], "actions": [{"op": "set_category", "value": "food"}], "priority": 10},
+
+            {"name": "NZ fuel", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"Z ENERGY|^Z |\bBP\b|\bMOBIL\b|\bGULL\b|WAITOMO|\bNPD\b|CALTEX|ALLIED PETROLEUM|"
+                          r"TASMAN FUELS|MCKEOWN|PAK ?'?N ?'?SAVE ?FUEL|COSTCO ?FUEL"},
+            ], "actions": [{"op": "set_category", "value": "transport"}], "priority": 10},
+
+            {"name": "NZ public transport", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"METLINK|AT HOP|AUCKLAND TRANSPORT|SNAPPER|BEE CARD|KIWIRAIL|INTERCITY|\bMETRO CARD\b|"
+                          r"MOTU MOVE|\bBUSIT\b|\bBAYBUS\b|\bORBUS\b|\bGOBAY\b|FULLERS|\bDIDI\b"},
+            ], "actions": [{"op": "set_category", "value": "transport"}], "priority": 10},
+
+            {"name": "NZ airlines and ferries", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"\bAIR ?N(EW )?Z(EALAND)?\b|JETSTAR|SOUNDS AIR|AIR CHATHAMS|ORIGINAIR|BARRIER AIR|"
+                          r"INTERISLANDER|BLUEBRIDGE"},
+            ], "actions": [{"op": "set_category", "value": "transport"}], "priority": 10},
+
+            {"name": "NZ parking", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"WILSON PARKING|PARKMATE|\bCARE ?PARK|PAYBYPHONE|SMARTPARK|SECURE PARKING|TOURNAMENT PARKING"},
+            ], "actions": [{"op": "set_category", "value": "transport"}], "priority": 10},
+
+            {"name": "NZ vehicle licensing and inspections", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"\bNZTA\b|NZ TRANSPORT AGENCY|WAKA KOTAHI|\bVTNZ\b|\bVINZ\b"},
+            ], "actions": [{"op": "set_category", "value": "transport"}], "priority": 10},
+
+            {"name": "NZ power and gas", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"MERIDIAN|MERCURY|GENESIS|CONTACT ENERGY|TRUSTPOWER|ELECTRIC KIWI|FLICK ELECTRIC|NOVA ENERGY|"
+                          r"POWERSHOP|PULSE ENERGY|ROCKGAS|OCTOPUS ENERGY|ECOTRICITY|GLOBUG|TOAST ELECTRIC|HANERGY|"
+                          r"NAU MAI RA|WISE ?PRE-?PAY|FRANK ENERGY|GREY POWER ELECTRICITY|BLACK BOX POWER|"
+                          r"JUST ENERGY|ENERGY ONLINE|SIMPLY ENERGY|KEA ENERGY|LODESTONE ENERGY|\bELGAS\b|\bON ?GAS\b"},
+            ], "actions": [{"op": "set_category", "value": "housing"}], "priority": 10},
+
+            {"name": "NZ phone and broadband", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"\bSPARK\b|\bONE ?NZ|VODAFONE|2DEGREES|SKINNY|ORCON|SLINGSHOT|\bNOW ?NZ|VOYAGER|STUFF FIBRE|"
+                          r"BIGPIPE|ZERONET|WIRELESS NATION|FARMSIDE|STARLINK|KOGAN MOBILE|WAREHOUSE MOBILE|"
+                          r"MIGHTY MOBILE|ROCKET MOBILE|KIWI MOBILE"},
+            ], "actions": [{"op": "set_category", "value": "housing"}], "priority": 10},
+
+            {"name": "NZ water", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"WATERCARE|TIAKI WAI|WELLINGTON WATER|\bIAWAI\b|WAIKATO WATERS"},
+            ], "actions": [{"op": "set_category", "value": "housing"}], "priority": 10},
+
+            {"name": "NZ council rates", "conditions_op": "and", "conditions": [
+                # Bank lines truncate long payee names ("EXAMPLE CITY COUN").
+                {"field": "description", "op": "regex",
+                 "value": r"(CITY|DISTRICT|REGIONAL) COUN|AUCKLAND COUNCIL|CHATHAM ISLANDS COUNCIL"},
+            ], "actions": [{"op": "set_category", "value": "housing"}], "priority": 10},
+
+            {"name": "Kainga Ora rent", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"KAINGA ORA"},
+                {"field": "type", "op": "equals", "value": "debit"},
+            ], "actions": [{"op": "set_category", "value": "housing"}], "priority": 10},
+
+            {"name": "NZ hardware stores", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"BUNNINGS|MITRE ?10|PLACEMAKERS"},
+            ], "actions": [{"op": "set_category", "value": "housing"}], "priority": 10},
+
+            {"name": "NZ department and electronics stores", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"THE WAREHOUSE|WAREHOUSE STATIONERY|\bKMART\b|BRISCOES|\bFARMERS(?! MARKET)|NOEL LEEMING|"
+                          r"HARVEY NORMAN|JB HI|PB TECH|REBEL SPORT|TORPEDO7|TRADE ME(?! INS)|SMITHS CITY|"
+                          r"100% APPLIANCES|MIGHTY APE|\bTEMU\b"},
+            ], "actions": [{"op": "set_category", "value": "shopping"}], "priority": 10},
+
+            {"name": "NZ clothing, sport and outdoor stores", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"HALLENSTEIN|GLASSONS|COTTON ON|\bPOSTIE\b|NUMBER ONE SHOES|STIRLING SPORTS|"
+                          r"HUNTING (AND|&) FISHING|KATHMANDU|MACPAC"},
+            ], "actions": [{"op": "set_category", "value": "shopping"}], "priority": 10},
+
+            {"name": "NZ home, book and pet stores", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"SPOTLIGHT|BED BATH (AND|&) BEYOND|FREEDOM FURNITURE|\bNOOD\b|WHITCOULLS|PAPER PLUS|"
+                          r"ANIMATES|PETSTOCK|PET\.CO\.NZ|PETDIRECT"},
+            ], "actions": [{"op": "set_category", "value": "shopping"}], "priority": 10},
+
+            {"name": "NZ pharmacies", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"UNICHEM|LIFE PHARMACY|CHEMIST WAREHOUSE|PHARMACY"},
+            ], "actions": [{"op": "set_category", "value": "health"}], "priority": 10},
+
+            {"name": "NZ doctors, dentists and optometrists", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"MEDICAL CENTRE|HEALTH CENTRE|\bDENTAL\b|DENTIST|PHYSIO|SPECSAVERS|\bOPSM\b|"
+                          r"SOUTHERN CROSS (HOSPITAL|HEALTHCARE)"},
+            ], "actions": [{"op": "set_category", "value": "health"}], "priority": 10},
+
+            {"name": "NZ gyms", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"LES MILLS|CITYFITNESS|ANYTIME FITNESS|\bJETTS\b|SNAP FITNESS|FLEX FITNESS"},
+            ], "actions": [{"op": "set_category", "value": "health"}], "priority": 10},
+
+            {"name": "NZ insurers", "conditions_op": "and", "conditions": [
+                # Common words (State, Tower, Cove, Star, Ando, Partners) only
+                # match with an insurance word after them.
+                {"field": "description", "op": "regex",
+                 "value": r"INSURANCE|\bINSURE\b|\bAMI INS|\bSTATE INS|\bTOWER INS|\bVERO\b|\bNZI\b|\bFMG\b|INITIO|"
+                          r"\bYOUI\b|\bANDO INS|KIWI INSURE|HOLLARD|STAR INSUR|\bCOVE INS|"
+                          r"SOUTHERN CROSS (HEALTH (INS|SOC)|TRAVEL|PET)|\bSCHS\b|\bSCTI\b|\bNIB\b|\bAIA\b|"
+                          r"PARTNERS LIFE|UNIMED|ACCURO|FIDELITY LIFE|ASTERON|ACENDA LIFE|PINNACLE LIFE|\bCHUBB\b|"
+                          r"ONEPATH|\bCIGNA\b|PETCOVER|PET-N-SUR|COVER-MORE|\b1COVER\b|WORLD NOMADS"},
+                {"field": "type", "op": "equals", "value": "debit"},
+            ], "actions": [{"op": "set_category", "value": "insurance"}], "priority": 10},
+
+            {"name": "NZ streaming", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"\bNEON\b|SKY NETWORK|SKY TV|\bSKY GO\b|TVNZ|THREENOW"},
+            ], "actions": [{"op": "set_category", "value": "subscriptions"}], "priority": 10},
+
+            {"name": "NZ news subscriptions", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"NZ ?HERALD|\bNZME\b|THE SPINOFF|BUSINESSDESK|\bNBR\b"},
+            ], "actions": [{"op": "set_category", "value": "subscriptions"}], "priority": 10},
+
+            {"name": "NZ early childhood", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"KINDERGARTEN|PLAYCENTRE|\bKINDY\b|EDUCARE"},
+                {"field": "type", "op": "equals", "value": "debit"},
+            ], "actions": [{"op": "set_category", "value": "education"}], "priority": 10},
+
+            {"name": "Inland Revenue (IRD)", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"INLAND REVENUE|\bIRD\b"},
+            ], "actions": [{"op": "set_category", "value": "taxes"}], "priority": 10},
+
+            {"name": "NZ ACC levies", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex", "value": r"\bACC LEV|ACCIDENT COMPENSATION"},
+            ], "actions": [{"op": "set_category", "value": "taxes"}], "priority": 10},
+
+            {"name": "NZ government fees and fines", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"INTERNAL AFFAIRS|PASSPORT OFFICE|MINISTRY OF JUSTICE|COURT FINES?|"
+                          r"IMMIGRATION (NZ|NEW ZEALAND)|NZ CUSTOMS"},
+                {"field": "type", "op": "equals", "value": "debit"},
+            ], "actions": [{"op": "set_category", "value": "taxes"}], "priority": 10},
+
+            {"name": "NZ bank fees", "conditions_op": "and", "conditions": [
+                # Wording from ANZ, Kiwibank and BNZ fee schedules.
+                {"field": "description", "op": "regex",
+                 "value": r"(ACCOUNT|TRANSACTION|OVERDRAFT|CARD|LATE PAYMENT|STATEMENT|ATM OWNER|CASH ADVANCE|"
+                          r"INVESTIGATION|RETRIEVAL) FEE|UNARRANGED OVERDRAFT|CURRENCY CONVERSION|DISHONOUR"},
+                {"field": "type", "op": "equals", "value": "debit"},
+            ], "actions": [{"op": "set_category", "value": "taxes"}], "priority": 10},
+
+            {"name": "NZ benefits and student support", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"WORK AND INCOME|\bWINZ\b|\bMSD\b|MINISTRY OF SOCIAL DEV|STUDYLINK"},
+                {"field": "type", "op": "equals", "value": "credit"},
+            ], "actions": [{"op": "set_category", "value": "salary"}], "priority": 10},
+
+            {"name": "NZ charities", "conditions_op": "and", "conditions": [
+                {"field": "description", "op": "regex",
+                 "value": r"GIVEALITTLE|RED CROSS|\bSPCA\b(?! PET)|WORLD VISION|UNICEF|STARSHIP FOUNDATION|"
+                          r"CANCER SOCIETY|DONATION"},
+            ], "actions": [{"op": "set_category", "value": "donations"}], "priority": 10},
+        ],
+    },
 }
 
 # Map currency code -> default rule pack country
@@ -567,14 +762,18 @@ CURRENCY_TO_PACK = {
     "USD": "US",
     "EUR": "EU",
     "GBP": "GB",
+    "NZD": "NZ",
 }
 
 
 def _resolve_categories_by_internal_key(
     categories_by_name: dict[str, str],
+    categories_by_key: Optional[dict[str, str]] = None,
 ) -> dict[str, str]:
     """Map default-category internal keys (e.g. 'transport') to the user's actual
-    category UUID by matching against any language variant of the default name.
+    category UUID: the category seeded from that key (``categories_by_key``,
+    from ``Category.default_key``, which survives a rename) first, else by
+    matching against any language variant of the default name.
 
     Rule templates reference categories by their internal key, but the user's
     categories are stored under a localized name. If we resolve the key using
@@ -584,13 +783,27 @@ def _resolve_categories_by_internal_key(
     which language the user's categories were created in.
     """
     key_to_id: dict[str, str] = {}
+    keyed = categories_by_key or {}
+    keyed_ids = set(keyed.values())
     for internal_key, data in DEFAULT_CATEGORIES.items():
+        if internal_key in keyed:
+            key_to_id[internal_key] = keyed[internal_key]
+            continue
         for value in data["names"].values():
             cat_id = categories_by_name.get(value)
-            if cat_id:
+            # A category seeded from another key keeps that key whatever
+            # it is renamed to, so its name never stands in for this one.
+            if cat_id and cat_id not in keyed_ids:
                 key_to_id[internal_key] = cat_id
                 break
     return key_to_id
+
+
+def _categories_by_name_and_key(categories: list[Category]) -> tuple[dict[str, str], dict[str, str]]:
+    """The two lookups `_resolve_categories_by_internal_key` takes."""
+    by_name = {cat.name: str(cat.id) for cat in categories}
+    by_key = {cat.default_key: str(cat.id) for cat in categories if cat.default_key}
+    return by_name, by_key
 
 
 def _build_rules_from_templates(
@@ -656,8 +869,9 @@ async def create_default_rules(
     else:
         cat_query = cat_query.where(Category.user_id == user_id)
     result = await session.execute(cat_query)
-    categories = {cat.name: str(cat.id) for cat in result.scalars().all()}
-    key_to_id = _resolve_categories_by_internal_key(categories)
+    key_to_id = _resolve_categories_by_internal_key(
+        *_categories_by_name_and_key(list(result.scalars().all()))
+    )
 
     resolved, _unresolved = _build_rules_from_templates(UNIVERSAL_RULES, key_to_id)
 
@@ -732,12 +946,16 @@ async def _ensure_categories_for_keys(
             )
         ).scalars().all()
     )
-    existing_cat_names = {c.name for c in existing_cats}
+    # A category seeded from a key keeps it when renamed, so the key alone
+    # says the default exists; its name only counts for unkeyed categories.
+    existing_keys = {c.default_key for c in existing_cats if c.default_key}
+    existing_cat_names = {c.name for c in existing_cats if not c.default_key}
 
     missing_keys = [
         key
         for key in internal_keys
         if (data := DEFAULT_CATEGORIES.get(key))
+        and key not in existing_keys
         and not (name_variants(data) & existing_cat_names)
     ]
     if not missing_keys:
@@ -794,6 +1012,7 @@ async def _ensure_categories_for_keys(
             is_system=True,
             group_id=target_group.id if target_group else None,
             treat_as_transfer=data.get("treat_as_transfer", False),
+            default_key=key,
         )
         session.add(cat)
     await session.commit()
@@ -843,8 +1062,9 @@ async def install_rule_pack(
             else Category.user_id == user_id
         )
     )
-    categories = {cat.name: str(cat.id) for cat in result.scalars().all()}
-    key_to_id = _resolve_categories_by_internal_key(categories)
+    key_to_id = _resolve_categories_by_internal_key(
+        *_categories_by_name_and_key(list(result.scalars().all()))
+    )
 
     resolved, unresolved = _build_rules_from_templates(pack["rules"], key_to_id)
 

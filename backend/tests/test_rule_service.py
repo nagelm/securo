@@ -1280,6 +1280,103 @@ async def test_install_rule_pack_works_across_languages(session: AsyncSession, t
 
 
 @pytest.mark.asyncio
+async def test_install_nz_rule_pack_resolves_every_rule(session: AsyncSession, test_user, test_workspace):
+    await create_default_categories(session, test_user.id, lang="en")
+
+    result = await install_rule_pack(session, test_workspace.id, test_user.id, "NZ", lang="en")
+
+    assert len(result.rules) == len(RULE_PACKS["NZ"]["rules"])
+    assert result.unresolved == 0
+
+
+
+@pytest.mark.asyncio
+async def test_install_nz_rule_pack_adds_insurance_to_an_older_workspace(
+    session: AsyncSession, test_user, test_workspace
+):
+    # Workspaces seeded before Insurance was a default category have none;
+    # installing the pack creates it so the insurers rule still installs.
+    from sqlalchemy import delete, select
+
+    from app.models.category import Category
+
+    await create_default_categories(session, test_user.id, lang="en")
+    await session.execute(delete(Category).where(Category.default_key == "insurance"))
+    await session.commit()
+
+    result = await install_rule_pack(session, test_workspace.id, test_user.id, "NZ", lang="en",
+                                     create_missing_categories=True)
+
+    assert result.unresolved == 0
+    insurance = (await session.execute(
+        select(Category).where(Category.default_key == "insurance"))).scalar_one()
+    assert insurance.name == "Insurance"
+
+@pytest.mark.parametrize("description,tx_type,expected", [
+    ("Kmart Riccarton Christchurch", "debit", "NZ department and electronics stores"),
+    ("Farmers Online Order 0001", "debit", "NZ department and electronics stores"),
+    ("Farmers Market Nelson", "debit", None),
+    ("Unichem Central Pharmacy Dunedin", "debit", "NZ pharmacies"),
+    ("POS W/D Example Dental C-", "debit", "NZ doctors, dentists and optometrists"),
+    ("Direct Debit -EXAMPLE CITY COUNCIL", "debit", "NZ council rates"),
+    ("Pak N Save Hamilton", "debit", "NZ supermarkets"),
+    ("BP 2go Rotorua", "debit", "NZ fuel"),
+    ("2degrees Mobile Example", "debit", "NZ phone and broadband"),
+    ("Example Kindergarten Napier", "debit", "NZ early childhood"),
+    ("IRD tax deduction example", "debit", "Inland Revenue (IRD)"),
+    ("PAKnSAVE FUEL Kaiapoi", "debit", "NZ fuel"),
+    ("Costco Fuel Westgate", "debit", "NZ fuel"),
+    ("Night n Day Dunedin", "debit", "NZ supermarkets"),
+    ("Liquorland Riccarton", "debit", "NZ liquor stores"),
+    ("Carl's Jr Manukau", "debit", "NZ takeaway and cafe chains"),
+    ("AIR NZ 0861234567890", "debit", "NZ airlines and ferries"),
+    ("Hair NZ Salon Tauranga", "debit", None),
+    ("Interislander Picton", "debit", "NZ airlines and ferries"),
+    ("NZTA Vehicle Licence", "debit", "NZ vehicle licensing and inspections"),
+    ("Direct Debit -OCTOPUS ENERGY", "debit", "NZ power and gas"),
+    ("Contact Lenses Direct", "debit", None),
+    ("Warehouse Mobile Prepay", "debit", "NZ phone and broadband"),
+    ("Phone NZ Repairs", "debit", None),
+    ("Direct Debit -WATERCARE SERVICES", "debit", "NZ water"),
+    ("Watercare Services", "debit", "NZ water"),
+    ("EXAMPLE CITY COUN RATES", "debit", "NZ council rates"),
+    ("Auckland Council Rates", "debit", "NZ council rates"),
+    ("Kainga Ora Rent", "debit", "Kainga Ora rent"),
+    ("Kāinga Ora Bond Refund", "credit", None),
+    ("Trade Me Insurance", "debit", "NZ insurers"),
+    ("Trade Me Ltd Auckland", "debit", "NZ department and electronics stores"),
+    ("Glassons Sylvia Park", "debit", "NZ clothing, sport and outdoor stores"),
+    ("Animates Albany", "debit", "NZ home, book and pet stores"),
+    ("Southern Cross Health Society", "debit", "NZ insurers"),
+    ("Southern Cross Hospital Christchurch", "debit", "NZ doctors, dentists and optometrists"),
+    ("Direct Debit -STATE INSURANCE", "debit", "NZ insurers"),
+    ("State Highway Cafe", "debit", None),
+    ("Sky Tower Auckland", "debit", None),
+    ("SPCA Pet Insurance", "debit", "NZ insurers"),
+    ("SPCA Animal Welfare Centre", "debit", "NZ charities"),
+    ("ThreeNow Subscription", "debit", "NZ streaming"),
+    ("NZ Herald Premium", "debit", "NZ news subscriptions"),
+    ("ACC Levy Invoice 123", "debit", "NZ ACC levies"),
+    ("Account Access Fee Waiver", "credit", None),
+    ("Department of Internal Affairs Passport", "debit", "NZ government fees and fines"),
+    ("International Transaction Fee", "debit", "NZ bank fees"),
+    ("Work and Income Payment", "credit", "NZ benefits and student support"),
+    ("SkyCity Auckland", "debit", None),
+    ("Refund Example Store", "credit", None),
+])
+def test_nz_rule_pack_matches_nz_bank_text(description, tx_type, expected):
+    from types import SimpleNamespace
+
+    from app.services.rule_engine import evaluate_conditions
+
+    tx = SimpleNamespace(description=description, type=tx_type, payee=None, notes=None, amount=Decimal("10"),
+                         account_id=None, payee_id=None, date=date(2026, 10, 12), status="posted")
+    hits = [r["name"] for r in RULE_PACKS["NZ"]["rules"]
+            if evaluate_conditions(r["conditions_op"], r["conditions"], tx)]  # ty: ignore[invalid-argument-type]
+    assert hits == ([expected] if expected else [])
+
+
+@pytest.mark.asyncio
 async def test_install_rule_pack_reports_unresolved_when_categories_missing(
     session: AsyncSession, test_user, test_workspace
 ):

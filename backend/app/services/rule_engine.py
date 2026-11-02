@@ -51,7 +51,7 @@ def _to_decimal(val) -> Decimal | None:
     return number if number.is_finite() else None
 
 
-def _signed_amount(tx: "Transaction", raw) -> Decimal:
+def _signed_amount(tx: "Transaction", raw) -> Decimal | None:
     """The amount as a condition compares it: credits positive, debits negative.
 
     Amounts are stored positive with the direction in `type`, so an unsigned
@@ -61,7 +61,10 @@ def _signed_amount(tx: "Transaction", raw) -> Decimal:
     does not reject one) must follow the same contract: the sign comes from
     `type` alone.
     """
-    amount = abs(_to_decimal(raw))
+    number = _to_decimal(raw)
+    if number is None:
+        return None
+    amount = abs(number)
     if getattr(tx, "type", None) == "debit":
         amount = -amount
     return amount
@@ -116,19 +119,17 @@ def _match_condition(condition: dict, tx: "Transaction") -> bool:
             # parse, and fall back to text when either does not. The
             # comparison is signed: a debit of 100.00 is -100.
             if field == "amount":
-                try:
-                    return _signed_amount(tx, tx_val) == Decimal(str(value))
-                except InvalidOperation:
-                    pass
+                signed, wanted = _signed_amount(tx, tx_val), _to_decimal(value)
+                if signed is not None and wanted is not None:
+                    return signed == wanted
             return tx_str == val_str
         if op == "not_equals":
             # Signed for the same reason as `equals`: a debit of 100.00 is
             # -100, so it is not equal to the typed 100.
             if field == "amount":
-                try:
-                    return _signed_amount(tx, tx_val) != Decimal(str(value))
-                except InvalidOperation:
-                    pass
+                signed, wanted = _signed_amount(tx, tx_val), _to_decimal(value)
+                if signed is not None and wanted is not None:
+                    return signed != wanted
             return tx_str != val_str
         if op == "regex":
             try:
