@@ -236,6 +236,8 @@ function splitRatio(tx: AssetTransaction, locale: string): string {
   return formatSplitRatio(tx.old_units ?? 0, tx.new_units ?? 0, locale)
 }
 
+const VALUE_BASIS_KEY = 'securo.assets.valueBasis'
+
 export default function AssetsPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -252,6 +254,28 @@ export default function AssetsPage() {
   const today = effectiveTimezone ? todayInTimezone(effectiveTimezone) : null
   const userCurrency = user?.preferences?.currency_display ?? 'USD'
   const queryClient = useQueryClient()
+  // Fork: assets with linked loans chart as equity unless switched to gross
+  // value on their own row; the choice is remembered per asset in this browser.
+  const [valueBasisIds, setValueBasisIds] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(VALUE_BASIS_KEY) ?? '[]') as string[])
+    } catch {
+      return new Set()
+    }
+  })
+  const toggleAssetBasis = (assetId: string) => {
+    setValueBasisIds(prev => {
+      const next = new Set(prev)
+      if (next.has(assetId)) next.delete(assetId)
+      else next.add(assetId)
+      try {
+        localStorage.setItem(VALUE_BASIS_KEY, JSON.stringify([...next]))
+      } catch {
+        // storage unavailable: the choice lasts for this visit only
+      }
+      return next
+    })
+  }
 
   const { data: supportedCurrencies } = useQuery({
     queryKey: ['currencies'],
@@ -1031,6 +1055,18 @@ export default function AssetsPage() {
           </div>
         </div>
 
+        {hasLinkedLoans && (
+          <div className="pr-3 pb-2 -mt-1.5 pl-[3.375rem]">
+            <AssetEquityLine
+              asset={asset}
+              locale={locale}
+              mask={mask}
+              basis={valueBasisIds.has(asset.id) ? 'value' : 'equity'}
+              onBasisChange={() => toggleAssetBasis(asset.id)}
+            />
+          </div>
+        )}
+
         {isExpanded && (
           <>
           {LOAN_COLLATERAL_TYPES.includes(asset.type) && (
@@ -1344,6 +1380,7 @@ export default function AssetsPage() {
       {portfolioData && portfolioData.trend.length > 0 && (
         <PortfolioChart
           data={portfolioData}
+          valueBasisIds={valueBasisIds}
           wallets={sortedWallets}
           currency={userCurrency}
           locale={locale}
@@ -1980,8 +2017,10 @@ export default function AssetsPage() {
 // The theme's series colors, as every chart uses them.
 const PORTFOLIO_COLORS = Array.from({ length: 12 }, (_, i) => `var(--chart-${i + 1})`)
 
-function PortfolioChart({ data, wallets, currency, locale: loc, dateLocale: dateLoc, mask }: {
-  data: { assets: { id: string; name: string; type: string; group_id: string | null }[]; trend: Record<string, unknown>[]; total: number }
+function PortfolioChart({ data: grossData, valueBasisIds, wallets, currency, locale: loc, dateLocale: dateLoc, mask }: {
+  data: { assets: { id: string; name: string; type: string; group_id: string | null }[]; trend: Record<string, unknown>[]; total: number; debt_total?: number }
+  /** Assets switched to gross value on their row; the rest with loans chart as equity. */
+  valueBasisIds: Set<string>
   wallets: AssetGroup[]
   currency: string
   locale: string
@@ -1997,6 +2036,28 @@ function PortfolioChart({ data, wallets, currency, locale: loc, dateLocale: date
   const [mode, setMode] = useState<'wallet' | 'asset'>('wallet')
   const [drawMode, setDrawMode] = useState<'stacked' | 'lines'>('stacked')
   const isStacked = drawMode === 'stacked'
+  // Fork: an asset with loans secured on it charts as its value minus what
+  // those loans owed that day ("debt:<id>" per trend row), unless its row is
+  // switched to gross Value.
+  const data = useMemo(() => {
+    const trend = grossData.trend.map(row => {
+      const out: Record<string, unknown> = { ...row }
+      let netted = 0
+      for (const a of grossData.assets) {
+        if (valueBasisIds.has(a.id)) continue
+        const debt = (row[`debt:${a.id}`] as number) ?? 0
+        if (debt) {
+          out[a.id] = ((row[a.id] as number) ?? 0) - debt
+          netted += debt
+        }
+      }
+      out._total = ((row._total as number) ?? 0) - netted
+      return out
+    })
+    // The header total matches the last row's _total, as for the gross view.
+    const last = trend[trend.length - 1]
+    return { ...grossData, trend, total: last ? ((last._total as number) ?? 0) : grossData.total }
+  }, [valueBasisIds, grossData])
 
   const formatCompact = (v: number) => {
     const abs = Math.abs(v)

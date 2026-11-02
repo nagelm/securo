@@ -2,7 +2,7 @@ import logging
 import uuid
 from datetime import date, datetime, timezone, timedelta
 from decimal import ROUND_DOWN, Decimal
-from typing import Any, Optional, Sequence, cast
+from typing import Any, Awaitable, Callable, Optional, Sequence, cast
 
 from fastapi import HTTPException, status
 from sqlalchemy import exists, or_, select, func, desc, update, update as sa_update
