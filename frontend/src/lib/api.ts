@@ -53,6 +53,10 @@ import type {
   InvoiceSettings,
   InvoiceSummary,
   RecurringTransaction,
+  ForecastItem,
+  ForecastResponse,
+  InsightsBriefing,
+  ForecastScenario,
   ProjectedTransaction,
   TransactionCalendarResponse,
   Budget,
@@ -1346,6 +1350,82 @@ export const recurring = {
   generate: async (): Promise<{ generated: number }> => {
     const { data } = await api.post('/recurring-transactions/generate')
     return data
+  },
+}
+
+// Fork: the Forecast page.
+// Fork: the Insights page's monthly briefing.
+export const insights = {
+  briefing: async (month?: string): Promise<InsightsBriefing> => {
+    const { data } = await api.get('/insights/briefing', { params: month ? { month } : {} })
+    return data
+  },
+}
+
+export const forecast = {
+  get: async (
+    months = 12,
+    interval = 'monthly',
+    includeSpending = true,
+    // Fork: an account view; omitted for all cash and card accounts.
+    accountIds?: string[],
+  ): Promise<ForecastResponse> => {
+    const { data } = await api.get('/forecast', {
+      params: {
+        months,
+        interval,
+        include_spending: includeSpending,
+        ...(accountIds ? { account_ids: accountIds } : {}),
+      },
+      // Repeated `account_ids=a&account_ids=b`, as FastAPI reads a list.
+      ...(accountIds ? { paramsSerializer: { indexes: null as null } } : {}),
+    })
+    return data
+  },
+  // Fork: the budgets the forecast applies (opt-in).
+  budgetChoices: {
+    get: async (): Promise<ForecastBudgetChoices> => {
+      const { data } = await api.get('/forecast/budget-choices')
+      return data
+    },
+    set: async (choices: ForecastBudgetChoices): Promise<ForecastBudgetChoices> => {
+      const { data } = await api.put('/forecast/budget-choices', choices)
+      return data
+    },
+  },
+  items: {
+    list: async (): Promise<ForecastItem[]> => {
+      const { data } = await api.get('/forecast/items')
+      return data
+    },
+    create: async (item: Partial<ForecastItem>): Promise<ForecastItem> => {
+      const { data } = await api.post('/forecast/items', item)
+      return data
+    },
+    update: async (id: string, item: Partial<ForecastItem>): Promise<ForecastItem> => {
+      const { data } = await api.patch(`/forecast/items/${id}`, item)
+      return data
+    },
+    delete: async (id: string): Promise<void> => {
+      await api.delete(`/forecast/items/${id}`)
+    },
+  },
+  scenarios: {
+    list: async (): Promise<ForecastScenario[]> => {
+      const { data } = await api.get('/forecast/scenarios')
+      return data
+    },
+    create: async (scenario: Partial<ForecastScenario>): Promise<ForecastScenario> => {
+      const { data } = await api.post('/forecast/scenarios', scenario)
+      return data
+    },
+    update: async (id: string, scenario: Partial<ForecastScenario>): Promise<ForecastScenario> => {
+      const { data } = await api.patch(`/forecast/scenarios/${id}`, scenario)
+      return data
+    },
+    delete: async (id: string): Promise<void> => {
+      await api.delete(`/forecast/scenarios/${id}`)
+    },
   },
 }
 

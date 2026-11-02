@@ -1,0 +1,401 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { screen, waitFor, within } from '@testing-library/react'
+
+import ForecastPage from '@/pages/forecast'
+import { renderWithProviders, t } from '@/test/utils'
+import type { Account, ForecastResponse, ForecastScenario, LoanForecast, RecurringTransaction } from '@/types'
+
+const api = vi.hoisted(() => ({
+  forecast: {
+    get: vi.fn(),
+    items: { list: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+    budgetChoices: { get: vi.fn(), set: vi.fn() },
+    scenarios: { list: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  },
+  recurring: { list: vi.fn() },
+  accounts: { list: vi.fn() },
+  categories: { list: vi.fn(), listIncludingHidden: vi.fn() },
+  categoryGroups: { list: vi.fn() },
+}))
+
+vi.mock('@/lib/api', () => api)
+
+// The Recurring tab has its own tests; here it only has to show up.
+vi.mock('@/pages/recurring', () => ({ RecurringTab: () => <div data-testid="recurring-tab" /> }))
+
+vi.mock('@/hooks/use-display-locale', () => ({
+  useDisplayLocale: () => 'en-US',
+  useDateLocale: () => 'en-US',
+}))
+
+vi.mock('@/hooks/use-privacy-mode', () => ({
+  usePrivacyMode: () => ({ mask: (value: string) => value, privacyMode: false, MASK: '••••' }),
+}))
+
+vi.mock('@/contexts/auth-context', () => ({
+  useAuth: () => ({ user: { preferences: { currency_display: 'USD' } } }),
+}))
+
+vi.mock('@/contexts/workspace-context', async () => {
+  const { createContext } = await import('react')
+  return {
+    useWorkspace: () => ({ canWrite: true }),
+    WorkspaceContext: createContext(null),
+  }
+})
+
+// Made-up figures: one weekly table loan with a "repay more" scenario, and a
+// revolving loan with no details.
+const scenario: ForecastScenario = { id: 'sc-1', name: 'Repay more', color: '#10B981', is_enabled: true, position: 0 }
+
+const homeLoan: LoanForecast = {
+  account_id: 'loan-1',
+  name: 'Home loan',
+  currency: 'USD',
+  balance: 100000,
+  rate: 5.15,
+  frequency: 'WEEKLY',
+  missing_details: false,
+  base: {
+    points: [
+      { date: '2026-10-14', balance: 100000, interest: 0, principal: 0 },
+      { date: '2026-10-31', balance: 99500, interest: 290, principal: 500 },
+      { date: '2026-11-30', balance: 98600, interest: 480, principal: 900 },
+    ],
+    payoff_date: '2033-03-30',
+    total_interest: 17229.88,
+    repayment: 352.40,
+  },
+  scenarios: [{
+    scenario_id: scenario.id,
+    name: scenario.name,
+    color: scenario.color,
+    points: [
+      { date: '2026-10-14', balance: 100000, interest: 0, principal: 0 },
+      { date: '2026-10-31', balance: 99000, interest: 290, principal: 1000 },
+      { date: '2026-11-30', balance: 97000, interest: 470, principal: 2000 },
+    ],
+    payoff_date: '2030-04-17',
+    total_interest: 9217.4,
+    repayment: 600,
+    interest_saved: 8012.48,
+    payoff_change_days: -1078,
+  }],
+}
+
+const revolving: LoanForecast = {
+  account_id: 'loan-2',
+  name: 'Revolving credit',
+  currency: 'USD',
+  balance: 5000,
+  rate: null,
+  frequency: null,
+  missing_details: true,
+  base: null,
+  scenarios: [],
+}
+
+function response(): ForecastResponse {
+  return {
+    currency: 'USD',
+    interval: 'monthly',
+    start_date: '2026-10-14',
+    end_date: '2026-11-30',
+    starting_balance: 1000,
+    include_spending: true,
+    base: [
+      { date: '2026-10-14', value: 1000 },
+      { date: '2026-11-30', value: 1200 },
+    ],
+    summary: { end_balance: 1200, lowest_balance: 1000, lowest_date: '2026-10-14' },
+    scenarios: [],
+    spending_estimates: [],
+    loans: [homeLoan, revolving],
+  }
+}
+
+const recurring = [
+  { id: 'r-1', description: 'Salary', is_active: true, amount: 5000, currency: 'USD', type: 'credit' },
+  { id: 'r-2', description: 'Rent', is_active: true, amount: 1500, currency: 'USD', type: 'debit' },
+  { id: 'r-3', description: 'Old gym', is_active: false, amount: 50, currency: 'USD', type: 'debit' },
+] as unknown as RecurringTransaction[]
+
+const accounts = [
+  { id: 'acc-1', name: 'Everyday', display_name: null, type: 'checking', currency: 'USD', position: 0, is_closed: false },
+  { id: 'loan-1', name: 'Home loan', display_name: null, type: 'loan', currency: 'USD', position: 1, is_closed: false },
+] as unknown as Account[]
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  api.forecast.get.mockResolvedValue(response())
+  api.forecast.items.list.mockResolvedValue([])
+  api.forecast.budgetChoices.get.mockResolvedValue({ category_ids: [], budget_group_ids: [] })
+  api.forecast.items.create.mockResolvedValue({})
+  api.forecast.scenarios.list.mockResolvedValue([scenario])
+  api.recurring.list.mockResolvedValue(recurring)
+  api.accounts.list.mockResolvedValue(accounts)
+  api.categories.list.mockResolvedValue([])
+  api.categories.listIncludingHidden.mockResolvedValue([])
+  api.categoryGroups.list.mockResolvedValue([])
+})
+
+// Fork (owner 2026-10-15): the cash chart and each loan's chart share one
+// carousel; expected payments and scenarios sit on their own tabs.
+async function openLoans(user: ReturnType<typeof renderWithProviders>['user']) {
+  await user.click(await screen.findByRole('button', { name: 'Home loan' }))
+}
+
+async function openScenarios(user: ReturnType<typeof renderWithProviders>['user']) {
+  await user.click(await screen.findByRole('tab', { name: t('forecast.tabs.scenarios') }))
+}
+
+describe('Forecast page: loans', () => {
+  it('shows each loan with its payoff, interest and what each scenario changes', async () => {
+    const { user } = renderWithProviders(<ForecastPage />)
+    await openLoans(user)
+
+    // One loan at a time, with a picker and a position.
+    const rows = await screen.findAllByTestId('loan-row')
+    expect(rows).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Home loan' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText(t('forecast.loans.position', { index: 2, count: 3 }))).toBeInTheDocument()
+    const home = rows[0]
+    expect(within(home).getByRole('link', { name: 'Home loan' })).toHaveAttribute('href', '/accounts/loan-1')
+    expect(within(home).getByText(/\$100,000\.00 owed/)).toBeInTheDocument()
+    expect(within(home).getByText(/5\.15% a year/)).toBeInTheDocument()
+    expect(within(home).getByText(/\$352\.40 weekly/)).toBeInTheDocument()
+    expect(within(home).getByText('Mar 2033')).toBeInTheDocument()
+    expect(within(home).getByText('$17,229.88')).toBeInTheDocument()
+
+    const change = within(home).getByTestId('loan-scenario')
+    expect(change).toHaveTextContent('Repay more:')
+    expect(change).toHaveTextContent('pays off 35 months earlier (Apr 2030)')
+    expect(change).toHaveTextContent('saves $8,012.48 interest')
+    expect(change).toHaveTextContent('repayment $600.00')
+
+    // Balance lines (base + scenario) and the interest/principal bars.
+    await waitFor(() => expect(home.querySelectorAll('.recharts-line')).toHaveLength(2))
+    const strokes = [...home.querySelectorAll('.recharts-line-curve')].map((p) => p.getAttribute('stroke'))
+    expect(strokes).toEqual(['#6366F1', '#10B981'])
+    expect(home.querySelectorAll('.recharts-bar').length).toBe(2)
+  })
+
+  it('a loan without enough details links to the loan to fill them in', async () => {
+    const { user } = renderWithProviders(<ForecastPage />)
+    await openLoans(user)
+    await user.click(screen.getByRole('button', { name: t('forecast.loans.next') }))
+
+    const rows = await screen.findAllByTestId('loan-row')
+    expect(rows).toHaveLength(1)
+    const note = within(rows[0]).getByTestId('loan-missing-details')
+    expect(note).toHaveTextContent(t('forecast.loans.missingDetails'))
+    expect(within(note).getByRole('link', { name: t('forecast.loans.addDetails') })).toHaveAttribute('href', '/accounts/loan-2')
+    expect(rows[0].querySelector('.recharts-wrapper')).toBeNull()
+  })
+
+  it('a loan change picks a projectable loan, a new rate and keeps the repayment', async () => {
+    const { user } = renderWithProviders(<ForecastPage />)
+    await screen.findByRole('button', { name: 'Home loan' })
+    await openScenarios(user)
+    await user.click(await screen.findByRole('button', { name: t('forecast.addChange') }))
+    const dialog = await screen.findByRole('dialog')
+
+    await user.selectOptions(within(dialog).getByLabelText(t('forecast.changeKind')), 'loan_change')
+    const picker = within(dialog).getByLabelText(t('forecast.loans.loan'))
+    expect(picker).toHaveValue('loan-1')
+    expect(within(picker).getByRole('option', { name: 'Revolving credit (needs loan details)' })).toBeDisabled()
+    expect(within(dialog).getByTestId('loan-current')).toHaveTextContent('Now 5.15% a year, $352.40 weekly')
+    expect(within(dialog).getByLabelText(t('forecast.changeMode'))).toHaveValue('rate')
+
+    await user.type(within(dialog).getByLabelText(t('forecast.loans.newRate')), '6.5')
+    expect(within(dialog).getByRole('button', { name: t('forecast.loans.recalculate') })).toHaveAttribute('aria-pressed', 'true')
+    await user.click(within(dialog).getByRole('button', { name: t('forecast.loans.keep') }))
+    expect(within(dialog).getByText(t('forecast.loans.keepHint'))).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: t('common.save') }))
+
+    await waitFor(() => expect(api.forecast.items.create).toHaveBeenCalledWith(expect.objectContaining({
+      scenario_id: 'sc-1', kind: 'loan_change', account_id: 'loan-1', change_mode: 'rate', percent: '6.5',
+      amount: null, recalculate_repayment: false, end_date: null,
+    })))
+  })
+
+  it('a rate change can set the repayment by hand (fork)', async () => {
+    const { user } = renderWithProviders(<ForecastPage />)
+    await screen.findByRole('button', { name: 'Home loan' })
+    await openScenarios(user)
+    await user.click(await screen.findByRole('button', { name: t('forecast.addChange') }))
+    const dialog = await screen.findByRole('dialog')
+
+    await user.selectOptions(within(dialog).getByLabelText(t('forecast.changeKind')), 'loan_change')
+    await user.type(within(dialog).getByLabelText(t('forecast.loans.newRate')), '4.9')
+    expect(within(dialog).queryByLabelText(t('forecast.loans.newRepaymentAmount'))).not.toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: t('forecast.loans.set') }))
+    expect(within(dialog).getByText(t('forecast.loans.setHint'))).toBeInTheDocument()
+    await user.type(within(dialog).getByLabelText(t('forecast.loans.newRepaymentAmount')), '600')
+    await user.click(within(dialog).getByRole('button', { name: t('common.save') }))
+
+    await waitFor(() => expect(api.forecast.items.create).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'loan_change', account_id: 'loan-1', change_mode: 'rate', percent: '4.9',
+      amount: '600', recalculate_repayment: false,
+    })))
+  })
+
+  it('a rate change with a set repayment reads as one line', async () => {
+    api.forecast.items.list.mockResolvedValue([{
+      id: 'it-2', scenario_id: 'sc-1', kind: 'loan_change', description: '', amount: '600', currency: 'USD',
+      type: null, date: null, start_date: '2027-02-01', end_date: null, frequency: null, account_id: 'loan-1',
+      category_id: null, recurring_transaction_id: null, change_mode: 'rate', percent: '4.9',
+      recalculate_repayment: false, matched_transaction_id: null,
+    }])
+    const { user } = renderWithProviders(<ForecastPage />)
+    await openScenarios(user)
+
+    expect(await screen.findByText(/Home loan rate 4\.9% and repayment \$600\.00 from 2\/1\/2027/)).toBeInTheDocument()
+  })
+
+  it('a lump sum sends the amount and its date', async () => {
+    const { user } = renderWithProviders(<ForecastPage />)
+    await screen.findByRole('button', { name: 'Home loan' })
+    await openScenarios(user)
+    await user.click(await screen.findByRole('button', { name: t('forecast.addChange') }))
+    const dialog = await screen.findByRole('dialog')
+
+    await user.selectOptions(within(dialog).getByLabelText(t('forecast.changeKind')), 'loan_change')
+    await user.selectOptions(within(dialog).getByLabelText(t('forecast.changeMode')), 'lump_sum')
+    expect(within(dialog).queryByRole('button', { name: t('forecast.loans.keep') })).not.toBeInTheDocument()
+    await user.type(within(dialog).getByLabelText(t('forecast.loans.extraAmount')), '10000')
+    await user.click(within(dialog).getByRole('button', { name: t('common.save') }))
+
+    await waitFor(() => expect(api.forecast.items.create).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'loan_change', account_id: 'loan-1', change_mode: 'lump_sum', amount: '10000', percent: null,
+      recalculate_repayment: null,
+    })))
+  })
+
+  it('a loan change in a scenario reads as one line', async () => {
+    api.forecast.items.list.mockResolvedValue([{
+      id: 'it-1', scenario_id: 'sc-1', kind: 'loan_change', description: '', amount: null, currency: 'USD',
+      type: null, date: null, start_date: '2027-02-01', end_date: null, frequency: null, account_id: 'loan-1',
+      category_id: null, recurring_transaction_id: null, change_mode: 'rate', percent: '6.25',
+      recalculate_repayment: true, matched_transaction_id: null,
+    }])
+    const { user } = renderWithProviders(<ForecastPage />)
+    await openScenarios(user)
+
+    expect(await screen.findByText(/Home loan rate 6\.25% from 2\/1\/2027, repayment recalculated/)).toBeInTheDocument()
+  })
+})
+
+describe('Forecast page: loan chart legend (fork)', () => {
+  it('a legend click takes interest out of the repayment stack and a second click puts it back', async () => {
+    const { user } = renderWithProviders(<ForecastPage />)
+    await openLoans(user)
+    const home = await screen.findByTestId('loan-row')
+    // Two future repayments, each an interest and a principal bar.
+    await waitFor(() => expect(home.querySelectorAll('.recharts-bar-rectangle')).toHaveLength(4))
+    const barChart = [...home.querySelectorAll('.recharts-wrapper')][1]
+    const yTicks = () =>
+      [...barChart.querySelectorAll('.recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value')].map((n) => n.textContent)
+    const before = yTicks()
+    expect(before.length).toBeGreaterThan(0)
+
+    const interest = within(home).getByRole('button', { name: t('forecast.loans.interest') })
+    await user.click(interest)
+
+    await waitFor(() => expect(home.querySelectorAll('.recharts-bar-rectangle')).toHaveLength(2))
+    const fills = [...home.querySelectorAll('.recharts-bar-rectangle path')].map((p) => p.getAttribute('fill'))
+    expect(new Set(fills)).toEqual(new Set(['#6366F1']))
+    expect(interest).toHaveAttribute('aria-pressed', 'false')
+    // The stack tops out at 900 (principal alone) instead of 1,380.
+    await waitFor(() => expect(yTicks()).not.toEqual(before))
+
+    await user.click(interest)
+
+    await waitFor(() => expect(home.querySelectorAll('.recharts-bar-rectangle')).toHaveLength(4))
+    expect(interest).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() => expect(yTicks()).toEqual(before))
+  })
+})
+
+describe('Forecast page: recurring', () => {
+  it('shows one line counting the active recurring payments, and Manage links to the Recurring page', async () => {
+    renderWithProviders(<ForecastPage />)
+
+    const line = await screen.findByTestId('recurring-line')
+    await waitFor(() => expect(line).toHaveTextContent('2 recurring payments feed this forecast'))
+    expect(screen.queryByText('Salary')).not.toBeInTheDocument()
+
+    expect(within(line).getByRole('link', { name: t('forecast.manageRecurring') })).toHaveAttribute('href', '/recurring')
+  })
+})
+
+describe('Forecast page: history', () => {
+  it('draws the balance over the whole term while the bars keep the forecast horizon (fork)', async () => {
+    const term = (end: number) => [
+      { date: '2026-10-14', balance: 100000, interest: 0, principal: 0 },
+      { date: '2030-04-30', balance: end === 2030 ? 0 : 60000, interest: 0, principal: 0 },
+      { date: '2033-03-31', balance: 0, interest: 0, principal: 0 },
+    ]
+    api.forecast.get.mockResolvedValue({
+      ...response(),
+      loans: [{
+        ...homeLoan,
+        base: { ...homeLoan.base!, term_points: term(2033) },
+        scenarios: [{ ...homeLoan.scenarios[0], term_points: term(2030) }],
+      }],
+    })
+    const { user } = renderWithProviders(<ForecastPage />)
+    await openLoans(user)
+    const loanRow = await screen.findByTestId('loan-row')
+    await waitFor(() => expect(loanRow.querySelectorAll('.recharts-wrapper')).toHaveLength(2))
+    const [balanceChart, barChart] = [...loanRow.querySelectorAll('.recharts-wrapper')] as HTMLElement[]
+    // The balance chart reaches the base payoff year; the bars stop at the horizon.
+    expect(balanceChart.textContent).toMatch(/33/)
+    expect(barChart.textContent).not.toMatch(/33/)
+  })
+
+  it('draws the real balance up to today, then the dashed projection', async () => {
+    api.forecast.get.mockResolvedValue({
+      ...response(),
+      loans: [{
+        ...homeLoan,
+        scenarios: [],
+        actuals: [
+          { date: '2026-08-14', value: 101000 },
+          { date: '2026-09-30', value: 100500 },
+          { date: '2026-10-14', value: 100000 },
+        ],
+      }],
+      actuals: [
+        { date: '2026-08-14', value: 700 },
+        { date: '2026-08-31', value: 760 },
+        { date: '2026-09-30', value: 880 },
+        { date: '2026-10-14', value: 1000 },
+      ],
+    })
+    const { container, user } = renderWithProviders(<ForecastPage />)
+
+    // The carousel opens on the cash-and-cards chart.
+    await waitFor(() => expect(container.querySelector('.recharts-wrapper')).not.toBeNull())
+    const chart = container.querySelector('.recharts-wrapper') as HTMLElement
+    // Actual, the past trend (fork), then the forecast.
+    await waitFor(() => expect(chart.querySelectorAll('.recharts-line')).toHaveLength(3))
+    const curves = [...chart.querySelectorAll('.recharts-line-curve')]
+    expect(curves.map((c) => c.getAttribute('stroke'))).toEqual(['#64748B', '#94A3B8', '#6366F1'])
+    expect(curves[0].getAttribute('stroke-dasharray')).toBeNull()
+    expect(curves[1].getAttribute('stroke-dasharray')).toBe('2 4')
+    expect(curves[2].getAttribute('stroke-dasharray')).toBe('6 3')
+    expect(screen.getAllByText(t('forecast.trend')).length).toBeGreaterThan(0)
+    expect(within(chart).getByText(t('reports.today'))).toBeInTheDocument()
+    expect(screen.getAllByText(t('forecast.actual')).length).toBeGreaterThan(0)
+    // Summary cards stay future-only.
+    expect(screen.getByText('$1,200.00')).toBeInTheDocument()
+
+    // The loan's own history, then its projection, on the loan's slide.
+    await openLoans(user)
+    const loanRow = await screen.findByTestId('loan-row')
+    await waitFor(() => expect(loanRow.querySelectorAll('.recharts-line')).toHaveLength(2))
+    const loanCurves = [...loanRow.querySelectorAll('.recharts-line-curve')]
+    expect(loanCurves.map((c) => c.getAttribute('stroke'))).toEqual(['#64748B', '#6366F1'])
+  })
+})

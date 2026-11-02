@@ -86,6 +86,8 @@ async def _get_recurring_projections(
     account_ids: Optional[list[uuid.UUID]] = None,
     *,
     include_transfer_like: bool = False,
+    with_recurring_id: bool = False,
+    external_transfers: bool = False,
 ) -> list[dict]:
     """Compute virtual recurring transaction projections for a month.
     Pure read — no DB writes. Returns list of dicts with category_id, amount, type, currency.
@@ -96,7 +98,15 @@ async def _get_recurring_projections(
     Transfer-like categories are excluded by default because most callers use
     these rows for P&L, budgets, reports, or spending. Balance projections can
     opt in because transfers and investment applications still move cash in
-    the affected account. Ignored categories never participate."""
+    the affected account. Ignored categories never participate.
+
+    Fork: ``with_recurring_id`` adds each row's ``recurring_transaction_id``,
+    so a forecast scenario can change one schedule's rows.
+
+    Fork: ``external_transfers`` (with ``account_ids``) keeps a transfer's leg
+    on an account in scope when its other side is outside the scope, e.g. a
+    loan repayment leaving checking while loans are left out of cash flow:
+    that money really leaves the accounts in scope."""
     if account_ids is not None and len(account_ids) == 0:
         return []
     filters = [
@@ -108,7 +118,8 @@ async def _get_recurring_projections(
             Category.is_ignored.is_not(True),
         ),
     ]
-    if not include_transfer_like:
+    keep_external = external_transfers and bool(account_ids) and not include_transfer_like
+    if not include_transfer_like and not keep_external:
         filters.append(or_(
             RecurringTransaction.category_id.is_(None),
             Category.treat_as_transfer.is_not(True),
@@ -127,6 +138,21 @@ async def _get_recurring_projections(
         )
     result = await session.execute(stmt)
     recurring_list = list(result.scalars().all())
+    transfer_like_ids: set[uuid.UUID] = set()
+    if keep_external:
+        transfer_cats = set(
+            (
+                await session.execute(
+                    select(Category.id).where(
+                        Category.id.in_([r.category_id for r in recurring_list if r.category_id]),
+                        Category.treat_as_transfer.is_(True),
+                    )
+                )
+            ).scalars()
+        )
+        transfer_like_ids = {
+            r.id for r in recurring_list if r.category_id in transfer_cats
+        }
 
     # A recurrence may already have been materialized without its nominal
     # pointer being advanced yet (for example by generate-ahead workflows).
@@ -190,6 +216,7 @@ async def _get_recurring_projections(
                 "type": rec.type,
                 "currency": rec.currency,
                 "date": occ_date,
+                **({"recurring_transaction_id": rec.id} if with_recurring_id else {}),
             })
     return projections
 

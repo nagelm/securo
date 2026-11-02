@@ -9,6 +9,7 @@ from app.models.account import Account
 from app.models.transaction import Transaction
 from app.models.rule import Rule
 from app.models.recurring_transaction import RecurringTransaction
+from app.models.forecast import ForecastItem, ForecastScenario
 from app.models.budget import Budget
 from app.models.budget_group import BudgetGroup, BudgetGroupCap, BudgetGroupCategory
 from app.models.import_log import ImportLog
@@ -63,6 +64,8 @@ __all__ = [
     "Transaction",
     "Rule",
     "RecurringTransaction",
+    "ForecastItem",
+    "ForecastScenario",
     "Budget",
     "BudgetGroup",
     "BudgetGroupCap",
