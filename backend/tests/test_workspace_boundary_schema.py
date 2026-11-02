@@ -42,6 +42,9 @@ VIA_PARENT: dict[str, str] = {
     "collection_accounts": "collection_id",
     "collection_asset_groups": "collection_id",
     "institutions": "connection_id",
+    # Fork: budget groups (carry/15-budgets) scope their caps and members.
+    "budget_group_caps": "group_id",
+    "budget_group_categories": "group_id",
 }
 
 EXEMPT = GLOBAL.keys() | USER_OWNED.keys() | VIA_PARENT.keys()

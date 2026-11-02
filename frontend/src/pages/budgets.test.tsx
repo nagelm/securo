@@ -18,11 +18,14 @@ const api = vi.hoisted(() => ({
   budgets: { list: vi.fn(), comparison: vi.fn(), suggestions: vi.fn(), createBatch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), copyMonth: vi.fn() },
   categories: { listIncludingHidden: vi.fn() },
   categoryGroups: { listIncludingHidden: vi.fn() },
+  budgetGroups: { comparison: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  forecast: { budgetChoices: { get: vi.fn(), set: vi.fn() } },
 }))
 
 vi.mock('@/lib/api', () => ({
   budgets: api.budgets, categories: api.categories, categoryGroups: api.categoryGroups,
   dashboard: api.dashboard, transactions: api.transactions, admin: api.admin,
+  budgetGroups: api.budgetGroups, forecast: api.forecast,
 }))
 vi.mock('@/hooks/use-display-locale', () => ({ useDisplayLocale: () => 'en-US', useDateLocale: () => 'en-US' }))
 vi.mock('@/hooks/use-timezone', () => ({ useEffectiveTimezone: () => 'UTC' }))
@@ -84,6 +87,9 @@ beforeEach(() => {
   }[month] ?? []))
   api.budgets.update.mockResolvedValue(rent)
   api.budgets.create.mockResolvedValue(rent)
+  api.budgetGroups.comparison.mockResolvedValue([])
+  api.forecast.budgetChoices.get.mockResolvedValue({ category_ids: [], budget_group_ids: [] })
+  api.forecast.budgetChoices.set.mockImplementation(async (choices: unknown) => choices)
 })
 
 afterEach(() => vi.useRealTimers())
@@ -602,5 +608,36 @@ describe('Copying the previous month', () => {
     await screen.findByRole('textbox', { name: t('budgets.budgetFor', { category: 'Rent' }) })
 
     expect(screen.queryByRole('button', { name: t('budgets.copyAction') })).not.toBeInTheDocument()
+  })
+})
+
+describe('fork budget features on the budgets page', () => {
+  it("shows a repeating budget's end month on its row", async () => {
+    api.budgets.list.mockResolvedValue([{ ...rent, end_month: '2027-03-01' }])
+    renderWithProviders(<BudgetsPage />, { route: '/budgets?month=2026-10' })
+
+    expect(await screen.findByText(t('budgets.untilLabel', { month: monthLabel('2027-03', 'en') }))).toBeInTheDocument()
+  })
+
+  it('includes a saved budget in the forecast from its switch', async () => {
+    const { user } = renderWithProviders(<BudgetsPage />, { route: '/budgets?month=2026-10' })
+
+    const toggle = await screen.findByRole('switch', { name: t('budgets.includeInForecastFor', { name: 'Rent' }) })
+    await waitFor(() => expect(toggle).toBeEnabled())
+    await user.click(toggle)
+
+    await waitFor(() => expect(api.forecast.budgetChoices.set).toHaveBeenCalledWith({ category_ids: ['rent'], budget_group_ids: [] }))
+  })
+
+  it('lists budget groups with their member count', async () => {
+    api.budgetGroups.comparison.mockResolvedValue([{
+      id: 'grp-1', name: 'Everyday', amount: 500, month: '2026-10-01', is_recurring: true, end_month: null,
+      category_ids: ['rent', 'food'], actual_amount: 120, projected_amount: 150, percentage_used: 30,
+    }])
+    renderWithProviders(<BudgetsPage />, { route: '/budgets?month=2026-10' })
+
+    const row = await screen.findByTestId('budget-group')
+    expect(within(row).getByText('Everyday')).toBeInTheDocument()
+    expect(within(row).getByTestId('group-member-count')).toHaveTextContent(t('budgets.categoryCount', { count: 2 }))
   })
 })

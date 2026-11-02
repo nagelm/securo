@@ -16,6 +16,10 @@ from app.schemas.budget import (
     BudgetCopyMonthRequest,
     BudgetCreate,
     BudgetForecastResponse,
+    BudgetGroupCreate,
+    BudgetGroupRead,
+    BudgetGroupUpdate,
+    BudgetGroupVsActual,
     BudgetRead,
     BudgetRolloverSummaryResponse,
     BudgetSuggestionResponse,
@@ -83,7 +87,10 @@ async def update_budget(
     ctx: WorkspaceContext = Depends(current_writable_workspace),
     session: AsyncSession = Depends(get_async_session),
 ):
-    budget = await budget_service.update_budget(session, budget_id, ctx.workspace.id, data)
+    try:
+        budget = await budget_service.update_budget(session, budget_id, ctx.workspace.id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if not budget:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found")
     return budget
@@ -160,3 +167,63 @@ async def get_budget_forecast_endpoint(
         start_month=start_month,
         num_months=months,
     )
+
+
+# Fork: budget groups, one cap over several categories.
+groups_router = APIRouter(prefix="/api/budget-groups", tags=["budgets"])
+
+
+@groups_router.get("", response_model=list[BudgetGroupRead])
+async def list_budget_groups(
+    month: Optional[date] = Query(None),
+    ctx: WorkspaceContext = Depends(current_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    return await budget_service.list_budget_groups(session, ctx.workspace.id, month)
+
+
+@groups_router.get("/comparison", response_model=list[BudgetGroupVsActual])
+async def budget_group_comparison(
+    month: Optional[date] = Query(None),
+    ctx: WorkspaceContext = Depends(current_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    return await budget_service.get_budget_group_vs_actual(session, ctx.workspace.id, ctx.user_id, month)
+
+
+@groups_router.post("", response_model=BudgetGroupRead, status_code=status.HTTP_201_CREATED)
+async def create_budget_group(
+    data: BudgetGroupCreate,
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        return await budget_service.create_budget_group(session, ctx.workspace.id, ctx.user_id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@groups_router.patch("/{group_id}", response_model=BudgetGroupRead)
+async def update_budget_group(
+    group_id: uuid.UUID,
+    data: BudgetGroupUpdate,
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        group = await budget_service.update_budget_group(session, group_id, ctx.workspace.id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget group not found")
+    return group
+
+
+@groups_router.delete("/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_budget_group(
+    group_id: uuid.UUID,
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    if not await budget_service.delete_budget_group(session, group_id, ctx.workspace.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget group not found")
