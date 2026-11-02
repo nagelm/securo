@@ -385,7 +385,7 @@ async def _stamp_account_amount(
     account = await session.get(Account, account_id)
     amount = getattr(obj, amount_field, None)
     currency = getattr(obj, currency_field, None)
-    if account is None or amount is None:
+    if account is None or amount is None or currency is None:
         return
     if currency == account.currency:
         obj.amount_account = None

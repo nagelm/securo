@@ -5,7 +5,7 @@ import uuid
 from collections.abc import Collection
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import regex
 
@@ -25,7 +25,7 @@ def _strip_accents(text: str) -> str:
     return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
-def compile_rule_regex(pattern: str) -> regex.Pattern[str]:
+def compile_rule_regex(pattern: str) -> Any:
     """Compile a regex using Securo's runtime normalization and safety policy."""
     effective_pattern = _strip_accents(pattern)
     try:
