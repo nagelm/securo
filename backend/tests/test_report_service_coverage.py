@@ -343,11 +343,10 @@ async def test_income_expenses_pending_is_projected_not_actual(
     assert bd["projectedExpenses"] == pytest.approx(50.0)
 
 
-async def test_income_expenses_many_categories_triggers_other_bucket(session, test_user, test_workspace):
-    """More than CATEGORY_TREND_TOP_N expense categories → an 'Other' bucket."""
+async def test_income_expenses_lists_every_category(session, test_user, test_workspace):
+    """Fork: every expense category gets its own trend, largest first; no 'Other' bucket."""
     acct = await _make_account(session, test_user.id, "IE Many")
     today = date.today()
-    # 14 distinct expense categories (> top-N of 11)
     for i in range(14):
         cat = await _make_category(session, test_user.id, f"Cat{i}", color="#aabbcc")
         await _add_txn(
@@ -358,11 +357,8 @@ async def test_income_expenses_many_categories_triggers_other_bucket(session, te
         session, test_workspace.id, test_user.id, months=1, interval="monthly"
     )
     expense_items = [ct for ct in report.category_trend if ct.group == "expenses"]
-    keys = {ct.key for ct in expense_items}
-    assert "other" in keys
-    other = next(ct for ct in expense_items if ct.key == "other")
-    assert other.label == "Other"
-    assert other.total > 0
+    assert [ct.label for ct in expense_items] == [f"Cat{i}" for i in range(13, -1, -1)]
+    assert "other" not in {ct.key for ct in expense_items}
 
 
 async def test_income_expenses_change_percent_computed(session, test_user, test_workspace):
@@ -411,6 +407,23 @@ async def test_net_worth_composition_includes_credit_card_liability(session, tes
     )
     liab = [c for c in report.composition if c.group == "liabilities"]
     assert any(c.label == "My Card" for c in liab)
+
+
+async def test_net_worth_lists_an_undrawn_loan_with_the_liabilities(session, test_user, test_workspace):
+    """Fork: a loan at $0 (an undrawn revolving facility) is still a liability,
+    listed under liabilities at zero, not counted as cash."""
+    loan = Account(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        name="Revolving facility", type="loan", balance=Decimal("0"), currency="BRL",
+    )
+    session.add(loan)
+    await session.commit()
+
+    report = await get_net_worth_report(
+        session, test_workspace.id, test_user.id, months=1, interval="monthly"
+    )
+    items = [c for c in report.composition if c.label == "Revolving facility"]
+    assert [(c.group, c.value) for c in items] == [("liabilities", 0)]
 
 
 async def test_net_worth_composition_asset_uses_asset_value_entry(session, test_user, test_workspace):

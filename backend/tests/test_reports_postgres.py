@@ -368,3 +368,84 @@ async def test_reports_data_range_excludes_ignored_rows(
     assert response.status_code == 200
     data = response.json()
     assert data["min_date"] == min(t.date for t in test_transactions).strftime("%Y-%m-%d")
+
+
+async def _pg_account(session, user_id, name, acct_type="checking"):
+    from app.models.account import Account
+    acct = Account(id=uuid.uuid4(), user_id=user_id, name=name, type=acct_type,
+                   balance=Decimal("0"), currency="BRL")
+    session.add(acct)
+    await session.commit()
+    return acct
+
+
+async def _pg_txn(session, user_id, account_id, amount, txn_type, txn_date):
+    from datetime import datetime, timezone
+    txn = Transaction(id=uuid.uuid4(), user_id=user_id, account_id=account_id,
+                      description=f"Test {txn_type}", amount=Decimal(str(amount)), date=txn_date,
+                      type=txn_type, source="manual", currency="BRL", status="posted",
+                      created_at=datetime.now(timezone.utc))
+    session.add(txn)
+    await session.commit()
+    return txn
+
+
+@pytest.mark.asyncio
+async def test_income_expenses_sets_aside_paired_loan_principal(
+    session, test_user, test_workspace
+):
+    """Fork: a paired payment from cash into a loan shows in the set-aside
+    (investments) lane of the money map instead of vanishing into surplus;
+    a transfer between two cash accounts still doesn't."""
+    from app.models.category import Category
+    from app.services.report_service import get_income_expenses_report
+
+    checking = await _pg_account(session, test_user.id, "MM Cash")
+    savings = await _pg_account(session, test_user.id, "MM Savings", acct_type="savings")
+    loan = await _pg_account(session, test_user.id, "MM Mortgage", acct_type="loan")
+    repay = Category(id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+                     name="Loan repayments", icon="landmark", color="#000000", treat_as_transfer=True)
+    move = Category(id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+                    name="Transfers", icon="arrow-left-right", color="#111111", treat_as_transfer=True)
+    session.add_all([repay, move])
+    await session.commit()
+    day = date.today() - timedelta(days=3)
+    for src, dst, amount, cat in ((checking, loan, 900, repay), (checking, savings, 400, move)):
+        pair = uuid.uuid4()
+        out = await _pg_txn(session, test_user.id, src.id, amount, "debit", day)
+        inn = await _pg_txn(session, test_user.id, dst.id, amount, "credit", day)
+        for t in (out, inn):
+            t.transfer_pair_id = pair
+            t.category_id = cat.id
+    await session.commit()
+
+    report = await get_income_expenses_report(session, test_workspace.id, test_user.id, months=1)
+    lanes = {(c.group, c.label): c.value for c in report.composition}
+    assert lanes[("investments", "Loan repayments")] == 900
+    assert ("investments", "Transfers") not in lanes
+
+
+async def test_income_expenses_nets_refunds_against_spending(session, test_user, test_workspace):
+    """Fork: a credit in a category that has spending nets against it; a
+    credit-only category stays income."""
+    from app.models.category import Category
+    from app.services.report_service import get_income_expenses_report
+
+    cash = await _pg_account(session, test_user.id, "MM Refund Cash")
+    shop = Category(id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+                    name="Shopping", icon="shopping-bag", color="#222222")
+    pay = Category(id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+                   name="Salary", icon="briefcase", color="#333333")
+    session.add_all([shop, pay])
+    await session.commit()
+    day = date.today() - timedelta(days=3)
+    for amount, kind, cat in ((100, "debit", shop), (30, "credit", shop), (500, "credit", pay)):
+        t = await _pg_txn(session, test_user.id, cash.id, amount, kind, day)
+        t.category_id = cat.id
+    await session.commit()
+
+    report = await get_income_expenses_report(session, test_workspace.id, test_user.id, months=1)
+    lanes = {(c.group, c.label): c.value for c in report.composition}
+    assert lanes[("expenses", "Shopping")] == 70
+    assert ("income", "Shopping") not in lanes
+    assert lanes[("income", "Salary")] == 500

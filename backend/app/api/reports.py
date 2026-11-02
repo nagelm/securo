@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/reports", tags=["reports"])
 # Cap the user-picked custom range so wide windows can't tie up the DB with
 # per-day snapshot fan-out. Ten years covers every realistic personal-finance
 # question and stays inside the existing daily-interval budget.
-_MAX_CUSTOM_RANGE_YEARS = 10
+_MAX_CUSTOM_RANGE_YEARS = 20  # fork: 20 years (upstream 10)
 
 
 def _add_years(value: date, years: int) -> date:
@@ -111,7 +111,7 @@ async def get_data_range(
 
 @router.get("/net-worth", response_model=ReportResponse)
 async def get_net_worth(
-    months: int = Query(12, ge=1, le=24),
+    months: int = Query(12, ge=1, le=120),
     interval: str = Query("monthly", pattern="^(daily|weekly|monthly|yearly)$"),
     account_ids: Optional[list[uuid.UUID]] = Query(None),
     asset_group_ids: Optional[list[uuid.UUID]] = Query(None),
@@ -137,7 +137,7 @@ async def get_net_worth(
 
 @router.get("/income-expenses", response_model=ReportResponse)
 async def get_income_expenses(
-    months: int = Query(12, ge=1, le=24),
+    months: int = Query(12, ge=1, le=120),
     interval: str = Query("monthly", pattern="^(daily|weekly|monthly|yearly)$"),
     account_ids: Optional[list[uuid.UUID]] = Query(None),
     period: str | None = Query(None, pattern="^ytd$"),
@@ -169,14 +169,17 @@ async def get_income_expenses(
 
 @router.get("/cash-flow", response_model=ReportResponse)
 async def get_cash_flow(
-    months: int = Query(6, ge=1, le=12),
+    # Fork (owner 2026-10-15): up to ten years ahead.
+    months: int = Query(6, ge=1, le=120),
     interval: str = Query("daily", pattern="^(daily|weekly|monthly)$"),
     baseline: bool = Query(False),
     account_ids: Optional[list[uuid.UUID]] = Query(None),
+    # Fork (owner 2026-10-15): how much history the chart shows before today.
+    past_months: Optional[int] = Query(None, ge=1, le=120),
     ctx: WorkspaceContext = Depends(current_workspace),
     session: AsyncSession = Depends(get_async_session),
 ):
     return await report_service.get_cash_flow_report(
         session, ctx.workspace.id, ctx.user_id, months, interval, ctx.user.primary_currency,
-        baseline=baseline, account_ids=account_ids,
+        baseline=baseline, account_ids=account_ids, past_months=past_months,
     )

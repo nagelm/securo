@@ -64,12 +64,20 @@ function formatMoney(value: number, currency: string, locale: string, compact: b
   }).format(value)
 }
 
-/** Sort largest-first, then fold everything past the cap into a single "Other". */
+// Fork: a node under this share of its side is a sliver whose label would
+// collide with its neighbours', so it joins "Other" instead.
+const MIN_NODE_SHARE = 0.02
+
+/** Sort largest-first, then fold slivers and everything past the cap into a single "Other". */
 function collapse(items: ReportCompositionItem[], otherLabel: string): ReportCompositionItem[] {
   const sorted = [...items].sort((a, b) => b.value - a.value)
-  if (sorted.length <= MAX_NODES_PER_SIDE) return sorted
-  const top = sorted.slice(0, MAX_NODES_PER_SIDE - 1)
-  const rest = sorted.slice(MAX_NODES_PER_SIDE - 1)
+  const sideTotal = sorted.reduce((s, c) => s + c.value, 0)
+  const keep = sorted.filter((c, i) => i === 0 || c.value >= sideTotal * MIN_NODE_SHARE)
+  if (keep.length === sorted.length && sorted.length <= MAX_NODES_PER_SIDE) return sorted
+  const room = Math.min(keep.length, MAX_NODES_PER_SIDE - 1)
+  const top = sorted.slice(0, room)
+  const rest = sorted.slice(room)
+  if (rest.length === 0) return top
   const otherValue = rest.reduce((s, c) => s + c.value, 0)
   return [
     ...top,
@@ -90,15 +98,19 @@ export function CashflowSankey({ composition, currency, locale }: CashflowSankey
   const [width, setWidth] = useState(0)
   const [hover, setHover] = useState<Hover | null>(null)
 
+  // The diagram's box only exists once there is data, so the size watcher
+  // attaches when it appears (a first render with no data used to leave it
+  // unwatched, and the diagram at zero width).
+  const [observedEl, setObservedEl] = useState<HTMLDivElement | null>(null)
   useEffect(() => {
-    const el = containerRef.current
+    const el = observedEl
     if (!el) return
     const observer = new ResizeObserver((entries) => {
       setWidth(entries[0].contentRect.width)
     })
     observer.observe(el)
     return () => observer.disconnect()
-  }, [])
+  }, [observedEl])
 
   const { nodes: rawNodes, links: rawLinks, hasData } = useMemo(() => {
     const income = collapse(
@@ -305,7 +317,13 @@ export function CashflowSankey({ composition, currency, locale }: CashflowSankey
   const nodeDimmed = (idx: number) => hover !== null && !activeNodes.has(idx)
 
   return (
-    <div ref={containerRef} className="w-full privacy-sensitive">
+    <div
+      ref={(el) => {
+        containerRef.current = el
+        setObservedEl(el)
+      }}
+      className="w-full privacy-sensitive"
+    >
       {layout && (
         <svg
           width={width}

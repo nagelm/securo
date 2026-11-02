@@ -29,6 +29,9 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { DateRangePicker } from '@/components/ui/date-range-picker'
 import { PageHeader } from '@/components/page-header'
 import { CashflowSankey } from '@/components/reports/CashflowSankey'
+import { moneyMapWindow } from '@/components/reports/money-map-window'
+import { MoneyMapScrubber } from '@/components/reports/MoneyMapScrubber'
+import { CategoryTrendDialog } from '@/components/reports/CategoryTrendDialog'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
 import { useCollectionFilter } from '@/contexts/collection-filter-context'
@@ -86,16 +89,22 @@ const HISTORICAL_RANGE_OPTIONS: readonly RangeOption[] = [
   { key: 'ytd', months: 12, period: 'ytd' },
   { key: '1y', months: 12 },
   { key: '2y', months: 24 },
+  { key: '5y', months: 60 },
+  { key: '10y', months: 120 },
 ]
 
 const FORWARD_RANGE_OPTIONS: readonly RangeOption[] = [
   { key: '3m', months: 3 },
   { key: '6m', months: 6 },
   { key: '12m', months: 12 },
+  // Fork (owner 2026-10-15): longer forecasts.
+  { key: '2y', months: 24 },
+  { key: '5y', months: 60 },
+  { key: '10y', months: 120 },
 ]
 
-// The Money Map answers "where did my money go lately", so it leans on recent
-// windows (down to 30 days) and drops the 2Y trend view the other tabs keep.
+// The Money Map answers "where did my money go", from the last 30 days up to
+// ten years (fork, owner 2026-10-15: 2Y, 5Y and 10Y added).
 const MONEY_MAP_RANGE_OPTIONS: readonly RangeOption[] = [
   { key: 'this_month', months: 1, monthAnchor: 0 },
   { key: 'last_month', months: 1, monthAnchor: -1 },
@@ -104,6 +113,9 @@ const MONEY_MAP_RANGE_OPTIONS: readonly RangeOption[] = [
   { key: '6m', months: 6 },
   { key: 'ytd', months: 12, period: 'ytd' },
   { key: '1y', months: 12 },
+  { key: '2y', months: 24 },
+  { key: '5y', months: 60 },
+  { key: '10y', months: 120 },
 ]
 
 const HISTORICAL_INTERVAL_OPTIONS = [
@@ -112,6 +124,12 @@ const HISTORICAL_INTERVAL_OPTIONS = [
   { key: 'monthly', value: 'monthly' },
   { key: 'yearly', value: 'yearly' },
 ] as const
+
+// Fork (owner 2026-10-15): Cash Flow shows the selected period of history and
+// half of it ahead (6M = six months back, three ahead).
+function cashFlowAhead(months: number): number {
+  return Math.max(1, Math.ceil(months / 2))
+}
 
 const CASH_FLOW_INTERVAL_OPTIONS = [
   { key: 'daily', value: 'daily' },
@@ -134,6 +152,8 @@ const RANGE_LABELS: Record<string, string> = {
   ytd: 'rangeYtd',
   '12m': 'range12m',
   '2y': 'range2y',
+  '5y': 'range5y',
+  '10y': 'range10y',
   this_month: 'rangeThisMonth',
   last_month: 'rangeLastMonth',
   custom: 'customRange',
@@ -147,8 +167,8 @@ const CUSTOM_RANGE_KEY = 'custom'
 // Mirrors the backend's `_MAX_CUSTOM_RANGE_YEARS` (backend/app/api/reports.py)
 // so a too-wide pick is rejected in the picker instead of round-tripping to
 // the API for the same 422. A calendar-year anniversary, not a fixed day
-// count, so leap days inside the window can't push the cap past 10 years.
-const CUSTOM_RANGE_MAX_YEARS = 10
+// count, so leap days inside the window can't push the cap past 20 years.
+const CUSTOM_RANGE_MAX_YEARS = 20
 
 // Seed a historical draft from January 1 through today; Apply commits it.
 function defaultCustomRange(): { from: string; to: string } {
@@ -173,12 +193,14 @@ const REPORT_TABS: ReportTab[] = [
   {
     key: 'net_worth', labelKey: 'reports.netWorth', enabled: true,
     rangeOptions: HISTORICAL_RANGE_OPTIONS, intervalOptions: HISTORICAL_INTERVAL_OPTIONS,
-    supportsCustomRange: true, fallbackRangeKey: '1y', fallbackInterval: 'monthly',
+    // Fork (owner 2026-10-15): net worth opens on ten years, monthly.
+    supportsCustomRange: true, fallbackRangeKey: '10y', fallbackInterval: 'monthly',
   },
   {
     key: 'income_expenses', labelKey: 'reports.incomeExpenses', enabled: true,
     rangeOptions: HISTORICAL_RANGE_OPTIONS, intervalOptions: HISTORICAL_INTERVAL_OPTIONS,
-    supportsCustomRange: true, fallbackRangeKey: '1y', fallbackInterval: 'monthly',
+    // Fork (owner 2026-10-15): income vs expenses opens on two years, monthly.
+    supportsCustomRange: true, fallbackRangeKey: '2y', fallbackInterval: 'monthly',
   },
   {
     key: 'cash_flow', labelKey: 'reports.cashFlow', enabled: true,
@@ -234,7 +256,7 @@ export default function ReportsPage() {
     interval: REPORT_TABS[0].fallbackInterval,
   })
   const [rangeKey, setRangeKey] = useState(initialRange.rangeKey)
-  const [interval, setInterval] = useState(initialRange.interval)
+  const [chosenInterval, setInterval] = useState(initialRange.interval)
   // Custom range endpoints (YYYY-MM-DD) — populated when the user opens the
   // Custom preset and confirms a date range. Preserved across tab switches
   // that still support custom ranges so the picker doesn't forget its
@@ -248,13 +270,22 @@ export default function ReportsPage() {
   // Each tab keeps its own range: Cash Flow clamping to its forward presets
   // must not overwrite what Net Worth was showing.
   useEffect(() => {
-    saveReportsRange(activeTab, { rangeKey, from: customFrom, to: customTo, interval, periodOffset })
-  }, [activeTab, rangeKey, customFrom, customTo, interval, periodOffset])
+    saveReportsRange(activeTab, { rangeKey, from: customFrom, to: customTo, interval: chosenInterval, periodOffset })
+  }, [activeTab, rangeKey, customFrom, customTo, chosenInterval, periodOffset])
   const [compositionView, setCompositionView] = useState<string>('netWorth')
   const [sparklineView, setSparklineView] = useState<'byExpenses' | 'byIncome'>('byExpenses')
   const [sparklinePage, setSparklinePage] = useState(0)
+  const [trendDetail, setTrendDetail] = useState<CategoryTrendItem | null>(null)
   const [cashFlowBaseline, setCashFlowBaseline] = useState(false)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  // Fork: Money Map slider. `mapBackDraft` follows the thumb; `mapBack` is
+  // what is queried, a moment after the thumb stops.
+  const [mapBackDraft, setMapBackDraft] = useState(0)
+  const [mapBack, setMapBack] = useState(0)
+  useEffect(() => {
+    const id = window.setTimeout(() => setMapBack(mapBackDraft), 250)
+    return () => window.clearTimeout(id)
+  }, [mapBackDraft])
   // Active Collection filter (issue #105): scope all report tabs to its
   // accounts; net worth also includes the collection's wallets' assets.
   const { activeAccountIds, activeWalletIds } = useCollectionFilter()
@@ -317,8 +348,11 @@ export default function ReportsPage() {
   const months = navWindow ? windowMonths(navWindow) : isCustomRange ? customMonths : selectedRange.months
   const period = navWindow || isCustomRange ? undefined : selectedRange.period
   const days = navWindow || isCustomRange ? undefined : selectedRange.days
-  const apiStart = navWindow ? navWindow.from : hasCustomRange ? customFrom : undefined
-  const apiEnd = navWindow ? navWindow.to : hasCustomRange ? customTo : undefined
+  // Fork: on the Money Map, a slider position other than "now" moves the
+  // selected window back in time; the report is asked for those dates.
+  const mapWindow = activeTab === 'money_map' && !isCustomRange ? moneyMapWindow(mapBack, selectedRange) : null
+  const apiStart = navWindow ? navWindow.from : hasCustomRange ? customFrom : mapWindow?.start
+  const apiEnd = navWindow ? navWindow.to : hasCustomRange ? customTo : mapWindow?.end
   // Label for the period being viewed: the month name for the month presets,
   // the covered span when the window has been stepped back or is custom, and
   // the preset's own name while the window still ends today.
@@ -331,8 +365,21 @@ export default function ReportsPage() {
         : activeWindow
           ? `${formatShortMonth(activeWindow.from, dateLocale)} - ${formatShortMonth(activeWindow.to, dateLocale)}`
           : t(`reports.${RANGE_LABELS[selectedRange.key]}`)
+  // Fork: long ranges would draw thousands of points, so daily is offered up
+  // to 1 year and weekly up to 5 years; a disallowed choice falls back to the
+  // next coarser interval until the range is short enough again.
+  const spanDays = hasCustomRange
+    ? (new Date(customTo + 'T00:00:00').getTime() - new Date(customFrom + 'T00:00:00').getTime()) / 86_400_000
+    : months * 30.44
+  const intervalAllowed = (value: string) =>
+    (value !== 'daily' || spanDays <= 366) && (value !== 'weekly' || spanDays <= 1827)
+  const interval = intervalAllowed(chosenInterval)
+    ? chosenInterval
+    : intervalOptions.find((o) => o.value !== 'daily' && intervalAllowed(o.value))?.value ?? 'monthly'
 
   const handleSelectTab = (key: string) => {
+    setMapBackDraft(0)
+    setMapBack(0)
     const nextTab = REPORT_TABS.find((tab) => tab.key === key) ?? REPORT_TABS[0]
     setActiveTab(key)
     setCompositionView(key === 'net_worth' ? 'netWorth' : 'net')
@@ -349,19 +396,16 @@ export default function ReportsPage() {
       }
       return
     }
-    // Clamp the range/interval preset to what the new tab supports.
-    const stillValid =
-      (rangeKey === CUSTOM_RANGE_KEY && nextTab.supportsCustomRange) ||
-      nextTab.rangeOptions.some((r) => r.key === rangeKey)
-    if (!stillValid) {
-      setRangeKey(nextTab.fallbackRangeKey)
-      setPeriodOffset(0)
-    } else if (nextTab.key === 'cash_flow') {
-      setPeriodOffset(0)
+    // Fork (owner 2026-10-15): each tab opens on its own default range and
+    // interval; a custom date range carries over to tabs that support one.
+    if (rangeKey === CUSTOM_RANGE_KEY && nextTab.supportsCustomRange) {
+      if (!nextTab.intervalOptions.some((i) => i.value === interval)) {
+        setInterval(nextTab.fallbackInterval)
+      }
+      return
     }
-    if (!nextTab.intervalOptions.some((i) => i.value === interval)) {
-      setInterval(nextTab.fallbackInterval)
-    }
+    setRangeKey(nextTab.fallbackRangeKey)
+    setInterval(nextTab.fallbackInterval)
   }
 
   // Year picker (issue #765): one entry per year the workspace's data
@@ -400,10 +444,14 @@ export default function ReportsPage() {
     queryKey: ['reports', activeTab, rangeKey, months, period ?? null, days ?? null, interval, isCashFlow ? cashFlowBaseline : false, activeAccountIds, activeWalletIds, apiStart ?? null, apiEnd ?? null],
     queryFn: () =>
       isCashFlow
-        ? reports.cashFlow(months, interval, cashFlowBaseline, acctIds)
+        ? reports.cashFlow(cashFlowAhead(months), interval, cashFlowBaseline, acctIds, months)
         : activeTab === 'income_expenses' || isMoneyMap
           ? reports.incomeExpenses(months, interval, acctIds, period, days, apiStart, apiEnd)
           : reports.netWorth(months, interval, acctIds, walletIds, period, apiStart, apiEnd),
+    // Keep the map on screen while the slider asks for the next window.
+    // Only the Money Map's own previous window: another tab's data is not a map.
+    placeholderData: (previous, previousQuery) =>
+      isMoneyMap && previousQuery?.queryKey[1] === 'money_map' ? previous : undefined,
     // Only request a custom report with both committed endpoints.
     enabled: currentTab.enabled && !(noAccounts && activeTab !== 'net_worth') && (!isCustomRange || hasCustomRange),
   })
@@ -844,7 +892,9 @@ export default function ReportsPage() {
                 <button
                   key={opt.key}
                   onClick={() => { setInterval(opt.value); setSelectedDate(null) }}
-                  className={`px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                  disabled={!intervalAllowed(opt.value)}
+                  title={intervalAllowed(opt.value) ? undefined : t('reports.intervalTooFine')}
+                  className={`px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                     interval === opt.value
                       ? 'bg-primary text-primary-foreground'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
@@ -1020,6 +1070,14 @@ export default function ReportsPage() {
               </div>
             </div>
           </div>
+          {!isCustomRange && (
+            <MoneyMapScrubber
+              monthsBack={mapBackDraft}
+              onChange={setMapBackDraft}
+              range={selectedRange}
+              locale={locale}
+            />
+          )}
           <div className="px-3 pb-5">
             {isLoading ? (
               <div className="px-2"><Skeleton className="h-[360px] w-full" /></div>
@@ -1544,6 +1602,15 @@ export default function ReportsPage() {
           </div>
         </div>
 
+        <CategoryTrendDialog
+          item={trendDetail}
+          label={trendDetail ? (trendDetail.key === 'uncategorized' ? t('reports.uncategorized') : trendDetail.label) : ''}
+          onClose={() => setTrendDetail(null)}
+          formatMoney={(v) => (privacyMode ? MASK : formatCurrency(v, userCurrency, locale))}
+          formatAxis={(v) => (privacyMode ? MASK : formatCompactCurrency(v, userCurrency, locale))}
+          tooltipStyle={tooltipStyle}
+        />
+
         {/* Evolution / Category Sparklines */}
         <div className={`lg:col-span-2 rounded-xl border shadow-sm transition-colors ${selectedDate && meta?.type !== 'income_expenses' ? 'bg-primary/5 border-primary/50' : 'bg-card border-border'}`}>
           <div className="px-5 pt-5 pb-2 flex items-center justify-between">
@@ -1655,7 +1722,17 @@ export default function ReportsPage() {
                           return (
                             <div
                               key={`${item.key}-${item.group}`}
-                              className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2"
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => setTrendDetail(item)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault()
+                                  setTrendDetail(item)
+                                }
+                              }}
+                              aria-label={t('reports.trendOpenDetail', { name: item.key === 'uncategorized' ? t('reports.uncategorized') : item.label })}
+                              className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 cursor-pointer transition-colors hover:border-primary/50 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                             >
                               <div className="flex items-center gap-1.5 mb-0.5">
                                 <div

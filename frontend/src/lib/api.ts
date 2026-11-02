@@ -1694,9 +1694,13 @@ export const reports = {
     })
     return data
   },
-  cashFlow: async (months = 6, interval = 'daily', baseline = false, accountIds?: string[]): Promise<ReportResponse> => {
+  cashFlow: async (
+    months = 6, interval = 'daily', baseline = false, accountIds?: string[], pastMonths?: number,
+  ): Promise<ReportResponse> => {
     const extra = acctIdsParam(accountIds)
-    const { data } = await api.get('/reports/cash-flow', { params: { months, interval, baseline, ...(extra.params ?? {}) }, ...(extra.paramsSerializer ? { paramsSerializer: extra.paramsSerializer } : {}) })
+    // Fork: `pastMonths` is how much history the chart shows before today.
+    const past = pastMonths ? { past_months: pastMonths } : {}
+    const { data } = await api.get('/reports/cash-flow', { params: { months, interval, baseline, ...past, ...(extra.params ?? {}) }, ...(extra.paramsSerializer ? { paramsSerializer: extra.paramsSerializer } : {}) })
     return data
   },
   // Oldest and newest transaction dates in the workspace (opening

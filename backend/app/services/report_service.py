@@ -1,10 +1,12 @@
+import bisect
 import calendar
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import String, select, desc, func, case, or_
+from sqlalchemy import String, and_, exists, or_, select, desc, func, case
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.app_clock import app_today
@@ -36,13 +38,12 @@ from app.schemas.report import (
 )
 from app.services import invoice_forecast_service
 from app.services.dashboard_service import (
-    _account_balance_at,
+    _account_balances_at,
     _counts_as_user_pnl_row,
     _get_forecast_transactions,
     _get_open_accounts,
 )
 
-CATEGORY_TREND_TOP_N = 11
 
 _ACCOUNT_TYPE_COLORS: dict[str, str] = {
     "checking": "#6366F1",
@@ -149,60 +150,33 @@ async def _net_worth_at(
     account list for this workspace/filter pass it in, instead of re-querying
     it for every snapshot in a multi-point trend. Omit it to fetch as before.
     """
+    points = await _net_worth_series(
+        session, workspace_id, [cutoff], primary_currency, account_ids, asset_group_ids,
+        accounts=accounts,
+    )
+    return points[0]
+
+
+async def _net_worth_series(
+    session: AsyncSession, workspace_id: uuid.UUID, cutoffs: list[date],
+    primary_currency: str = "USD",
+    account_ids: Optional[list[uuid.UUID]] = None,
+    asset_group_ids: Optional[list[uuid.UUID]] = None,
+    accounts: Optional[list[Account]] = None,
+) -> list[ReportDataPoint]:
+    """Net worth snapshots at each cutoff, in order (see ``_net_worth_at``).
+
+    Fork: one snapshot per point used to cost a balance query per account, a
+    value query per asset and an FX lookup per item (about 100 queries a
+    point). This reads each table once for all the cutoffs (the accounts'
+    daily sums, the assets' value rows, the stored FX rates) and builds every
+    snapshot in memory with the same rules, so the query count does not grow
+    with the number of points.
+    """
     if accounts is None:
         accounts = await _get_open_accounts(session, workspace_id, account_ids)
 
-    accounts_total = 0.0
-    liabilities_total = 0.0
-    composition: list[ReportCompositionItem] = []
-
-    # Cards on one consolidated credit line (same shared_balance_group) each
-    # carry the whole line's debt, so they are summed as one item, the same way
-    # the dashboard's _total_balance_by_currency does. Only credit cards: an
-    # account retyped to checking keeps its group but no longer shares the debt.
-    grouped: dict[str, list[Account]] = {}
-    for account in accounts:
-        shared = account.shared_balance_group if account.type == "credit_card" else None
-        grouped.setdefault(shared or str(account.id), []).append(account)
-
-    for key, group in grouped.items():
-        account = group[0]
-        bal = 0.0
-        for member in group:
-            bal += await _account_balance_at(session, member, cutoff)
-        if len(group) > 1 and account.shared_balance_group:
-            # Each card's balance at the cutoff is the shared debt today minus
-            # that card's own activity since, so the duplicates to strip are
-            # today's shared debt once per extra card.
-            current_shared = await _account_balance_at(session, account, app_today())
-            bal -= current_shared * (len(group) - 1)
-        label = " + ".join(get_account_name(member) for member in group)
-        converted, _ = await convert(
-            session, Decimal(str(abs(bal))), account.currency, primary_currency, cutoff
-        )
-        converted_val = float(converted)
-        if account.type in {"credit_card", "loan"} or bal < 0:
-            liabilities_total += converted_val
-            if converted_val > 0:
-                composition.append(ReportCompositionItem(
-                    key=key,
-                    label=label,
-                    value=round(converted_val, 2),
-                    color=_ACCOUNT_TYPE_COLORS.get(account.type, "#6B7280"),
-                    group="liabilities",
-                ))
-        else:
-            accounts_total += converted_val
-            if converted_val > 0:
-                composition.append(ReportCompositionItem(
-                    key=key,
-                    label=label,
-                    value=round(converted_val, 2),
-                    color=_ACCOUNT_TYPE_COLORS.get(account.type, "#6B7280"),
-                    group="accounts",
-                ))
-
-    # Per-asset composition at the cutoff date
+    # Per-asset composition: the assets net worth counts.
     filtered = account_ids is not None
     asset_stmt = select(Asset).where(
         Asset.workspace_id == workspace_id,
@@ -211,54 +185,139 @@ async def _net_worth_at(
     )
     if filtered:
         asset_stmt = asset_stmt.where(Asset.group_id.in_(asset_group_ids or []))
-    asset_result = await session.execute(asset_stmt)
-    # Decimal until the one final rounding: sub-cent holdings must add up
-    # exactly the way the wallet rollup does.
-    assets_sum = Decimal("0")
-    for asset in asset_result.scalars().all():
-        val_result = await session.execute(
-            select(AssetValue.amount)
-            .where(AssetValue.asset_id == asset.id, AssetValue.date <= cutoff)
-            .order_by(desc(AssetValue.date), desc(AssetValue.id))
-            .limit(1)
+    # A holding an open account's balance already carries is counted there.
+    asset_stmt = asset_stmt.where(counted_in_net_worth())
+    assets = list((await session.execute(asset_stmt)).scalars().all())
+
+    # Each asset's value rows, oldest first; the value at a cutoff is the
+    # last row on or before it (latest date, then highest id).
+    value_dates: dict[uuid.UUID, list[date]] = {asset.id: [] for asset in assets}
+    value_amounts: dict[uuid.UUID, list[Decimal]] = {asset.id: [] for asset in assets}
+    if assets:
+        value_rows = await session.execute(
+            select(AssetValue.asset_id, AssetValue.date, AssetValue.amount)
+            .where(AssetValue.asset_id.in_([asset.id for asset in assets]))
+            .order_by(AssetValue.asset_id, AssetValue.date, AssetValue.id)
         )
-        val = val_result.scalar_one_or_none()
-        if val is not None:
-            amount = float(val)
-        elif asset.purchase_price is not None and (
-            asset.purchase_date is None or asset.purchase_date <= cutoff
-        ):
-            amount = float(asset.purchase_price)
-        else:
-            amount = 0.0
-        if amount > 0:
-            converted, _ = await convert(
-                session, Decimal(str(amount)), asset.currency, primary_currency, cutoff,
-                decimals=ASSET_PRICE_DECIMALS,
-            )
-            converted_val = round(float(converted), 2)
-            assets_sum += converted
-            composition.append(ReportCompositionItem(
-                key=str(asset.id),
-                label=asset.name,
-                value=converted_val,
-                color=_ASSET_TYPE_COLORS.get(asset.type, "#6B7280"),
-                group="assets",
-            ))
+        for asset_id, day, amount in value_rows.all():
+            value_dates[asset_id].append(day)
+            value_amounts[asset_id].append(amount)
 
-    assets_total = float(assets_sum.quantize(Decimal("0.01")))
-    net_worth = accounts_total + assets_total - liabilities_total
-
-    return ReportDataPoint(
-        date=cutoff.isoformat(),
-        value=round(net_worth, 2),
-        breakdowns={
-            "accounts": round(accounts_total, 2),
-            "assets": round(assets_total, 2),
-            "liabilities": round(liabilities_total, 2),
-        },
-        composition=composition,
+    rates = PreloadedRates(
+        session,
+        {primary_currency}
+        | {account.currency for account in accounts}
+        | {asset.currency for asset in assets},
     )
+    balances = await _account_balances_at(
+        session, accounts, cutoffs, convert_fn=rates.convert
+    )
+
+    snapshots: list[ReportDataPoint] = []
+    for cutoff in cutoffs:
+        accounts_total = 0.0
+        investments_total = 0.0
+        # Decimal until the one final rounding: sub-cent holdings must add up
+        # exactly the way the wallet rollup does.
+        assets_sum = Decimal("0")
+        liabilities_total = 0.0
+        composition: list[ReportCompositionItem] = []
+
+        # Cards on one consolidated credit line (same shared_balance_group) each
+        # carry the whole line's debt, so they are summed as one item. Only credit
+        # cards: an account retyped to checking keeps its group but no longer
+        # shares the debt.
+        grouped: dict[str, list[Account]] = {}
+        for account in accounts:
+            shared = account.shared_balance_group if account.type == "credit_card" else None
+            grouped.setdefault(shared or str(account.id), []).append(account)
+
+        for key, group in grouped.items():
+            account = group[0]
+            bal = sum(balances[member.id][cutoff] for member in group)
+            if len(group) > 1 and account.shared_balance_group:
+                # Each card's balance at the cutoff is the shared debt today minus
+                # that card's own activity since, so the duplicates to strip are
+                # today's shared debt once per extra card.
+                today = app_today()
+                today_balances = await _account_balances_at(
+                    session, [account], [today], convert_fn=rates.convert
+                )
+                current_shared = today_balances[account.id][today]
+                bal -= current_shared * (len(group) - 1)
+            label = " + ".join(get_account_name(member) for member in group)
+            converted, _ = await rates.convert(
+                Decimal(str(abs(bal))), account.currency, primary_currency, cutoff
+            )
+            converted_val = float(converted)
+            # Fork: a loan is a liability even when it is fully repaid or undrawn
+            # (a revolving facility at $0), and is listed with the liabilities.
+            is_debt_account = account.type in ("credit_card", "loan")
+            if is_debt_account or bal < 0:
+                liabilities_total += converted_val
+                if converted_val > 0 or is_debt_account:
+                    composition.append(ReportCompositionItem(
+                        key=key,
+                        label=label,
+                        value=round(converted_val, 2),
+                        color=_ACCOUNT_TYPE_COLORS.get(account.type, "#6B7280"),
+                        group="liabilities",
+                    ))
+            else:
+                # Fork: an investment account's value is its holdings, so it sits
+                # with the assets; Accounts is the cash in hand.
+                is_investment = account.type == "investment"
+                if is_investment:
+                    investments_total += converted_val
+                else:
+                    accounts_total += converted_val
+                if converted_val > 0:
+                    composition.append(ReportCompositionItem(
+                        key=key,
+                        label=label,
+                        value=round(converted_val, 2),
+                        color=_ACCOUNT_TYPE_COLORS.get(account.type, "#6B7280"),
+                        group="assets" if is_investment else "accounts",
+                    ))
+
+        for asset in assets:
+            i = bisect.bisect_right(value_dates[asset.id], cutoff)
+            if i:
+                amount = float(value_amounts[asset.id][i - 1])
+            elif asset.purchase_price is not None and (
+                asset.purchase_date is None or asset.purchase_date <= cutoff
+            ):
+                amount = float(asset.purchase_price)
+            else:
+                amount = 0.0
+            if amount > 0:
+                converted, _ = await rates.convert(
+                    Decimal(str(amount)), asset.currency, primary_currency, cutoff,
+                    decimals=ASSET_PRICE_DECIMALS,
+                )
+                converted_val = round(float(converted), 2)
+                assets_sum += converted
+                composition.append(ReportCompositionItem(
+                    key=str(asset.id),
+                    label=asset.name,
+                    value=converted_val,
+                    color=_ASSET_TYPE_COLORS.get(asset.type, "#6B7280"),
+                    group="assets",
+                ))
+
+        assets_total = investments_total + float(assets_sum.quantize(Decimal("0.01")))
+        net_worth = accounts_total + assets_total - liabilities_total
+        snapshots.append(ReportDataPoint(
+            date=cutoff.isoformat(),
+            value=round(net_worth, 2),
+            breakdowns={
+                "accounts": round(accounts_total, 2),
+                "assets": round(assets_total, 2),
+                "liabilities": round(liabilities_total, 2),
+            },
+            composition=composition,
+        ))
+    return snapshots
 
 
 def _format_date_label(d: date, interval: str) -> str:
@@ -386,13 +445,20 @@ async def get_net_worth_report(
     # date, so every point below reuses it instead of re-querying it.
     accounts = await _get_open_accounts(session, workspace_id, account_ids)
 
+    # The first trend point's *actual* cutoff (`points[0]`, before its `.date`
+    # is overwritten with a formatted label) equals `start` for every
+    # interval except monthly, which snaps to month-end. Only reuse it then —
+    # an approximate match would silently swap in the wrong day's snapshot.
+    # Otherwise the baseline at `start` is computed along with the points.
+    separate_baseline = not (points and points[0] == start)
+    snapshots = await _net_worth_series(
+        session, workspace_id, points + ([start] if separate_baseline else []),
+        primary_currency, account_ids, asset_group_ids, accounts=accounts,
+    )
+
     # Compute snapshot at each date point
     trend: list[ReportDataPoint] = []
-    for point in points:
-        dp = await _net_worth_at(
-            session, workspace_id, point, primary_currency, account_ids, asset_group_ids,
-            accounts=accounts,
-        )
+    for point, dp in zip(points, snapshots):
         dp.date = _format_date_label(point, interval)
         dp.change = round(dp.value - trend[-1].value, 2) if trend else None
         trend.append(dp)
@@ -401,17 +467,7 @@ async def get_net_worth_report(
     current = trend[-1] if trend else ReportDataPoint(
         date="", value=0, breakdowns={"accounts": 0, "assets": 0, "liabilities": 0}
     )
-    # The first trend point's *actual* cutoff (`points[0]`, before its `.date`
-    # was overwritten with a formatted label) equals `start` for every
-    # interval except monthly, which snaps to month-end. Only reuse it then —
-    # an approximate match would silently swap in the wrong day's snapshot.
-    if trend and points[0] == start:
-        baseline = trend[0]
-    else:
-        baseline = await _net_worth_at(
-            session, workspace_id, start, primary_currency, account_ids, asset_group_ids,
-            accounts=accounts,
-        )
+    baseline = snapshots[-1] if separate_baseline else trend[0]
     previous = baseline if trend else current
 
     change_amount = current.value - previous.value
@@ -903,6 +959,23 @@ async def get_income_expenses_report(
             if comp_map[comp_key]["value"] <= 0:
                 comp_map.pop(comp_key)
 
+    # Fork: a credit filed in a category that also has spending in the range is
+    # a refund (or a share paid back) of that spending, so it nets against the
+    # expense instead of appearing as income. Categories with credits only
+    # (salary, interest, sales) stay income.
+    for (cat_key, group) in [k for k in comp_map if k[1] == "income"]:
+        expense = comp_map.get((cat_key, "expenses"))
+        if expense is None:
+            continue
+        refund = comp_map.pop((cat_key, "income"))["value"]
+        remainder = expense["value"] - refund
+        if remainder > 0:
+            expense["value"] = remainder
+        else:
+            comp_map.pop((cat_key, "expenses"))
+            if remainder < 0:
+                comp_map[(cat_key, "income")] = {**expense, "value": -remainder}
+
     # Investment-style outflows: transactions in `treat_as_transfer` categories
     # are excluded from P&L by counts_as_user_pnl (an investment application's
     # counterpart is an Asset/Holding, not spending). But for the cashflow Sankey
@@ -910,7 +983,21 @@ async def get_income_expenses_report(
     # from spending and from leftover surplus (mirrors how Sure shows an
     # "Investment Contributions" node). Paired account transfers stay excluded via
     # the transfer_pair_id filter, so only one-sided movements (contributions)
-    # appear here.
+    # appear here. Fork: a paired payment from a cash account into a loan or
+    # investment account (loan principal, a fund deposit) is set aside too, so
+    # it shows in this lane instead of swelling the surplus.
+    partner = aliased(Transaction)
+    partner_account = aliased(Account)
+    into_debt_or_investment = and_(
+        Transaction.transfer_pair_id.is_not(None),
+        Account.type.not_in(("loan", "investment")),
+        exists().where(
+            partner.transfer_pair_id == Transaction.transfer_pair_id,
+            partner.id != Transaction.id,
+            partner_account.id == partner.account_id,
+            partner_account.type.in_(("loan", "investment")),
+        ),
+    )
     inv_result = await session.execute(
         select(
             Category.id,
@@ -919,6 +1006,7 @@ async def get_income_expenses_report(
             func.sum(amount_expr),
         )
         .select_from(Transaction)
+        .join(Account, Transaction.account_id == Account.id)
         .join(Category, Transaction.category_id == Category.id)
         .where(
             Transaction.workspace_id == workspace_id,
@@ -927,7 +1015,7 @@ async def get_income_expenses_report(
             Transaction.source != "opening_balance",
             Transaction.type == "debit",
             Transaction.status == "posted",
-            Transaction.transfer_pair_id.is_(None),
+            or_(Transaction.transfer_pair_id.is_(None), into_debt_or_investment),
             Transaction.is_ignored.is_(False),
             Transaction.exclude_from_pnl.is_(False),
             Category.treat_as_transfer.is_(True),
@@ -1168,17 +1256,15 @@ async def get_income_expenses_report(
     # Build period labels from the same points used by the trend
     period_labels = [_format_date_label(p, interval) for p in points]
 
-    # Top 6 + Other per group
+    # Fork: every category, largest first (upstream kept the top 11 and
+    # folded the rest into "Other"; owner 2026-10-14 wants them all).
     category_trend: list[CategoryTrendItem] = []
     for group in ("expenses", "income"):
         group_items = [
             (k, v) for (k, g), v in cat_trend_map.items() if g == group
         ]
         group_items.sort(key=lambda x: x[1]["total"], reverse=True)
-        top = group_items[:CATEGORY_TREND_TOP_N]
-        rest = group_items[CATEGORY_TREND_TOP_N:]
-
-        for cat_key, info in top:
+        for cat_key, info in group_items:
             series = [
                 ReportDataPoint(
                     date=pl,
@@ -1192,29 +1278,6 @@ async def get_income_expenses_report(
                 label=info["label"],
                 color=info["color"],
                 total=round(info["total"], 2),
-                group=group,
-                series=series,
-            ))
-
-        if rest:
-            other_total = sum(v["total"] for _, v in rest)
-            other_periods: dict[str, float] = {}
-            for _, v in rest:
-                for pl, amt in v["periods"].items():
-                    other_periods[pl] = other_periods.get(pl, 0.0) + amt
-            series = [
-                ReportDataPoint(
-                    date=pl,
-                    value=round(other_periods.get(pl, 0.0), 2),
-                    breakdowns={},
-                )
-                for pl in period_labels
-            ]
-            category_trend.append(CategoryTrendItem(
-                key="other",
-                label="Other",
-                color="#6B7280",
-                total=round(other_total, 2),
                 group=group,
                 series=series,
             ))
@@ -1378,6 +1441,10 @@ async def get_cash_flow_report(
 ) -> ReportResponse:
     """Cash flow chart with a short past window plus a forward projection.
 
+    Fork: ``past_months`` widens the past window (default
+    ``_PAST_HISTORY_MONTHS``); the Reports tab shows the selected period of
+    history and half of it ahead.
+
     Past window (``_PAST_HISTORY_MONTHS`` months back to today) shows actual
     booked transactions so the user has a visible "this is real" anchor next
     to the forecast. Forward window walks from today to ``today + months``
@@ -1396,10 +1463,14 @@ async def get_cash_flow_report(
     from app.services.dashboard_service import _balance_at, _get_recurring_projections
     from app.services.fx_rate_service import get_rate
 
-    acct_filter = [Transaction.account_id.in_(account_ids)] if account_ids is not None else []
+    # Invoices have no account; they are left out only under a Collection
+    # filter, so remember whether the caller narrowed the report.
+    narrowed = account_ids is not None
+    account_ids = await cash_flow_account_ids(session, workspace_id, account_ids)
+    acct_filter = [Transaction.account_id.in_(account_ids)]
     today = app_today()
     end = _add_months(today, months)
-    chart_start = _add_months(today, -_PAST_HISTORY_MONTHS)
+    chart_start = _add_months(today, -(past_months or _PAST_HISTORY_MONTHS))
 
     user = await session.get(User, user_id)
     primary_currency = user.primary_currency if user else get_settings().default_currency
@@ -1617,10 +1688,11 @@ async def get_cash_flow_report(
     #     payment that settles it never both appear. Skipped when the
     #     chart is narrowed to particular accounts: a claim has no account
     #     until somebody pays it.
-    # `is None`, not falsy: a collection holding only wallets narrows
-    # the report to an empty set of bank accounts, and an empty list
-    # means filtered to nothing rather than not filtered at all.
-    if account_ids is None:
+    # `narrowed` is whether the caller passed account_ids at all: a
+    # collection holding only wallets narrows the report to an empty set of
+    # bank accounts, and an empty list means filtered to nothing rather than
+    # not filtered at all.
+    if not narrowed:
         for claim in await invoice_forecast_service.claims_in_range(
             session, workspace_id, today + timedelta(days=1), end + timedelta(days=1)
         ):

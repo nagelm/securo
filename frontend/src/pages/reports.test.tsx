@@ -64,11 +64,14 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('Reports page — Custom range segment', () => {
-  it('loads the Net Worth tab with the 1Y preset by default', async () => {
+  it('loads the Net Worth tab with the 10Y monthly preset by default (fork)', async () => {
     renderWithProviders(<ReportsPage />)
 
     await waitFor(() => expect(api.reports.netWorth).toHaveBeenCalled())
-    const [, , , , , startDate, endDate] = api.reports.netWorth.mock.calls[0]
+    const [months, interval, , , , startDate, endDate] = api.reports.netWorth.mock.calls[0]
+    expect(months).toBe(120)
+    expect(interval).toBe('monthly')
+    expect(screen.getByRole('button', { name: t('reports.range10y') })).toHaveClass('bg-primary')
     expect(startDate).toBeUndefined()
     expect(endDate).toBeUndefined()
   })
@@ -80,7 +83,7 @@ describe('Reports page — Custom range segment', () => {
     await user.click(screen.getByRole('button', { name: t('reports.customRange') }))
 
     expect(api.reports.netWorth).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('button', { name: t('reports.range1y') })).toHaveClass('bg-primary')
+    expect(screen.getByRole('button', { name: t('reports.range10y') })).toHaveClass('bg-primary')
     await user.click(screen.getByRole('button', { name: t('transactions.filtersBar.apply') }))
     const year = 2026
     await waitFor(() => {
@@ -140,8 +143,8 @@ it.each(['Cancel', 'Escape', 'outside'] as const)(
 )
 
 it.each([
-  ['reports.netWorth', 'reports.range1y', 12],
-  ['reports.incomeExpenses', 'reports.range1y', 12],
+  ['reports.netWorth', 'reports.range10y', 120],
+  ['reports.incomeExpenses', 'reports.range2y', 24],
   ['reports.moneyMap', 'reports.range3m', 3],
 ] as const)('Reset then Apply restores the fallback for %s', async (tab, fallback, months) => {
   const { user } = renderWithProviders(<ReportsPage />)
@@ -193,7 +196,9 @@ it('preserves saved custom dates across supported tabs and preset dismissal', as
   await user.click(screen.getByRole('button', { name: t('reports.cashFlow') }))
   await waitFor(() => expect(api.reports.cashFlow).toHaveBeenCalled())
   expect(screen.queryByRole('button', { name: t('reports.customRange') })).not.toBeInTheDocument()
-  expect(api.reports.cashFlow.mock.calls.at(-1)?.[0]).toBe(6)
+  // Six months back, three ahead (fork).
+  expect(api.reports.cashFlow.mock.calls.at(-1)?.[0]).toBe(3)
+  expect(api.reports.cashFlow.mock.calls.at(-1)?.[4]).toBe(6)
   await user.click(screen.getByRole('button', { name: t('reports.netWorth') }))
   await user.click(screen.getByRole('button', { name: t('reports.customRange') }))
   await user.click(screen.getByRole('button', { name: t('transactions.filtersBar.apply') }))
@@ -246,6 +251,127 @@ describe('Reports page — query failure', () => {
     await user.click(screen.getByRole('button', { name: t('reports.range6m') }))
     await waitFor(() => expect(screen.queryByText('end_date must be on or before today')).not.toBeInTheDocument())
     expect(screen.getByRole('button', { name: t('reports.range6m') })).toHaveClass('bg-primary')
+  })
+})
+
+describe('Reports page — interval limits on long ranges', () => {
+  it('disables daily above 1Y and weekly above 5Y, falling back to a coarser interval', async () => {
+    const { user } = renderWithProviders(<ReportsPage />)
+    await waitFor(() => expect(api.reports.netWorth).toHaveBeenCalled())
+    const daily = () => screen.getByRole('button', { name: t('reports.intervalDaily') })
+    const weekly = () => screen.getByRole('button', { name: t('reports.intervalWeekly') })
+
+    // Net worth opens on 10Y, where daily is off; start from 1Y.
+    expect(daily()).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: t('reports.range1y') }))
+    await user.click(daily())
+    await waitFor(() => expect(api.reports.netWorth.mock.calls.at(-1)![1]).toBe('daily'))
+
+    await user.click(screen.getByRole('button', { name: t('reports.range2y') }))
+    expect(daily()).toBeDisabled()
+    expect(weekly()).toBeEnabled()
+    await waitFor(() => expect(api.reports.netWorth.mock.calls.at(-1)![1]).toBe('weekly'))
+
+    await user.click(screen.getByRole('button', { name: t('reports.range5y') }))
+    expect(weekly()).toBeEnabled()
+
+    await user.click(screen.getByRole('button', { name: t('reports.range10y') }))
+    expect(weekly()).toBeDisabled()
+    await waitFor(() => expect(api.reports.netWorth.mock.calls.at(-1)![1]).toBe('monthly'))
+
+    await user.click(screen.getByRole('button', { name: t('reports.range1y') }))
+    expect(daily()).toBeEnabled()
+    await waitFor(() => expect(api.reports.netWorth.mock.calls.at(-1)![1]).toBe('daily'))
+  })
+})
+
+it('each tab opens on its own default range, monthly (fork)', async () => {
+  const { user } = renderWithProviders(<ReportsPage />)
+  await waitFor(() => expect(api.reports.netWorth).toHaveBeenCalled())
+  expect(screen.getByRole('button', { name: t('reports.range10y') })).toHaveClass('bg-primary')
+
+  await user.click(screen.getByRole('button', { name: t('reports.incomeExpenses') }))
+  await waitFor(() => expect(api.reports.incomeExpenses.mock.calls.at(-1)?.slice(0, 2)).toEqual([24, 'monthly']))
+  expect(screen.getByRole('button', { name: t('reports.range2y') })).toHaveClass('bg-primary')
+
+  await user.click(screen.getByRole('button', { name: t('reports.netWorth') }))
+  await waitFor(() => expect(api.reports.netWorth.mock.calls.at(-1)?.slice(0, 2)).toEqual([120, 'monthly']))
+})
+
+it('cash flow offers 2Y, 5Y and 10Y: that much history and half of it ahead (fork)', async () => {
+  const { user } = renderWithProviders(<ReportsPage />)
+  await user.click(screen.getByRole('button', { name: t('reports.cashFlow') }))
+  await waitFor(() => expect(api.reports.cashFlow).toHaveBeenCalled())
+  for (const key of ['range2y', 'range5y'] as const) {
+    expect(screen.getByRole('button', { name: t(`reports.${key}`) })).toBeInTheDocument()
+  }
+  await user.click(screen.getByRole('button', { name: t('reports.range10y') }))
+  await waitFor(() => expect(api.reports.cashFlow.mock.calls.at(-1)?.slice(0, 2)).toEqual([60, 'monthly']))
+  expect(api.reports.cashFlow.mock.calls.at(-1)?.[4]).toBe(120)
+})
+
+it('the money map offers 2Y, 5Y and 10Y (fork)', async () => {
+  const { user } = renderWithProviders(<ReportsPage />)
+  await user.click(screen.getByRole('button', { name: t('reports.moneyMap') }))
+  for (const key of ['range2y', 'range5y'] as const) {
+    expect(screen.getByRole('button', { name: t(`reports.${key}`) })).toBeInTheDocument()
+  }
+  await user.click(screen.getByRole('button', { name: t('reports.range10y') }))
+  await waitFor(() => expect(api.reports.incomeExpenses.mock.calls.at(-1)?.[0]).toBe(120))
+})
+
+it('the money map scrubber sits above the diagram and moves the window back in time (fork)', async () => {
+  const { user } = renderWithProviders(<ReportsPage />)
+  await user.click(screen.getByRole('button', { name: t('reports.moneyMap') }))
+  await waitFor(() => expect(api.reports.incomeExpenses).toHaveBeenCalled())
+  const slider = screen.getByRole('slider', { name: t('reports.moneyMapSlider') })
+  expect(screen.getByTestId('money-map-slider')).toHaveTextContent(t('reports.moneyMapNow'))
+
+  // Today is 12 Sep 2026; the Money Map opens on 3M. Three months back is
+  // the three months ending 30 Jun 2026.
+  fireEvent.keyDown(slider, { key: 'ArrowLeft' })
+  await user.click(screen.getByRole('button', { name: t('reports.moneyMapEarlier') }))
+  await user.click(screen.getByRole('button', { name: t('reports.moneyMapEarlier') }))
+  expect(slider).toHaveAttribute('aria-valuenow', '-3')
+  await waitFor(() => expect(api.reports.incomeExpenses.mock.calls.at(-1)?.slice(-2)).toEqual([
+    '2026-04-01', '2026-06-30',
+  ]))
+})
+
+describe('Reports page — Category Trends detail (fork)', () => {
+  function trendReport(): ReportResponse {
+    const cats = Array.from({ length: 14 }, (_, i) => ({
+      key: `00000000-0000-4000-8000-0000000000${String(i).padStart(2, '0')}`,
+      label: `Cat ${i}`,
+      color: '#123456',
+      total: 1400 - i * 100,
+      group: 'expenses',
+      series: [
+        { date: 'Aug 2026', value: 300 - i, breakdowns: {}, change: null },
+        { date: 'Sep 2026', value: 100 + i, breakdowns: {}, change: null },
+      ],
+    }))
+    return { ...emptyReport('income_expenses'), category_trend: cats }
+  }
+
+  it('pages through every category and opens a card in detail', async () => {
+    api.reports.incomeExpenses.mockResolvedValue(trendReport())
+    const { user } = renderWithProviders(<ReportsPage />)
+    await user.click(screen.getByRole('button', { name: t('reports.incomeExpenses') }))
+    await waitFor(() => expect(api.reports.incomeExpenses).toHaveBeenCalled())
+
+    // All 14 categories are cards (no "Other" bucket), the last one included.
+    const last = await screen.findByRole('button', { name: t('reports.trendOpenDetail', { name: 'Cat 13' }) })
+    expect(screen.getAllByRole('button', { name: /trend in detail/ })).toHaveLength(14)
+
+    await user.click(last)
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('Cat 13')
+    expect(dialog).toHaveTextContent(t('reports.trendAverage'))
+    expect(dialog).toHaveTextContent(t('reports.trendHighest'))
+    expect(screen.getByRole('link', { name: t('reports.trendViewTransactions') })).toHaveAttribute(
+      'href', '/transactions?category_id=00000000-0000-4000-8000-000000000013',
+    )
   })
 })
 
@@ -399,7 +525,8 @@ describe('Reports page: month presets and period navigation (issue #519)', () =>
     await user.click(screen.getByRole('button', { name: t('reports.cashFlow') }))
     await waitFor(() => expect(api.reports.cashFlow).toHaveBeenCalled())
 
-    expect(api.reports.cashFlow.mock.calls.at(-1)?.[0]).toBe(6)
+    // Fork: each tab opens on its own default range, three months here.
+    expect(api.reports.cashFlow.mock.calls.at(-1)?.[0]).toBe(3)
   })
 
   it('hides period navigation on the forward-only Cash Flow tab', async () => {

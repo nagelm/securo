@@ -505,7 +505,7 @@ async def test_income_expenses_api_validation(client, auth_headers):
 
     resp = await client.get(
         "/api/reports/income-expenses",
-        params={"months": 25},
+        params={"months": 121},
         headers=auth_headers,
     )
     assert resp.status_code == 422
@@ -1599,6 +1599,26 @@ async def test_cash_flow_months_range(session: AsyncSession, test_user, test_wor
 
 
 @pytest.mark.asyncio
+async def test_cash_flow_past_months_widens_the_history(session: AsyncSession, test_user, test_workspace: User):
+    """Fork: `past_months` sets how far back the chart starts; the end stays `months` ahead."""
+    from app.core.app_clock import app_today
+    from app.services.report_service import _add_months
+
+    account = await _make_manual_account(session, test_user.id, "CF Past")
+    await _add_txn(session, test_user.id, account.id, 1000, "credit", date.today(), source="opening_balance")
+    today = app_today()
+
+    default = await get_cash_flow_report(session, test_workspace.id, test_user.id, months=3, interval="daily")
+    wide = await get_cash_flow_report(
+        session, test_workspace.id, test_user.id, months=3, interval="daily", past_months=6,
+    )
+
+    assert date.fromisoformat(default.trend[0].date) > _add_months(today, -2)
+    assert date.fromisoformat(wide.trend[0].date) <= _add_months(today, -6) + timedelta(days=1)
+    assert wide.trend[-1].date == default.trend[-1].date
+
+
+@pytest.mark.asyncio
 async def test_cash_flow_balance_is_running_cumulative(
     session: AsyncSession, test_user, test_workspace: User
 ):
@@ -1750,10 +1770,10 @@ async def test_cash_flow_api_endpoint(client, auth_headers, test_transactions):
 @pytest.mark.asyncio
 async def test_cash_flow_api_validation(client, auth_headers):
     """GET /reports/cash-flow rejects out-of-range params."""
-    # months > 12
+    # months > 120 (fork: cash flow looks up to ten years ahead)
     resp = await client.get(
         "/api/reports/cash-flow",
-        params={"months": 13},
+        params={"months": 121},
         headers=auth_headers,
     )
     assert resp.status_code == 422
@@ -1762,6 +1782,14 @@ async def test_cash_flow_api_validation(client, auth_headers):
     resp = await client.get(
         "/api/reports/cash-flow",
         params={"months": 0},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+    # past_months beyond ten years (fork)
+    resp = await client.get(
+        "/api/reports/cash-flow",
+        params={"months": 6, "past_months": 121},
         headers=auth_headers,
     )
     assert resp.status_code == 422
@@ -2817,11 +2845,11 @@ def test_add_years_clamps_leap_day():
     ('income-expenses', 'get_income_expenses_report'),
 ])
 @pytest.mark.parametrize('start_offset,end_offset,status', [
-    # FixedDate.today() is 2026-09-12; -3652 days is exactly 2016-09-12, the
-    # 10-calendar-year anniversary. One day further back crosses it, even
-    # though the day-count difference (3653 vs. 3652) understates the effect
-    # of the two leap days (2020, 2024) inside the window.
-    (-1, 1, 422), (0, 0, 200), (-3652, 0, 200), (-3653, 0, 422),
+    # FixedDate.today() is 2026-09-12; -7305 days is exactly 2006-09-12, the
+    # 20-calendar-year anniversary (fork cap; upstream is 10). One day further
+    # back crosses it; the five leap days (2008-2024) inside the window are why
+    # the count is 7305 rather than 7300.
+    (-1, 1, 422), (0, 0, 200), (-7305, 0, 200), (-7306, 0, 422),
     (None, 0, 422), (-1, None, 422), (0, -1, 422),
 ])
 async def test_historical_api_custom_range_boundaries(
@@ -2901,6 +2929,62 @@ async def test_custom_dates_override_indian_yearly_ytd(
         assert service.call_args.kwargs['financial_year_start_month'] == 4
     finally:
         app.dependency_overrides.pop(current_workspace, None)
+
+
+@pytest.mark.asyncio
+async def test_cash_flow_leaves_investment_accounts_out_and_net_worth_keeps_them(
+    session: AsyncSession, test_user, test_workspace: User
+):
+    """Cash flow is spendable money: an investment account's balance, its
+    transactions and its recurring rules stay out, even under a collection
+    filter that names it. Net worth still counts it."""
+    checking = await _make_manual_account(session, test_user.id, "CF Spending")
+    invest = await _make_manual_account(session, test_user.id, "CF Fund", acct_type="investment")
+    await _add_txn(session, test_user.id, checking.id, 1000, "credit",
+                   date.today() - timedelta(days=10), source="opening_balance")
+    await _add_txn(session, test_user.id, invest.id, 5000, "credit",
+                   date.today() - timedelta(days=10), source="opening_balance")
+    await _add_txn(session, test_user.id, invest.id, 300, "credit", date.today() - timedelta(days=1))
+    await _make_recurring(session, test_user.id, invest.id, 200, "credit")
+    await _make_recurring(session, test_user.id, checking.id, 50, "debit")
+
+    for account_ids in (None, [checking.id, invest.id]):
+        report = await get_cash_flow_report(
+            session, test_workspace.id, test_user.id, months=1, interval="daily",
+            account_ids=account_ids,
+        )
+        values = {b.key: b.value for b in report.summary.breakdowns}
+        assert values["startingBalance"] == 1000
+        assert values["projectedIncome"] == 0
+        # Only the checking rule's occurrences (50 each) are projected.
+        assert values["projectedExpenses"] > 0 and values["projectedExpenses"] % 50 == 0
+        assert values["endingBalance"] == 1000 - values["projectedExpenses"]
+        past = [p.value for p in report.trend if p.date <= date.today().isoformat()]
+        assert set(past) == {1000}
+
+    net_worth = await get_net_worth_report(session, test_workspace.id, test_user.id, months=1)
+    assert net_worth.summary.primary_value == 6300
+    # Fork: the investment account's value sits in the Assets band.
+    bands = {b.key: b.value for b in net_worth.summary.breakdowns}
+    assert bands["accounts"] == 1000
+    assert bands["assets"] == 5300
+
+
+@pytest.mark.asyncio
+async def test_cash_flow_leaves_loan_accounts_out(session: AsyncSession, test_user, test_workspace: User):
+    """Fork: a loan's balance and rows stay out of cash flow, like investments."""
+    checking = await _make_manual_account(session, test_user.id, "CF Cash")
+    loan = await _make_manual_account(session, test_user.id, "CF Mortgage", acct_type="loan")
+    await _add_txn(session, test_user.id, checking.id, 1000, "credit",
+                   date.today() - timedelta(days=10), source="opening_balance")
+    await _add_txn(session, test_user.id, loan.id, 300000, "debit",
+                   date.today() - timedelta(days=10), source="opening_balance")
+    report = await get_cash_flow_report(
+        session, test_workspace.id, test_user.id, months=1, interval="daily",
+    )
+    values = {b.key: b.value for b in report.summary.breakdowns}
+    assert values["startingBalance"] == 1000
+
 
 
 # ---------------------------------------------------------------------------
