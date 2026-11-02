@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.core.shared_scope import bound_workspace_id
 from app.models.group import Group, GroupMember
 from app.models.user import User
+from app.services.payee_display import apply_payee_display
 from app.schemas.group import (
     GroupCreate,
     GroupMemberCreate,
@@ -428,7 +429,7 @@ async def list_transactions(
     # Hydrate fields the TransactionRead schema expects.
     for tx in txs:
         tx.attachment_count = 0
-        tx.payee_name = tx.payee_entity.name if tx.payee_entity else None
+        apply_payee_display(tx)
     return txs
 
 

@@ -455,7 +455,10 @@ async def test_update_transaction(
     test_user: User, test_transactions: list[Transaction],
     test_categories: list[Category],
 ):
-    payee = Payee(user_id=test_user.id, workspace_id=test_workspace.id, name="Netflix")
+    payee = Payee(
+        user_id=test_user.id, workspace_id=test_workspace.id, name="Netflix",
+        logo_url="https://logo.example/netflix.png", icon="tv",
+    )
     session.add(payee)
     await session.commit()
 
@@ -471,6 +474,8 @@ async def test_update_transaction(
     assert data["category"]["id"] == str(test_categories[0].id)
     assert data["payee_id"] == str(payee.id)
     assert data["payee_name"] == "Netflix"
+    assert data["payee_logo_url"] == "https://logo.example/netflix.png"
+    assert data["payee_icon"] == "tv"
 
 
 @pytest.mark.asyncio

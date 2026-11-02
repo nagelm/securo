@@ -106,9 +106,19 @@ export function MobileTransactionRow({
         </div>
       )}
 
-      {/* Category Icon */}
+      {/* Payee icon or logo, else the category icon */}
       <div className="shrink-0">
-        <TransactionCategoryIcon tx={tx} size="md" />
+        {tx.payee_icon || tx.payee_logo_url ? (
+          <PayeeIcon
+            icon={tx.payee_icon}
+            logoUrl={tx.payee_logo_url}
+            fallbackIcon={tx.category?.icon}
+            fallbackColor={tx.category?.color}
+            size="md"
+          />
+        ) : (
+          <TransactionCategoryIcon tx={tx} size="md" />
+        )}
       </div>
 
       {/* Content */}

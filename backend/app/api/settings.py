@@ -16,3 +16,10 @@ async def get_attachment_settings():
         "max_attachments_per_transaction": settings.storage_max_attachments_per_transaction,
         "max_attachments_per_invoice": settings.storage_max_attachments_per_invoice,
     }
+
+
+@router.get("/logos")
+async def get_logo_settings():
+    """Return how logo URLs are built, so a client can preview a favicon logo
+    exactly as the server would store it."""
+    return {"logo_size": get_settings().logo_size}

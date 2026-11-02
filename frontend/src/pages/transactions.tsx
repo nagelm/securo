@@ -54,6 +54,7 @@ import { PageHeader } from '@/components/page-header'
 import { calculateRangeSelection } from '@/lib/selection-utils'
 import { isManualInstallmentSeriesRow } from '@/lib/installment-series'
 import { TransactionCategoryIcon, TransactionCategoryLabel } from '@/components/category-lines-display'
+import { PayeeIcon } from '@/components/payee-icon'
 import { CategorySelect } from '@/components/category-select'
 import { CategoryPicker } from '@/components/category-picker'
 import { TransactionDialog, type SaveAction, type TransactionSavePayload } from '@/components/transaction-dialog'
@@ -1144,7 +1145,17 @@ export default function TransactionsPage() {
       : ''
     return (
       <div className="flex items-center gap-2 md:gap-3">
-        <TransactionCategoryIcon tx={tx} size="lg" />
+        {tx.payee_icon || tx.payee_logo_url ? (
+          <PayeeIcon
+            icon={tx.payee_icon}
+            logoUrl={tx.payee_logo_url}
+            fallbackIcon={tx.category?.icon}
+            fallbackColor={tx.category?.color}
+            size="lg"
+          />
+        ) : (
+          <TransactionCategoryIcon tx={tx} size="lg" />
+        )}
         <div className="min-w-0 flex-1">
           {/* The column has a fixed width, so a row carrying several badges
               (transfer with its counterpart account, report exclusion, an
